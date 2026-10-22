@@ -2370,6 +2370,11 @@ The provider-independent domain model is implemented in entity packages under
 storage is responsible for confirming that referenced records exist and that
 each executable Project has exactly one active Brain.
 
+Entity IDs, lifecycle state, Brain association, autonomy, activation state, and
+review requirements are private to their domain packages. Callers read them
+through getters and change them through validated methods. Persistence adapters
+must use an explicit restore mechanism if state hydration is introduced.
+
 Initial lifecycle transitions are explicit. Projects follow
 `CREATED → CONFIGURING → READY → RUNNING`, may be paused or archived, and must
 reference a Brain before becoming ready or running. Tasks follow the Kanban
@@ -2469,7 +2474,7 @@ policy checks
 ```
 
 Capability identifiers are validated lowercase names such as
-`filesystem.read` and `github.pr.merge`.
+`filesystem.read` and `github.pr.merge`; separators other than dots are rejected.
 
 ---
 

@@ -13,8 +13,8 @@ func TestRunRequiresReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Status != StatusPending {
-		t.Fatalf("expected initial status %q, got %q", StatusPending, r.Status)
+	if r.Status() != StatusPending {
+		t.Fatalf("expected initial status %q, got %q", StatusPending, r.Status())
 	}
 }
 
@@ -24,14 +24,14 @@ func TestRunTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.StartedAt.IsZero() {
+	if r.StartedAt().IsZero() {
 		t.Fatal("expected running transition to set start time")
 	}
 	r, err = r.Transition(StatusSuccess)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.FinishedAt.IsZero() {
+	if r.FinishedAt().IsZero() {
 		t.Fatal("expected terminal transition to set finish time")
 	}
 	if _, err := r.Transition(StatusRunning); !errors.Is(err, ErrInvalidTransition) {

@@ -17,7 +17,14 @@ func TestNewValidatesReferencesAndAutonomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !brain.Active || brain.Autonomy != AutonomySemiAuto {
-		t.Fatalf("unexpected Brain defaults: %+v", brain)
+	if !brain.Active() || brain.Autonomy() != AutonomySemiAuto {
+		t.Fatalf("unexpected Brain defaults: active=%t autonomy=%s", brain.Active(), brain.Autonomy())
+	}
+	if _, err := brain.SetAutonomy("INVALID"); err == nil {
+		t.Fatal("expected invalid autonomy to be rejected")
+	}
+	brain = brain.Deactivate()
+	if brain.Active() {
+		t.Fatal("expected Brain to deactivate through its method")
 	}
 }

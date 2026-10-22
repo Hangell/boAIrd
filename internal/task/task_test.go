@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestNewRequiresReferences(t *testing.T) {
+func TestNewRequiresReferencesAndInitializesBacklog(t *testing.T) {
 	if _, err := New("t1", "p1", "Title", "", " "); err == nil {
 		t.Fatal("expected empty creator reference to be rejected")
 	}
@@ -13,14 +13,14 @@ func TestNewRequiresReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.Status != StatusBacklog || task.CreatedAt.IsZero() || task.UpdatedAt.IsZero() {
-		t.Fatalf("unexpected task defaults: %+v", task)
+	if task.Status() != StatusBacklog || task.CreatedAt().IsZero() || task.UpdatedAt().IsZero() {
+		t.Fatalf("unexpected task defaults: status=%s created=%s updated=%s", task.Status(), task.CreatedAt(), task.UpdatedAt())
 	}
 }
 
-func TestTaskTransitions(t *testing.T) {
+func TestTaskTransitionsAndTerminalState(t *testing.T) {
 	task, _ := New("t1", "p1", "Title", "", "user1")
-	for _, status := range []Status{StatusReady, StatusWorking, StatusReview, StatusHumanReview, StatusDone} {
+	for _, status := range []Status{StatusReady, StatusWorking, StatusReview, StatusDone} {
 		var err error
 		task, err = task.Transition(status)
 		if err != nil {
@@ -34,22 +34,54 @@ func TestTaskTransitions(t *testing.T) {
 
 func TestHumanReviewCannotBeBypassed(t *testing.T) {
 	task, _ := New("t1", "p1", "Title", "", "user1")
-	task.HumanReview = true
-	task.Status = StatusReview
-	if _, err := task.Transition(StatusDone); !errors.Is(err, ErrInvalidTransition) {
-		t.Fatalf("expected direct completion to be rejected when human review is required, got %v", err)
+	var err error
+	task, err = task.RequireHumanReview()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := task.Transition(StatusHumanReview); err != nil {
-		t.Fatalf("expected required human review transition to be allowed: %v", err)
+	for _, status := range []Status{StatusReady, StatusWorking, StatusReview} {
+		task, err = task.Transition(status)
+		if err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	if _, err := task.Transition(StatusDone); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected direct completion to be rejected, got %v", err)
+	}
+	if _, err := task.DisableHumanReview(); err == nil {
+		t.Fatal("expected human review to remain required after reaching review")
+	}
+	task, err = task.Transition(StatusHumanReview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = task.Transition(StatusDone)
+	if err != nil || task.Status() != StatusDone {
+		t.Fatalf("expected completion after human review, task status=%s err=%v", task.Status(), err)
 	}
 }
 
-func TestTaskRejectsSelfReferences(t *testing.T) {
+func TestAssignmentAllowsAgentIDEqualToTaskID(t *testing.T) {
 	task, _ := New("t1", "p1", "Title", "", "user1")
-	if _, err := task.SetReferences("t1", ""); err == nil {
-		t.Fatal("expected self-assignment to be rejected")
+	task, err := task.Assign("t1")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := task.SetReferences("", "t1"); err == nil {
+	if task.AssignedTo() != "t1" {
+		t.Fatalf("expected Agent ID to be assigned, got %q", task.AssignedTo())
+	}
+}
+
+func TestTaskRejectsOnlySelfParentReference(t *testing.T) {
+	task, _ := New("t1", "p1", "Title", "", "user1")
+	task, err := task.SetReferences("t1", "")
+	if err != nil || task.AssignedTo() != "t1" {
+		t.Fatalf("expected assignment matching Task ID to be valid, task assignment=%q err=%v", task.AssignedTo(), err)
+	}
+	if _, err := task.SetParent("t1"); err == nil {
+		t.Fatal("expected a Task to reject itself as parent")
+	}
+	if _, err := task.SetReferences("agent-1", "t1"); err == nil {
 		t.Fatal("expected self-parent reference to be rejected")
 	}
 }

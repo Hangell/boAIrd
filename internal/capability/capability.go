@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
+var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:\.[a-z0-9]+)*$`)
 
 type Capability string
 

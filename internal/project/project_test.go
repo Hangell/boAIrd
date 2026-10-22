@@ -11,7 +11,7 @@ func TestNewRequiresIDAndName(t *testing.T) {
 	}
 }
 
-func TestProjectRequiresBrainBeforeReady(t *testing.T) {
+func TestProjectRequiresBrainBeforeReadyOrRunning(t *testing.T) {
 	p, err := New("p1", "Project")
 	if err != nil {
 		t.Fatal(err)
@@ -20,20 +20,49 @@ func TestProjectRequiresBrainBeforeReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = p.Transition(StatusReady); err == nil {
-		t.Fatal("expected project without a Brain to be rejected")
+	if _, err := p.Transition(StatusReady); err == nil {
+		t.Fatal("expected project without a Brain to be rejected from READY")
+	}
+	if _, err := p.Transition(StatusRunning); err == nil {
+		t.Fatal("expected project without a Brain to be rejected from RUNNING")
 	}
 	p, err = p.WithBrain("b1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = p.Transition(StatusReady); err != nil {
+	p, err = p.Transition(StatusReady)
+	if err != nil {
 		t.Fatalf("expected project with a Brain to become ready: %v", err)
+	}
+	if _, err := p.WithoutBrain(); err == nil {
+		t.Fatal("expected a ready project to retain its Brain")
+	}
+	p, err = p.Transition(StatusRunning)
+	if err != nil || p.Status() != StatusRunning {
+		t.Fatalf("expected project with a Brain to run, status=%s err=%v", p.Status(), err)
+	}
+	p, err = p.Transition(StatusPaused)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = p.WithoutBrain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Transition(StatusRunning); err == nil {
+		t.Fatal("expected paused project without a Brain to be rejected from RUNNING")
 	}
 }
 
 func TestArchivedProjectIsTerminal(t *testing.T) {
-	p := Project{ID: "p1", Name: "Project", Status: StatusArchived}
+	p, err := New("p1", "Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = p.Transition(StatusArchived)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := p.Transition(StatusReady); err == nil {
 		t.Fatal("expected archived project transition to be rejected")
 	}

@@ -25,18 +25,18 @@ const (
 var ErrInvalidTransition = errors.New("invalid task status transition")
 
 type Task struct {
-	ID          string
-	ProjectID   string
-	Title       string
-	Description string
-	Status      Status
-	Priority    string
-	CreatedBy   string
-	AssignedTo  string
-	HumanReview bool
-	ParentID    string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	id          string
+	projectID   string
+	title       string
+	description string
+	status      Status
+	priority    string
+	createdBy   string
+	assignedTo  string
+	humanReview bool
+	parentID    string
+	createdAt   time.Time
+	updatedAt   time.Time
 }
 
 func New(id, projectID, title, description, createdBy string) (Task, error) {
@@ -46,20 +46,77 @@ func New(id, projectID, title, description, createdBy string) (Task, error) {
 	}
 	now := time.Now().UTC()
 	return Task{
-		ID: id, ProjectID: projectID, Title: title, Description: description,
-		Status: StatusBacklog, CreatedBy: createdBy, CreatedAt: now, UpdatedAt: now,
+		id: id, projectID: projectID, title: title, description: description,
+		status: StatusBacklog, createdBy: createdBy, createdAt: now, updatedAt: now,
 	}, nil
+}
+
+func (t Task) ID() string           { return t.id }
+func (t Task) ProjectID() string    { return t.projectID }
+func (t Task) Title() string        { return t.title }
+func (t Task) Description() string  { return t.description }
+func (t Task) Status() Status       { return t.status }
+func (t Task) Priority() string     { return t.priority }
+func (t Task) CreatedBy() string    { return t.createdBy }
+func (t Task) AssignedTo() string   { return t.assignedTo }
+func (t Task) HumanReview() bool    { return t.humanReview }
+func (t Task) ParentID() string     { return t.parentID }
+func (t Task) CreatedAt() time.Time { return t.createdAt }
+func (t Task) UpdatedAt() time.Time { return t.updatedAt }
+
+func (t Task) Assign(agentID string) (Task, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return Task{}, errors.New("agent ID is required")
+	}
+	t.assignedTo = agentID
+	t.updatedAt = time.Now().UTC()
+	return t, nil
+}
+
+func (t Task) Unassign() Task {
+	t.assignedTo = ""
+	t.updatedAt = time.Now().UTC()
+	return t
+}
+
+func (t Task) SetParent(parentID string) (Task, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID != "" && parentID == t.id {
+		return Task{}, errors.New("task cannot be its own parent")
+	}
+	t.parentID = parentID
+	t.updatedAt = time.Now().UTC()
+	return t, nil
 }
 
 func (t Task) SetReferences(assignedTo, parentID string) (Task, error) {
 	assignedTo = strings.TrimSpace(assignedTo)
 	parentID = strings.TrimSpace(parentID)
-	if assignedTo == t.ID || (parentID != "" && parentID == t.ID) {
-		return Task{}, errors.New("task cannot reference itself")
+	if parentID != "" && parentID == t.id {
+		return Task{}, errors.New("task cannot be its own parent")
 	}
-	t.AssignedTo = assignedTo
-	t.ParentID = parentID
-	t.UpdatedAt = time.Now().UTC()
+	t.assignedTo = assignedTo
+	t.parentID = parentID
+	t.updatedAt = time.Now().UTC()
+	return t, nil
+}
+
+func (t Task) RequireHumanReview() (Task, error) {
+	if t.status == StatusDone || t.status == StatusCancelled {
+		return Task{}, errors.New("cannot change human review requirement for a terminal task")
+	}
+	t.humanReview = true
+	t.updatedAt = time.Now().UTC()
+	return t, nil
+}
+
+func (t Task) DisableHumanReview() (Task, error) {
+	if t.status == StatusReview || t.status == StatusHumanReview || t.status == StatusDone || t.status == StatusCancelled {
+		return Task{}, errors.New("cannot disable human review after the task reaches review")
+	}
+	t.humanReview = false
+	t.updatedAt = time.Now().UTC()
 	return t, nil
 }
 
@@ -67,14 +124,14 @@ func (t Task) Transition(to Status) (Task, error) {
 	if !validStatus(to) {
 		return Task{}, fmt.Errorf("unknown task status %q", to)
 	}
-	if t.HumanReview && t.Status == StatusReview && to == StatusDone {
+	if t.humanReview && t.status == StatusReview && to == StatusDone {
 		return Task{}, fmt.Errorf("%w: human review is required before completion", ErrInvalidTransition)
 	}
-	if !allowedTransition(t.Status, to) {
-		return Task{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.Status, to)
+	if !allowedTransition(t.status, to) {
+		return Task{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.status, to)
 	}
-	t.Status = to
-	t.UpdatedAt = time.Now().UTC()
+	t.status = to
+	t.updatedAt = time.Now().UTC()
 	return t, nil
 }
 

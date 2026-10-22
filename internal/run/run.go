@@ -21,20 +21,21 @@ const (
 var ErrInvalidTransition = errors.New("invalid run status transition")
 
 type Run struct {
-	ID         string
-	ProjectID  string
-	TaskID     string
-	AgentID    string
-	Runtime    string
-	Provider   string
-	Model      string
-	InputRef   string
-	OutputRef  string
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Error      string
-	ToolsUsed  []string
-	Status     Status
+	id         string
+	projectID  string
+	taskID     string
+	agentID    string
+	status     Status
+	startedAt  time.Time
+	finishedAt time.Time
+
+	Runtime   string
+	Provider  string
+	Model     string
+	InputRef  string
+	OutputRef string
+	Error     string
+	ToolsUsed []string
 }
 
 func New(id, projectID, taskID, agentID string) (Run, error) {
@@ -45,25 +46,34 @@ func New(id, projectID, taskID, agentID string) (Run, error) {
 			return Run{}, fmt.Errorf("%s is required", reference.name)
 		}
 	}
-	return Run{ID: id, ProjectID: projectID, TaskID: taskID, AgentID: agentID, Status: StatusPending}, nil
+	return Run{id: id, projectID: projectID, taskID: taskID, agentID: agentID, status: StatusPending}, nil
 }
+
+func (r Run) ID() string            { return r.id }
+func (r Run) ProjectID() string     { return r.projectID }
+func (r Run) TaskID() string        { return r.taskID }
+func (r Run) AgentID() string       { return r.agentID }
+func (r Run) Status() Status        { return r.status }
+func (r Run) StartedAt() time.Time  { return r.startedAt }
+func (r Run) FinishedAt() time.Time { return r.finishedAt }
+func (r Run) UsedTools() []string   { return append([]string(nil), r.ToolsUsed...) }
 
 func (r Run) Transition(to Status) (Run, error) {
 	if !validStatus(to) {
 		return Run{}, fmt.Errorf("unknown run status %q", to)
 	}
-	if !((r.Status == StatusPending && (to == StatusRunning || to == StatusCancelled)) ||
-		(r.Status == StatusRunning && (to == StatusSuccess || to == StatusFailed || to == StatusCancelled))) {
-		return Run{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, r.Status, to)
+	if !((r.status == StatusPending && (to == StatusRunning || to == StatusCancelled)) ||
+		(r.status == StatusRunning && (to == StatusSuccess || to == StatusFailed || to == StatusCancelled))) {
+		return Run{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, r.status, to)
 	}
 	now := time.Now().UTC()
 	if to == StatusRunning {
-		r.StartedAt = now
+		r.startedAt = now
 	}
 	if to == StatusSuccess || to == StatusFailed || to == StatusCancelled {
-		r.FinishedAt = now
+		r.finishedAt = now
 	}
-	r.Status = to
+	r.status = to
 	return r, nil
 }
 
