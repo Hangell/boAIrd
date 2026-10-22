@@ -2006,6 +2006,8 @@ Projects can attach one active API Brain with `POST /api/v1/projects/{id}/brain`
 
 Runs can be listed with `GET /api/v1/projects/{id}/runs`, filtered by `task_id` or `agent_id`, or fetched individually with `GET /api/v1/runs/{id}`. Responses include immutable audit events for run creation and status transitions. Common credential patterns are redacted from run input, output, tool names, and errors before persistence and display.
 
+Tasks can be created and listed with `POST` and `GET /api/v1/projects/{id}/tasks`, retrieved with `GET /api/v1/tasks/{id}`, assigned with `PUT /api/v1/tasks/{id}/assignment`, and moved through validated workflow transitions with `POST /api/v1/tasks/{id}/transitions`. Mutations require a reason and create immutable audit events. Project human-review policy requires a human-controlled transition through `HUMAN_REVIEW` before `DONE`. The API has no caller authentication: requests are attributed to a fixed local API actor and the service binds only to loopback, so other same-host processes share that authority.
+
 ---
 
 # Tasks

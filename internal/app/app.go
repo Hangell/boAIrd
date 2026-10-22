@@ -14,6 +14,7 @@ import (
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/storage"
+	"boAIrd/internal/task"
 )
 
 // Run opens service dependencies and serves HTTP until the context is cancelled.
@@ -74,7 +75,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize Brain service: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithBrain(database, projectManager, credentialManager, agentManager, brainService, runManager), logger); err != nil {
+	taskRepository, err := storage.NewTaskRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize task repository: %w", err)
+	}
+	taskService, err := task.NewService(taskRepository, projectManager, agentManager, brainRepository)
+	if err != nil {
+		return fmt.Errorf("initialize task service: %w", err)
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithTasks(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

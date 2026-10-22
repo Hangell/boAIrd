@@ -2491,6 +2491,14 @@ Task assignment
 Task transitions
 ```
 
+The implemented task workflow persists BACKLOG, READY, WORKING, REVIEW,
+HUMAN_REVIEW, BLOCKED, FAILED, DONE, and CANCELLED states. The service validates
+transitions and project/agent references, applies project human-review policy,
+and requires an actor and reason for each mutation. SQLite writes immutable
+audit rows for task creation, assignment, and status changes. The local HTTP API
+uses a fixed local API actor because caller authentication is not implemented;
+it does not accept actor identity from request data.
+
 ---
 
 ## `board`

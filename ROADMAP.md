@@ -579,6 +579,14 @@ task.create
 
 Create a card and move it through the entire workflow.
 
+## Current implementation
+
+- Tasks persist in SQLite with validated workflow states, priority, assignment, parent reference, project human-review policy, and actor/reason metadata.
+- The task service checks allowed transitions, active project state, agent capabilities for creation/assignment, and the mandatory human-review gate before completion.
+- The local HTTP API supports task create/list/get, assignment, and status transitions. Each mutation requires an audit reason; callers cannot supply actor identity through request JSON.
+- SQLite records immutable task creation, assignment, and status-change audit events. Integration tests cover capability denial, the complete review workflow, invalid terminal transitions, and audit attribution.
+- The unauthenticated loopback API currently represents its caller as a fixed local API actor. Same-host process isolation and per-user authorization remain future security work.
+
 ---
 
 # Phase 9 — Conversations

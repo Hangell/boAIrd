@@ -32,6 +32,47 @@ func TestTaskTransitionsAndTerminalState(t *testing.T) {
 	}
 }
 
+func TestTerminalTasksRejectAssignmentChanges(t *testing.T) {
+	for _, terminal := range []Status{StatusDone, StatusCancelled} {
+		t.Run(string(terminal), func(t *testing.T) {
+			value, err := New("t1", "p1", "Title", "", "user1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err = value.Assign("agent-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if terminal == StatusDone {
+				for _, next := range []Status{StatusReady, StatusWorking, StatusReview, StatusDone} {
+					value, err = value.Transition(next)
+					if err != nil {
+						t.Fatalf("transition to %s: %v", next, err)
+					}
+				}
+			} else {
+				value, err = value.Transition(StatusCancelled)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if _, err := value.Assign("agent-2"); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatalf("Assign() error = %v, want invalid transition", err)
+			}
+			if _, err := value.Unassign(); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatalf("Unassign() error = %v, want invalid transition", err)
+			}
+			if _, err := value.SetReferences("agent-2", ""); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatalf("SetReferences() error = %v, want invalid transition", err)
+			}
+			if value.AssignedTo() != "agent-1" {
+				t.Fatalf("terminal task assignment changed to %q", value.AssignedTo())
+			}
+		})
+	}
+}
+
 func TestHumanReviewCannotBeBypassed(t *testing.T) {
 	task, _ := New("t1", "p1", "Title", "", "user1")
 	var err error

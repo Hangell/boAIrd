@@ -276,6 +276,120 @@ paths:
               schema: { $ref: '#/components/schemas/Run' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{id}/tasks:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: createTask
+      summary: Create a task in a project
+      description: The local API records a fixed local API actor; callers cannot provide or override actor identity. A reason is required for audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTask' }
+      responses:
+        '201':
+          description: Task created in BACKLOG.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      operationId: listProjectTasks
+      summary: List tasks in a project
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [BACKLOG, READY, WORKING, REVIEW, HUMAN_REVIEW, BLOCKED, FAILED, DONE, CANCELLED] }
+        - name: assigned_to
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Tasks ordered by workflow status and creation time.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/tasks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getTask
+      summary: Get a task and immutable audit events
+      responses:
+        '200':
+          description: Task details and linked immutable audit events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/tasks/{id}/assignment:
+    put:
+      operationId: assignTask
+      summary: Assign a task to an agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignTask' }
+      responses:
+        '200':
+          description: Assignment updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Actor lacks the required task capability. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/tasks/{id}/transitions:
+    post:
+      operationId: transitionTask
+      summary: Move a task through a validated workflow transition
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitionTask' }
+      responses:
+        '200':
+          description: Task status updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Actor lacks the required task capability or human review is required. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/credentials/{id}:
     parameters:
       - name: id
@@ -454,7 +568,57 @@ components:
         resource_id: { type: string }
         from_status: { type: string }
         to_status: { type: string }
+        reason: { type: string }
         created_at: { type: string, format: date-time }
+    CreateTask:
+      type: object
+      additionalProperties: false
+      required: [title, reason]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 16000 }
+        priority: { type: string, enum: [LOW, NORMAL, HIGH, URGENT], default: NORMAL }
+        parent_id: { type: string }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    AssignTask:
+      type: object
+      additionalProperties: false
+      required: [agent_id, reason]
+      properties:
+        agent_id: { type: string }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    TransitionTask:
+      type: object
+      additionalProperties: false
+      required: [status, reason]
+      properties:
+        status: { type: string, enum: [BACKLOG, READY, WORKING, REVIEW, HUMAN_REVIEW, BLOCKED, FAILED, DONE, CANCELLED] }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    Task:
+      type: object
+      required: [id, project_id, title, description, status, priority, created_by, created_by_type, human_review_required, created_at, updated_at]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        title: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [BACKLOG, READY, WORKING, REVIEW, HUMAN_REVIEW, BLOCKED, FAILED, DONE, CANCELLED] }
+        priority: { type: string, enum: [LOW, NORMAL, HIGH, URGENT] }
+        created_by: { type: string }
+        created_by_type: { type: string, enum: [LOCAL_API_CLIENT, ADMINISTRATOR, BRAIN, AGENT] }
+        assigned_to: { type: string }
+        human_review_required: { type: boolean }
+        parent_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        audit_events: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+    TaskPage:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Task' } }
+        limit: { type: integer }
+        offset: { type: integer }
     CreateAgent:
       type: object
       additionalProperties: false
