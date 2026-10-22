@@ -50,6 +50,21 @@ func TestChatMapsRequestAndResponse(t *testing.T) {
 	}
 }
 
+func TestChatReturnsErrNoTextResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":""}}]}`))
+	}))
+	defer server.Close()
+	adapter, err := New(ConfigForTest(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.Chat(context.Background(), provider.ChatRequest{Model: "fake", MaxTokens: 8, Messages: []provider.ChatMessage{{Role: provider.RoleUser, Content: "hello"}}})
+	if !errors.Is(err, provider.ErrNoTextResponse) {
+		t.Fatalf("expected no-text error, got %v", err)
+	}
+}
+
 func TestHTTPErrorDoesNotExposeProviderBodyOrCredential(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

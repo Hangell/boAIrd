@@ -81,13 +81,25 @@ func (a *Adapter) Chat(ctx context.Context, request provider.ChatRequest) (provi
 	if len(result.Choices) == 0 {
 		return provider.ChatResponse{}, fmt.Errorf("%s: %w", a.name, provider.ErrInvalidResponse)
 	}
+	if result.Choices[0].Message.Content == "" {
+		return provider.ChatResponse{}, fmt.Errorf("%s: %w", a.name, provider.ErrNoTextResponse)
+	}
 	return provider.ChatResponse{ID: result.ID, Model: result.Model, Content: result.Choices[0].Message.Content, FinishReason: result.Choices[0].FinishReason, Usage: provider.Usage{InputTokens: result.Usage.PromptTokens, OutputTokens: result.Usage.CompletionTokens}}, nil
 }
 
 type modelList struct {
 	Data []struct {
-		ID      string `json:"id"`
-		OwnedBy string `json:"owned_by"`
+		ID               string   `json:"id"`
+		Name             string   `json:"name"`
+		OwnedBy          string   `json:"owned_by"`
+		ContextWindow    int      `json:"context_window"`
+		MaxOutputTokens  int      `json:"max_output_tokens"`
+		InputModalities  []string `json:"input_modalities"`
+		OutputModalities []string `json:"output_modalities"`
+		Effort           struct {
+			SupportedLevels []string `json:"supported_levels"`
+			DefaultLevel    string   `json:"default_level"`
+		} `json:"effort"`
 	} `json:"data"`
 }
 
@@ -98,7 +110,16 @@ func (a *Adapter) Models(ctx context.Context) ([]provider.Model, error) {
 	}
 	models := make([]provider.Model, 0, len(result.Data))
 	for _, model := range result.Data {
-		models = append(models, provider.Model{ID: model.ID, Name: model.ID, OwnedBy: model.OwnedBy})
+		name := model.Name
+		if name == "" {
+			name = model.ID
+		}
+		models = append(models, provider.Model{
+			ID: model.ID, Name: name, OwnedBy: model.OwnedBy,
+			ContextWindow: model.ContextWindow, MaxOutputTokens: model.MaxOutputTokens,
+			InputModalities: model.InputModalities, OutputModalities: model.OutputModalities,
+			SupportedEffortLevels: model.Effort.SupportedLevels, DefaultEffortLevel: model.Effort.DefaultLevel,
+		})
 	}
 	return models, nil
 }

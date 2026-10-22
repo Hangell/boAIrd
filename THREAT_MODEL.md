@@ -1,128 +1,95 @@
 # boAIrd Threat Model
 
-> Repository-wide architecture model for the checked-in source at the revision recorded below. Attack scenarios are hypotheses for future implementation and are not confirmed vulnerabilities.
+> This model distinguishes controls present in source from documented future goals. Threat rows describe plausible risks; they are not claims of confirmed vulnerabilities.
 
-## 1. Overview
+## 1. Current implementation and scope
 
-### Intended use and current implementation
+boAIrd currently starts a local Go HTTP service with a SQLite database. The service exposes health/status endpoints and project create, list, read, update, and archive operations. The configured host must be a loopback IP address; the default is `127.0.0.1:3110`. Project rows may contain a name, description, Brain reference, workspace path, repository URL, lifecycle state, and human-review flag.
 
-boAIrd is described as a local-first control plane for AI agents, with a Go core, dashboard, REST/SSE, MCP, providers, tools, project state, and optional remote deployment (README.md:3-27; ARCHITECTURE.md:127-209). These are intended design surfaces. In the inspected revision, the executable entry point only prints a fixed startup message; the four internal Go packages contain only package declarations (cmd/boaird/main.go:1-7; internal/agent/agent.go:1; internal/orchestrator/orchestrator.go:1; internal/provider/provider.go:1; internal/task/task.go:1). There is no implemented server, MCP transport, provider request, database access, credential handling, tool execution, or audit path in this source inventory.
+Provider-neutral request/model types, a registry, and adapters for OpenAI, Anthropic, DeepSeek, Gemini, and OpenAI-compatible APIs are implemented under `internal/provider`. Adapters resolve credentials through an injected `CredentialResolver`, use HTTPS by default (HTTP only for loopback), disable redirects, bound request/response sizes and request duration, and omit provider error bodies from returned HTTP errors. The application bootstrap does not currently configure or call the provider registry. There is no credential vault or credential-management API in this revision; a caller must supply the resolver and provider configuration.
 
-| Component or surface | Current evidence | Security relevance |
+Agent, Brain, capability, conversation, run, and task packages contain domain models and validation, but the application does not execute agents, tools, MCP sessions, or model-driven workflows. Project workspace paths and repository URLs are validated and persisted; the project API does not read workspace files, clone repositories, or fetch repository URLs. The API has no user authentication or authorization. Loopback binding prevents ordinary remote network access but does not isolate callers running on the same machine.
+
+| Surface | Implemented behavior | Security boundary and limitation |
 | --- | --- | --- |
-| CLI entry point | `main` writes a constant to stdout (cmd/boaird/main.go:3-7). | Current runtime boundary is the invoking process and its terminal. |
-| Agent, orchestration, provider, and task packages | Empty package stubs (internal/agent/agent.go:1; internal/orchestrator/orchestrator.go:1; internal/provider/provider.go:1; internal/task/task.go:1). | No runtime authority or controls are established by these packages. |
-| Dashboard and REST/SSE | Described as a browser-to-Go-core design (ARCHITECTURE.md:167-209). | Planned interface; no listener or browser application is present in the tracked source inventory. |
-| MCP and external agents | Described as external clients connected through MCP to identity and services (ARCHITECTURE.md:557-584, 1659-1685). | Planned trust boundary; no MCP server or session implementation is present. |
-| Providers and credentials | Provider runtime and credential flow are described in architecture (ARCHITECTURE.md:529-553, 616-688). | Planned external data transfer and secret boundary; no implementation is present. |
-| Local tools and workspace | Filesystem and shell tools are proposed (ARCHITECTURE.md:1280-1349). | Planned access to user files and processes; no tool registry or executor is present. |
-| Persistence and audit | SQLite and audit are described by policy and architecture (SECURITY.md:2024-2040; ARCHITECTURE.md:1829-1850). | Planned sensitive state; no database or audit writer is present in the tracked source inventory. |
+| CLI and configuration | `boaird serve`; reads `BOAIRD_HOST`, `BOAIRD_PORT`, and `BOAIRD_DATABASE_PATH`. Host must parse as a loopback IP. | No authenticated remote mode. A same-host process can connect to the HTTP listener. |
+| HTTP API | `/health`, `/api/v1/status`, and project CRUD/archive routes. Request JSON is size-limited and rejects unknown fields. | No caller identity, authentication, or per-user authorization. |
+| SQLite | Opens/migrates the configured database; creates parent directories with mode `0700` and database file mode `0600`. | Permissions on a pre-existing parent directory are not changed. Local OS users with sufficient access may read or replace the database. |
+| Project data | Validates project names, workspace paths, repository URL schemes, page limits, and Brain references; SQL uses parameters. | Workspace and repository values are stored, not acted upon by this API. No tenant boundary exists. |
+| Provider adapters | Provider-specific chat/model requests; credential reference resolved immediately before each HTTP call; bounded JSON transport and sanitized HTTP status errors. | Adapters are not wired into `app.Run`. If called by another component, prompt/message content is sent to the configured provider. No context-selection policy or credential vault is implemented here. |
+| MCP, tools, dashboard, audit | Present as design goals in repository documentation. | No executable MCP server, tool executor, browser dashboard, or durable audit pipeline is wired in the application. |
 
-### Effective resources and deployment
+### Effective configuration and data locations
 
-The rows below distinguish effective behavior from documented target behavior. The source inventory for this revision is the tracked Go entry point, four package stubs, and `go.mod` (go.mod:1-3; the files cited above).
+| Resource | Configuration | Current default or enforcement | Security notes |
+| --- | --- | --- | --- |
+| HTTP listener | `BOAIRD_HOST`, `BOAIRD_PORT` | `127.0.0.1:3110`; non-loopback IPs are rejected. | HTTP is used on loopback. There is no authentication, so local processes are within the current trust boundary. |
+| SQLite database | `BOAIRD_DATABASE_PATH` | `./data/boaird.db`; newly created parent/file modes are `0700`/`0600`. | A caller may choose another path; existing parent-directory permissions and symlink ownership are not hardened by the current code. |
+| Provider endpoint | `provider.Config.BaseURL` | Vendor HTTPS endpoint by default; custom HTTP endpoints are restricted to `localhost` or loopback IPs. | The configured HTTPS host is trusted by the caller; the adapter does not maintain a provider host allowlist. |
+| Provider credential | `CredentialID` plus injected resolver | Secret is resolved at request time and placed in the provider-specific auth header. | No credential persistence, lifecycle, or authorization policy is implemented in this repository yet. |
+| Workspace/repository metadata | Project API request fields | Workspace path must resolve to an existing directory; repository URL must use HTTP, HTTPS, or SSH. | Values are only stored today. Any later clone/read/write behavior needs a separate SSRF/path/authorization review. |
 
-| Deployment or workflow | Resource or capability | Configuration and precedence | Safe effective value or location | Readers, writers, or recipients | Enforcing control | Evidence or unknowns |
-| --- | --- | --- | --- | --- | --- | --- |
-| Current executable | stdout | No configuration is read; the entry point calls `fmt.Println` with a constant. | Fixed, nonsensitive startup text. | Invoking process's stdout consumer, usually the terminal. | No sensitive operation is performed on this path. | cmd/boaird/main.go:3-7 |
-| Documented local mode (not implemented) | HTTP/API listener and dashboard | README gives `boaird serve` and `http://localhost:3110`; SECURITY requires loopback by default. No listener or setting consumer exists. | No effective bind address or port is established. | No runtime client is established; docs describe a browser. | Loopback is a policy requirement, not an implemented control. | README.md:121-135; SECURITY.md:1040-1068; cmd/boaird/main.go:3-7 |
-| Documented remote mode (conditional, not implemented) | Remote API and dashboard | README gives an HTTPS example and says remote hosting may be supported later; SECURITY requires authentication, TLS, and authorization. | No effective endpoint, TLS configuration, or authentication setting is established. | No runtime recipient is established. | Requirements are documented only. | README.md:139-153; SECURITY.md:1072-1082; cmd/boaird/main.go:3-7 |
-| Documented provider flow (conditional, not implemented) | Provider requests and credentials | Architecture describes Agent → API Runtime → Provider Registry → Provider; no provider or credential consumer exists. | No endpoint, credential reference, or secret storage location is consumed. | No external provider recipient is established. | Isolation and secret protection are policy/design goals only. | ARCHITECTURE.md:529-553, 616-688; internal/provider/provider.go:1 |
-| Documented storage (conditional, not implemented) | SQLite project/task state | SECURITY names `data/boaird.db`; no database dependency, migration, or path consumer is in the tracked source inventory. | No database path is consumed. | No database reader or writer is established. | File permissions and parameterized queries are requirements only. | SECURITY.md:2024-2040; go.mod:1-3 |
-| Documented local tools (conditional, not implemented) | Filesystem, shell, Git, and GitHub operations | Architecture lists tool types and workspace limits; there is no executor or workspace configuration consumer. | No workspace root, executable, repository target, or derived path is consumed. | No operating-system or repository resource consumer is established. | Capability checks and workspace confinement are requirements only. | ARCHITECTURE.md:1280-1349; SECURITY.md:545-610 |
-| Documented MCP flow (conditional, not implemented) | MCP transport, sessions, and external-agent identity | Architecture describes transport → session → identity → services; there is no MCP implementation or auth setting consumer. | No endpoint, session store, or credential is consumed. | No connected client is established. | Authentication and capability rules are documented only. | ARCHITECTURE.md:557-584, 1659-1685; SECURITY.md:1106-1160 |
-
-### Intended data flow
-
-The following diagram summarizes documented future architecture, not current runtime components.
+### Data flow
 
 ```mermaid
 flowchart LR
-  User[Local user or remote caller] -->|planned REST / SSE| API[Planned Go API]
-  Ext[External agent] -->|planned authenticated MCP| MCP[Planned MCP adapter]
-  API --> Domain[Planned Brain, policy, tasks, orchestration]
-  MCP --> Domain
-  Domain -->|capability checked requests| Tools[Planned filesystem, shell, Git tools]
-  Domain -->|selected context and credential reference| Provider[Planned provider adapter]
-  Tools --> Workspace[User workspace and processes]
-  Provider --> External[External AI provider]
-  Domain --> Store[Planned database and audit log]
+  Local[Local process] -->|HTTP over loopback| API[Go API]
+  API -->|parameterized SQL| DB[(SQLite project data)]
+  API -->|validate and store only| Meta[Workspace path and repository URL]
+  Caller[Configured provider caller] -->|ChatRequest and credential reference| Registry[Provider registry and adapter]
+  Registry -->|resolve credential| Resolver[Injected credential resolver]
+  Registry -->|HTTPS, auth header, selected messages| Vendor[Configured external provider]
 ```
 
-## 2. Threat Model, Trust Boundaries, and Assumptions
+The provider flow is available to callers of the adapter packages, but is not currently connected to the running HTTP service or an agent runtime.
 
-### Protected assets and objectives
+## 2. Assets, actors, and assumptions
 
-Current executable behavior has no sensitive asset beyond runtime integrity and the local terminal output. For the documented design, assets that would need protection include project and task state, agent identities and capabilities, workspace contents, credentials, provider-bound context, and audit records (SECURITY.md:206-220, 807-902, 1644-1732; ARCHITECTURE.md:260-270, 1093-1112). Their presence or access is not established in current executable code.
+### Assets
 
-Security objectives for a future implementation, taken from the repository policy, are:
+- Project names, descriptions, lifecycle state, Brain association, and configuration metadata stored in SQLite.
+- Local database integrity and availability.
+- Workspace path and repository URL metadata, which may reveal local layout or private repository locations.
+- If provider adapters are used: credential values returned by the injected resolver, provider-bound message content, and provider responses.
+- Future assets not currently handled by the application: agent identity/capabilities, MCP sessions, tool authority, audit records, and user/tenant data.
 
-- Keep administrator and project policy authority above Brain, agent, and worker requests; check capabilities in the backend and deny by default (SECURITY.md:57-80, 249-299).
-- Authenticate remote API and MCP clients, enforce authorization server-side, and do not expose network services by default (SECURITY.md:1040-1082, 1106-1160).
-- Confine filesystem and process operations to approved workspaces and capabilities; never execute raw model output (SECURITY.md:416-610, 1312-1348).
-- Keep raw credentials away from agents and logs, redact secrets, and limit provider context to approved data (SECURITY.md:807-902, 1918-1948).
-- Preserve attributable audit events for sensitive actions and fail closed when policy or authorization cannot be determined (SECURITY.md:1644-1732, 1760-1800).
+### Actors and capabilities
 
-These are design objectives, not controls verified in the current implementation.
-
-### Actors and starting capabilities
-
-| Actor | Current or conditional starting capability | Privileges not assumed |
+| Actor | Current capability | Not assumed |
 | --- | --- | --- |
-| Local invoker | Can run the current entry point and read its fixed stdout output (cmd/boaird/main.go:3-7). | No server, agent, credential, database, or tool access is established. |
-| Local user or project administrator | Would configure projects and authorize work in the documented design (SECURITY.md:114-130; ARCHITECTURE.md:239-309). | No implemented identity or authorization model is present. |
-| Remote API caller | Conditional on a future remote deployment. | No internet exposure, tenant model, or remote endpoint is established (README.md:139-153). |
-| MCP client or external agent | Would send requests across the documented MCP boundary (ARCHITECTURE.md:557-584, 1659-1685). | No connected client or authenticated session is established. |
-| Prompt-injection content author | Could supply hostile repository, task, or provider content only if the future system ingests such content. | No content ingestion or agent execution path exists in the inspected source. |
-| External provider | Could receive selected context only if provider calls are implemented and configured (ARCHITECTURE.md:529-553). | No provider call or credential recipient is established. |
-| Dependency or build publisher | Could affect released artifacts only through future dependency/build workflows. | No CI workflow, release process, or dependency beyond the Go module declaration is established by the tracked inventory (go.mod:1-3). |
+| Local user launching boAIrd | Selects environment configuration and database path; can stop or restart the process. | No remote administrator role is implemented. |
+| Other process on the same host | Can attempt HTTP requests to the loopback listener. The API has no authentication layer. | It does not automatically have filesystem access to the SQLite file; OS permissions still apply. |
+| Remote network caller | Cannot directly reach the default listener through a non-loopback bind because configuration rejects non-loopback IPs. | No claim is made about host firewall, port forwarding, local proxies, or a separately exposed reverse proxy. |
+| Provider caller/configuration owner | Chooses provider config and request messages, and supplies a resolver implementation. | The adapter itself does not select or filter project context and does not validate that a credential is authorized for a particular project. |
+| Configured provider | Receives request messages and credentials in its required auth header when an adapter call is made. | No provider calls are made by the default application startup path. |
+| Future MCP client, worker, or tool author | Would cross planned trust boundaries if those features are wired. | These actors have no current executable MCP, agent-runtime, or tool capability through this application. |
 
-### Trust boundaries and assumptions
+### Trust boundaries
 
-1. **Current process to terminal.** `main` writes one fixed string to stdout. No input, secret, or authority crosses this boundary (cmd/boaird/main.go:3-7).
-2. **Browser or remote caller to API.** This is a documented future interface. Loopback is the stated local default; remote mode is expected to require authentication, TLS, and authorization, but none is implemented or effective in this revision (ARCHITECTURE.md:167-209; SECURITY.md:1040-1082).
-3. **External MCP client to boAIrd services.** The intended flow crosses transport, session, identity, and services. The policy says connection alone must grant no capabilities and remote MCP requires authentication; there is no source-backed enforcement today (ARCHITECTURE.md:1659-1685; SECURITY.md:1106-1160).
-4. **Brain to specialized agents and workers.** The design gives the Brain operational authority, while administrator policy remains higher and workers/agents should act only within assigned capabilities. Task review can flow from Worker through Reviewer/Brain and optionally a human (ARCHITECTURE.md:332-387, 830-903; SECURITY.md:57-80, 131-172, 176-202). These are policy boundaries only; no Brain, worker, task, or permission code exists in this revision (internal/agent/agent.go:1; internal/orchestrator/orchestrator.go:1; internal/task/task.go:1).
-5. **Agent/runtime to provider.** The intended flow can transfer selected context to an external provider. No provider, credential service, or context filtering path exists in the inspected implementation (ARCHITECTURE.md:529-553, 616-688; internal/provider/provider.go:1).
-6. **Agent/runtime to local tools.** Filesystem and shell operations could affect workspace files or processes. Policy describes capability checks and workspace boundaries, but no executor or effective workspace root exists (ARCHITECTURE.md:1280-1349; SECURITY.md:545-610).
-7. **Application to persistence and audit.** A SQLite location and audit behavior are documented, but no database or audit consumer exists in this source inventory (SECURITY.md:1644-1732, 2024-2040).
+1. **Local process to HTTP API.** The listener is loopback-only, but endpoints are unauthenticated. Other same-host processes are inside the effective network trust boundary.
+2. **HTTP API to project manager and SQLite.** Request decoding is bounded and rejects unknown JSON fields; domain validation and parameterized SQL protect input handling. There is no user/project ownership boundary.
+3. **Provider adapter to credential resolver.** The adapter passes a credential reference to the injected resolver, then sends the returned value only in the provider auth header. Resolver authorization, secure storage, rotation, and caller identity are outside the implemented adapter contract.
+4. **Provider adapter to external host.** HTTPS is required except for loopback development endpoints. Redirects are not followed, and error response bodies are not returned. Custom HTTPS base URLs remain caller-trusted, so a party controlling provider configuration can select the recipient host.
+5. **Project metadata to filesystem or Git.** The current API validates and persists these strings but performs no filesystem operation, clone, DNS lookup, or network fetch based on the repository URL.
+6. **Documented future services.** MCP, agent execution, tools, remote access, credentials CRUD, and audit remain separate future boundaries and must be reassessed when wired.
 
-Assumptions and scope limits:
+## 3. Threat scenarios and mitigations
 
-- This model covers the checked-in source at the revision below. Current tracked files contain a Go module, the command entry point, and four one-line internal package stubs; documentation describes a broader intended product (go.mod:1-3; cmd/boaird/main.go:1-7; internal/agent/agent.go:1; internal/orchestrator/orchestrator.go:1; internal/provider/provider.go:1; internal/task/task.go:1).
-- Documentation is not proof of a command, service, deployment, control, secret, or data store. For example, README's `boaird serve` command and localhost URL are examples; current `main` only prints a message (README.md:121-135; cmd/boaird/main.go:3-7).
-- The security policy is normative. Its requirements for loopback binding, authentication, MCP identity, workspace controls, secrets, and audit are not runtime guarantees until implemented and verified (SECURITY.md:1040-1082, 1106-1160, 807-902, 1644-1732).
-- Remote access, multiple users, tenant isolation, active agents, credentials, persistent user data, and external provider traffic are not established. Scenarios involving these require the stated future component and deployment prerequisite.
-- This is architecture mapping, not a vulnerability audit or finding report. Absence of implementation means future-boundary scenarios remain conditional; it does not establish a vulnerability in code that is not present.
+These are hypotheses to guide implementation and review. Priority reflects potential impact if prerequisites are met.
 
-## 3. Attack Surface, Mitigations, and Attacker Stories
+| Priority | Scenario and impact | Prerequisites | Current controls and limits | Mitigation / follow-up |
+| --- | --- | --- | --- | --- |
+| P1 | **Same-host unauthenticated project access:** another local process reads or changes projects through the loopback API. | Attacker can run code on the host and reach the listener. | Non-loopback bind is rejected; request size and project validation are enforced. There is no authentication or authorization, so loopback is not a per-user boundary. | Add local authentication/authorization before treating multiple OS users or untrusted local processes as isolated; test unauthorized read and mutation paths. |
+| P1 | **Provider credential disclosure or misuse:** a credential reaches an unintended host, log, or caller, or is used outside its intended project. | Provider adapter is invoked and resolver/configuration/caller is compromised or incorrectly authorized. | Credential values are not stored in adapter config; resolver errors and HTTP response bodies are sanitized; redirects are blocked; auth uses headers. Resolver storage/authorization and provider host selection are caller responsibilities. | Implement a credential broker with scoped authorization and audit; validate provider destinations against trusted configuration; keep credentials out of URLs, logs, and agent-visible data. |
+| P1 | **Sensitive prompt/context disclosure to a provider:** project or workspace content is sent externally without approval. | A caller passes sensitive content to an adapter and invokes a configured provider. | The transport sends the supplied messages; current app startup does not invoke adapters. No context-selection or consent policy is implemented. | Add explicit provider/data-use policy and context minimization before wiring providers into runtime; surface the destination and data classes to the user. |
+| P2 | **Provider endpoint misuse / SSRF:** a malicious or mistaken config points a provider adapter at an unintended HTTPS endpoint. | A component accepts attacker-controlled `BaseURL` and calls an adapter. | HTTPS is required except loopback HTTP; URLs with userinfo/query/fragment or traversal paths are rejected; redirects are not followed. Arbitrary HTTPS hosts are otherwise allowed. | Restrict configuration to administrator-controlled provider endpoints or an allowlist; consider DNS/IP policy if untrusted users can configure endpoints. |
+| P2 | **Project metadata becomes an unsafe file or network operation:** a later feature reads a stored workspace path or fetches a repository URL without revalidation. | A later agent/runtime feature consumes project metadata. | Workspace paths are canonicalized to existing directories and repository URLs are scheme-checked at storage time. The current API does not access these locations. | Revalidate at use time, enforce workspace roots and symlink policy, and restrict outbound Git/network destinations before adding clone or file operations. |
+| P2 | **SQLite disclosure or tampering:** another local account reads or replaces project data. | Attacker can access the database path or parent directory under OS permissions. | Newly created database directories/files use restrictive modes. Existing parent permissions, symlink ownership, backups, and filesystem-level access are not managed here. | Document secure placement and backup permissions; harden symlink and existing-directory handling if the local threat model includes other OS users. |
+| P2 | **Future MCP/tool authority confusion:** a client or prompt-injection payload obtains project or host operations beyond its grant. | MCP sessions or tool execution are implemented and reachable. | No MCP server or tool executor is wired in the current application. | Bind each action to authenticated identity, project, and capability; reauthorize on the backend; treat repository/provider content as untrusted. |
+| P2 | **Future audit omission:** a sensitive mutation occurs without durable attribution. | Sensitive actions and audit persistence are implemented. | Project mutations are persisted, but there is no durable audit pipeline in the application bootstrap. | Add durable actor/resource/outcome events and define behavior when audit persistence fails before introducing privileged runtime actions. |
 
-Each row is a **hypothesis**, not a confirmed vulnerability. Priority ranks the design work by potential impact and exposure if the documented component is implemented.
+## 4. Verification evidence and scope limits
 
-| Priority | Scenario and capability gain | Prerequisites | Impact | Existing controls | Mitigation | Evidence |
-| --- | --- | --- | --- | --- | --- | --- |
-| P1 | **Remote API authorization bypass:** a remote caller reaches project/task operations without an authenticated identity or server-side authorization, gaining access to or control over another user's project. | Remote API implemented and reachable; caller can reach endpoint; authorization missing or bypassable. | Project data disclosure or unauthorized state changes. | Policy requires authentication, TLS, and authorization for remote mode; no API code exists to enforce it. | Keep remote mode disabled until authentication, object-level authorization, TLS termination/configuration, and negative access tests are implemented; bind local mode to loopback. | README.md:139-153; ARCHITECTURE.md:167-209; SECURITY.md:1040-1082; cmd/boaird/main.go:3-7 |
-| P1 | **MCP identity or capability confusion:** an external MCP client reuses or forges session identity, or receives tools beyond its grant, gaining project actions as another agent. | MCP server and stateful sessions implemented; attacker can connect or influence session credentials; identity/capability checks fail. | Unauthorized project access or tool invocation. | Policy treats MCP as a trust boundary, requires remote authentication, identity, and explicit capabilities; not implemented. | Bind every request to authenticated client, project, session, and capability on the server; reject stale or mismatched identities and default to no tools. | ARCHITECTURE.md:557-584, 1659-1685; SECURITY.md:1106-1160 |
-| P1 | **Tool boundary escape:** hostile task or model content induces a filesystem or shell tool to read/write outside the approved workspace or execute an unintended command, gaining host-level file or process authority. | Tool execution implemented; attacker controls content reaching agent; unsafe path or command handling. | Workspace disclosure, modification, deletion, or process execution. | Policy identifies shell as high risk, calls for workspace boundaries and rejects raw model output; no executor exists. | Enforce capabilities and canonical path boundaries in the backend, defend against traversal and symlinks, use constrained commands, and require human approval for critical actions. | ARCHITECTURE.md:1280-1349; SECURITY.md:416-610, 1312-1348 |
-| P1 | **Credential exposure through provider context or logs:** a provider integration passes raw credentials or excessive project context to an agent, external provider, or log, granting unauthorized use or disclosure. | Provider and credential flow implemented; credentials/context available; filtering or redaction fails. | Provider account abuse, secret compromise, or project data disclosure. | Policy calls for credential isolation, redaction, and data minimization; no provider or credential consumer exists. | Pass credential references to a trusted broker, inject secrets only at the provider adapter, redact outputs, and let users review provider data handling and context selection. | ARCHITECTURE.md:529-553, 616-688; SECURITY.md:807-902, 1918-1948 |
-| P2 | **Brain/worker authority escalation:** a worker's output or request is treated as authority to change policy, grant capabilities, replace the Brain, or skip required review, gaining administrative or tool privileges. | Brain/worker workflow implemented; attacker can influence a worker or its output; backend confuses operational requests with administrator authority. | Privilege escalation, unauthorized tool use, or unreviewed project changes. | Policy separates administrator and Brain authority, denies by default, and calls for backend capability checks; these are not implemented in current code. | Enforce the authority hierarchy in backend services, bind requests to task and agent identity, require administrator approval for policy changes, and test worker-to-privileged-operation rejection. | ARCHITECTURE.md:332-387, 830-903; SECURITY.md:57-80, 131-172, 249-310 |
-| P2 | **Prompt injection crosses policy boundary:** hostile repository, task, or provider text is treated as instruction and causes the Brain/agent to request unauthorized tools or disclose context. | Context ingestion and model execution implemented; attacker can supply content included in context; policy is not independently enforced. | Unauthorized tool request or disclosure of data already available to the agent. | Policy classifies external content as untrusted and requires backend authorization for tool calls; no ingestion/runtime path exists. | Preserve source trust labels, separate policy from content, minimize context, and re-authorize every operation in a deterministic backend policy layer. | SECURITY.md:1225-1348, 1439-1452; ARCHITECTURE.md:1404-1476 |
-| P2 | **Project/task state tampering or injection:** crafted API or MCP input changes task ownership, project identity, or workflow state without validation or ownership checks. | Persistence and mutation endpoints implemented; attacker can submit malformed or cross-project identifiers. | Unauthorized state transition, work disclosure, or unsafe downstream execution. | Policy and architecture describe project scoping, validation, and human review; no storage or endpoint implementation exists. | Validate typed inputs, enforce project ownership and allowed state transitions in domain services, use parameterized database queries, and audit privileged transitions. | ARCHITECTURE.md:276-309, 717-865; SECURITY.md:954-976, 2024-2040 |
-| P2 | **Audit record omission or tampering:** a privileged operation succeeds without a durable audit record, leaving operators unable to attribute or investigate it. | Sensitive operations and audit storage implemented; attacker can trigger actions or alter the audit store. | Reduced detection and incident reconstruction; concealment of unauthorized actions. | Policy calls for audit events and immutability; no audit implementation or storage exists. | Make security-relevant mutations and audit writes atomic where possible, restrict audit modification, include actor/resource/outcome, and alert on audit failure. | ARCHITECTURE.md:1829-1850; SECURITY.md:1644-1732 |
-| P2 | **Dependency or build artifact substitution:** a compromised dependency or release workflow ships altered code with the application's future tool or credential authority. | Build/release workflow and dependency resolution implemented; attacker controls a dependency source or release credential. | Shipped code may inherit all local application privileges. | No workflow or lockfile is in the tracked source inventory; policy sets supply-chain expectations but does not establish controls. | Pin and review dependencies, protect release credentials, produce verifiable build provenance, and review changes to privileged code paths. | go.mod:1-3; SECURITY.md:1541-1628 |
+The source inventory for this model includes the executable and configuration under `cmd/boaird` and `internal/config`, HTTP routing under `internal/api`, project validation under `internal/project`, SQLite access under `internal/storage`, and provider contracts/adapters under `internal/provider`. The runtime composition in `internal/app` wires only the project manager and HTTP API to SQLite; it does not wire provider adapters, credentials, MCP, or tools.
 
-## 4. Severity Calibration (Critical, High, Medium, Low)
-
-Severity depends on reachable impact, required attacker capability, and effective controls. The scenarios above have no confirmed severity because their prerequisites are not implemented or established in this revision.
-
-| Severity | Example if the relevant component is implemented | Counterexample or lowering condition |
-| --- | --- | --- |
-| Critical | Unauthenticated remote execution of arbitrary commands across projects or users, with broad host or tenant impact and no effective containment. | No remote listener or command executor exists in the inspected source, so this example is not a current finding. An operation confined to an attacker's own project is not automatically critical. |
-| High | A reachable remote or MCP authorization failure exposes or modifies other users' sensitive project data, or a tool escape grants broad host access. | Requires the relevant interface, reachable deployment, sensitive resources, and bypassable enforcement. Documentation examples do not establish exposure. |
-| Medium | A constrained cross-project task mutation or limited context disclosure occurs behind an implemented interface with partial containment. | A malformed request rejected before sensitive state changes, or a prompt injection whose tool request is denied by backend policy, does not establish impact. |
-| Low | A narrow, low-sensitivity metadata disclosure or audit gap has limited reach and no meaningful privilege gain. | Ordinary authorized behavior, self-only effects, or disclosure of already-public data is not a security impact without additional consequences. |
-
-Do not assign severity from a feature description alone. Reassess this model when executable API, MCP, provider, persistence, audit, or tool code is added, and inspect the actual deployment configuration and effective resource paths at that time.
-
-Repository: sha256:662b04633a1c714e9ae82c7da08e070c8a551b9dab68442149845683ae73904a
-Version: a95983be06ed266b3a3ed2e74b74825839610492
+The source-backed controls described here should be rechecked when code or deployment configuration changes. This model is not a complete security audit, does not establish the safety of a user's resolver implementation or host deployment, and does not claim that tests prove upstream provider behavior. Future remote access, credential management, provider runtime, MCP, tool execution, user isolation, or audit implementation requires a fresh threat-model review.

@@ -29,11 +29,10 @@ type message struct {
 	Content string `json:"content"`
 }
 type chatPayload struct {
-	Model       string    `json:"model"`
-	MaxTokens   int       `json:"max_tokens"`
-	System      string    `json:"system,omitempty"`
-	Messages    []message `json:"messages"`
-	Temperature *float64  `json:"temperature,omitempty"`
+	Model     string    `json:"model"`
+	MaxTokens int       `json:"max_tokens"`
+	System    string    `json:"system,omitempty"`
+	Messages  []message `json:"messages"`
 }
 type messageResult struct {
 	ID      string `json:"id"`
@@ -53,7 +52,10 @@ func (a *Adapter) Chat(ctx context.Context, request provider.ChatRequest) (provi
 	if err := provider.ValidateChatRequest(request); err != nil {
 		return provider.ChatResponse{}, err
 	}
-	payload := chatPayload{Model: request.Model, MaxTokens: request.MaxTokens, Temperature: request.Temperature}
+	if request.Temperature != nil && *request.Temperature != 1 {
+		return provider.ChatResponse{}, fmt.Errorf("anthropic: custom temperature is unsupported: %w", provider.ErrInvalidRequest)
+	}
+	payload := chatPayload{Model: request.Model, MaxTokens: request.MaxTokens}
 	for _, item := range request.Messages {
 		if item.Role == provider.RoleSystem {
 			if payload.System != "" {

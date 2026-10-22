@@ -62,11 +62,15 @@ type Usage struct {
 }
 
 type Model struct {
-	ID              string `json:"id"`
-	Name            string `json:"name,omitempty"`
-	OwnedBy         string `json:"owned_by,omitempty"`
-	ContextWindow   int    `json:"context_window,omitempty"`
-	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
+	ID                    string   `json:"id"`
+	Name                  string   `json:"name,omitempty"`
+	OwnedBy               string   `json:"owned_by,omitempty"`
+	ContextWindow         int      `json:"context_window,omitempty"`
+	MaxOutputTokens       int      `json:"max_output_tokens,omitempty"`
+	InputModalities       []string `json:"input_modalities,omitempty"`
+	OutputModalities      []string `json:"output_modalities,omitempty"`
+	SupportedEffortLevels []string `json:"supported_effort_levels,omitempty"`
+	DefaultEffortLevel    string   `json:"default_effort_level,omitempty"`
 }
 
 // Registry resolves named provider instances configured by the application.
