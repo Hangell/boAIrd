@@ -585,9 +585,13 @@ Default development endpoint:
 http://localhost:3110
 ```
 
+The backend also accepts `BOAIRD_HOST`, `BOAIRD_PORT`, and `BOAIRD_DATABASE_PATH` to override the listen address, listen port, and SQLite file path. Defaults are `127.0.0.1`, `3110`, and `./data/boaird.db`.
+
 ---
 
 # Health Check
+
+This liveness check reports whether the HTTP service is running; it does not query SQLite.
 
 ```text
 GET /health
@@ -598,6 +602,32 @@ Expected response:
 ```json
 {
   "status": "ok"
+}
+```
+
+---
+
+# Service Status
+
+```text
+GET /api/v1/status
+```
+
+The endpoint returns `200 OK` when SQLite is connected:
+
+```json
+{
+  "status": "ok",
+  "database": "connected"
+}
+```
+
+It returns `503 Service Unavailable` when SQLite cannot be reached:
+
+```json
+{
+  "status": "unavailable",
+  "database": "disconnected"
 }
 ```
 

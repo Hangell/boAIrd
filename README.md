@@ -1907,15 +1907,43 @@ GET    /api/v1/logs
 
 # Healthcheck
 
+This liveness check reports whether the HTTP service is running; it does not query SQLite.
+
 ```text
 GET /health
 ```
 
-Resposta:
+Response:
 
 ```json
 {
   "status": "ok"
+}
+```
+
+---
+
+# Service Status
+
+```text
+GET /api/v1/status
+```
+
+When the service and SQLite are available, the endpoint returns `200 OK`:
+
+```json
+{
+  "status": "ok",
+  "database": "connected"
+}
+```
+
+When SQLite is unavailable, it returns `503 Service Unavailable`:
+
+```json
+{
+  "status": "unavailable",
+  "database": "disconnected"
 }
 ```
 
@@ -1936,6 +1964,14 @@ boaird
 ```bash
 boaird serve
 ```
+
+The service reads these optional environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BOAIRD_HOST` | `127.0.0.1` | HTTP listen address |
+| `BOAIRD_PORT` | `3110` | HTTP listen port |
+| `BOAIRD_DATABASE_PATH` | `./data/boaird.db` | SQLite database file |
 
 ---
 
