@@ -167,9 +167,9 @@ The Brain can be:
 - Gemini;
 - Qwen;
 - a VS Code agent;
-- aplicativo local;
+- a local application;
 - an MCP agent;
-- modelo local;
+- a local model;
 - a remote service.
 
 ---
@@ -305,7 +305,7 @@ brain:
   runtime: mcp
 ```
 
-Ou:
+Or:
 
 ```yaml
 brain:
@@ -431,10 +431,10 @@ Agents can use:
 
 - Portuguese;
 - English;
-- estruturas JSON;
+- JSON structures;
 - YAML;
 - custom protocols;
-- dados compactados;
+- compressed data;
 - binary representations;
 - formats optimized for machine-to-machine communication.
 
@@ -484,7 +484,7 @@ REVIEW
 DONE
 ```
 
-Estados adicionais:
+Additional states:
 
 ```text
 BLOCKED
@@ -566,7 +566,7 @@ task.create
 
 # Task
 
-Modelo conceitual:
+Conceptual model:
 
 ```go
 type Task struct {
@@ -720,7 +720,7 @@ can_pr
 can_mermaid
 ```
 
-Preferir:
+Prefer:
 
 ```go
 type Capability string
@@ -872,8 +872,8 @@ Responsible for:
 - installing tools;
 - validating dependencies;
 - configuring the environment;
-- preparar CLI;
-- instalar SDKs;
+- prepare the CLI;
+- install SDKs;
 - configuring the required tools.
 
 ---
@@ -940,9 +940,9 @@ github.pr.merge
 
 The Brain may have the capability to:
 
-- analisar PR;
+- analyze PRs;
 - review changes;
-- comentar;
+- comment on PRs;
 - validate implementations;
 - request corrections.
 
@@ -1216,7 +1216,7 @@ internal/provider/
 
 Credentials must not belong directly to agents.
 
-Relacionamento:
+Relationship:
 
 ```text
 Provider
@@ -1737,7 +1737,7 @@ Duration:
 
 Logs will be essential for auditing.
 
-Categorias:
+Categories:
 
 ```text
 system
