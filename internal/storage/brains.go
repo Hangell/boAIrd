@@ -113,6 +113,13 @@ func (r *BrainRepository) Replace(ctx context.Context, current, replacement brai
 		current.AgentID()+"/"+string(current.Autonomy()), replacement.AgentID()+"/"+string(replacement.Autonomy()), reason); err != nil {
 		return fmt.Errorf("audit Brain replacement: %w", err)
 	}
+	if current.Autonomy() != replacement.Autonomy() {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, from_status, to_status, reason)
+			VALUES (?, 'user', ?, 'brain.autonomy.changed', 'brain', ?, ?, ?, ?)`, current.ProjectID(), actorID, current.ID(),
+			string(current.Autonomy()), string(replacement.Autonomy()), reason); err != nil {
+			return fmt.Errorf("audit Brain autonomy change: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit Brain replacement: %w", err)
 	}

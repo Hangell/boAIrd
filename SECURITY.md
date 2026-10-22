@@ -95,6 +95,13 @@ AUTONOMOUS
 
 but it remains limited by its assigned capabilities.
 
+The Brain's task-action gate applies the configured mode before execution:
+`MANUAL` is plan-only; `SEMI_AUTO` can create, assign, transition, and review
+within its capabilities but requires human approval for completion;
+`AUTONOMOUS` may complete only when `task.complete` is granted and the project
+does not require human review. Mode changes require the local administrator and
+are recorded as immutable `brain.autonomy.changed` audit events.
+
 Example:
 
 ```text

@@ -51,12 +51,75 @@ func TestAuthorizeActionRequiresExplicitCapabilityRegardlessOfRoleOrAutonomy(t *
 	if err := b.AuthorizeAction(ActionPlan, p, a); !errors.Is(err, ErrUnauthorizedAction) {
 		t.Fatalf("plan without brain.execute: %v", err)
 	}
-	if err := b.AuthorizeAction(ActionCompleteTask, p, a); !errors.Is(err, ErrUnauthorizedAction) {
+	if err := b.AuthorizeAction(ActionCompleteTask, p, a); !errors.Is(err, ErrHumanApprovalRequired) {
 		t.Fatalf("completion bypassed human review: %v", err)
 	}
 	for _, action := range []Action{ActionReplaceBrain, ActionGrantCapability, ActionAccessCredential, ActionBypassHumanReview} {
 		if err := b.AuthorizeAction(action, p, a); !errors.Is(err, ErrUnauthorizedAction) {
 			t.Errorf("action %s: %v", action, err)
+		}
+	}
+}
+
+func TestAutonomyModesGateDecisionsWithoutGrantingCapabilities(t *testing.T) {
+	makeProject := func(humanReview bool) project.Project {
+		value, err := project.Restore(project.Snapshot{ID: "p1", Name: "Project", Status: project.StatusConfiguring, BrainID: "b1", HumanReviewRequired: humanReview})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	a, err := agent.NewConfigured("a1", agent.Configuration{
+		Name: "Brain", Role: "coordinator", Runtime: agent.RuntimeAPI, Provider: "openai", Model: "fake", CredentialID: "credential",
+		Capabilities: []string{"brain.execute", "task.create", "task.assign", "task.review", "task.complete"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name        string
+		mode        AutonomyMode
+		action      Action
+		humanReview bool
+		wantErr     error
+	}{
+		{name: "manual planning remains available", mode: AutonomyManual, action: ActionPlan},
+		{name: "manual task mutation requires a human", mode: AutonomyManual, action: ActionCreateTask, wantErr: ErrHumanApprovalRequired},
+		{name: "semi-auto can create tasks", mode: AutonomySemiAuto, action: ActionCreateTask},
+		{name: "semi-auto completion requires a human", mode: AutonomySemiAuto, action: ActionCompleteTask, wantErr: ErrHumanApprovalRequired},
+		{name: "autonomous completion follows project policy", mode: AutonomyAutonomous, action: ActionCompleteTask},
+		{name: "autonomous mode respects human review", mode: AutonomyAutonomous, action: ActionCompleteTask, humanReview: true, wantErr: ErrHumanApprovalRequired},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			b, err := New("b1", "p1", "a1", test.mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = b.AuthorizeAction(test.action, makeProject(test.humanReview), a)
+			if test.wantErr != nil && !errors.Is(err, test.wantErr) {
+				t.Fatalf("authorization error = %v, want %v", err, test.wantErr)
+			}
+			if test.wantErr == nil && err != nil {
+				t.Fatalf("authorization unexpectedly failed: %v", err)
+			}
+		})
+	}
+
+	withoutGrant, err := agent.NewConfigured("a1", agent.Configuration{
+		Name: "Brain", Role: "administrator", Runtime: agent.RuntimeAPI, Provider: "openai", Model: "fake", CredentialID: "credential",
+		Capabilities: []string{"brain.execute"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []AutonomyMode{AutonomyManual, AutonomySemiAuto, AutonomyAutonomous} {
+		b, err := New("b1", "p1", "a1", mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := b.AuthorizeAction(ActionCreateTask, makeProject(false), withoutGrant); !errors.Is(err, ErrUnauthorizedAction) {
+			t.Errorf("mode %s granted task.create without capability: %v", mode, err)
 		}
 	}
 }
