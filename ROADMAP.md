@@ -244,7 +244,7 @@ type Provider interface {
 }
 ```
 
-Providers iniciais:
+Initial providers:
 
 ```text
 OpenAI
@@ -721,7 +721,7 @@ i18n foundation
 
 Create an operational view for each project.
 
-Tela:
+Screen:
 
 ```text
 Project
@@ -738,7 +738,7 @@ Project
 
 ## Overview
 
-Mostrar:
+Show:
 
 ```text
 Brain status
@@ -805,7 +805,7 @@ Review
 
 Allow agents to be fully configured.
 
-Tela:
+Screen:
 
 ```text
 Avatar
@@ -842,7 +842,7 @@ Capabilities
 Autonomy Mode
 ```
 
-Mostrar:
+Show:
 
 ```text
 status
@@ -1088,7 +1088,7 @@ boAIrd
 
 Monitor external agents.
 
-Estados:
+States:
 
 ```text
 ONLINE
@@ -1194,7 +1194,7 @@ Agent request
 boAIrd Context Engine
 ```
 
-Fontes:
+Sources:
 
 ```text
 Project
@@ -1227,7 +1227,7 @@ Brain Summary
 Optimized Memory
 ```
 
-Categorias:
+Categories:
 
 ```text
 Architecture Decisions
@@ -1263,7 +1263,7 @@ Structure:
 Tool Registry
 ```
 
-Primeiras tools:
+Initial tools:
 
 ```text
 Filesystem
@@ -1272,7 +1272,7 @@ Git
 GitHub
 ```
 
-Futuras:
+Future tools:
 
 ```text
 Mermaid
@@ -1411,7 +1411,7 @@ Software Architect
 
 ## Objective
 
-Entender tudo que acontece.
+Understand everything that happens.
 
 Dashboard:
 
@@ -1423,7 +1423,7 @@ Agent activity
 Task history
 ```
 
-Categorias:
+Categories:
 
 ```text
 system
@@ -1456,7 +1456,7 @@ Timestamp
 Result
 ```
 
-Especialmente:
+Especially:
 
 ```text
 shell
@@ -1558,7 +1558,7 @@ Do not implement this until there is a real need.
 
 # Phase 38 — Multi-User
 
-Futuro.
+Future.
 
 Implement:
 
@@ -1598,7 +1598,7 @@ Git Manager
 
 # Phase 40 — Tool Marketplace / Extensions
 
-Futuro.
+Future.
 
 Allow tools to be added without changing the core.
 
