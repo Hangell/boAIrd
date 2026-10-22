@@ -1164,7 +1164,7 @@ Tool inputs and required capabilities:
 | `boaird.agent.list`, `.get`, `.status` | optional `agent_id` for get/status | `agent.read`; returns only the authenticated Agent |
 | `boaird.task.list` | optional `project_id`, `status`, `limit` (1–100), `offset` (0–10,000) | `task.read`; returns all tasks for projects in persisted membership or the authenticated Agent's active Brain scope, and otherwise only tasks assigned to that Agent |
 | `boaird.task.get` | `task_id` | `task.read`; exact assignment or persisted/active-Brain project scope |
-| `boaird.task.claim` | `task_id`, `reason` | starts an assigned READY task, or self-assigns an unassigned READY task with `task.assign` and persisted project membership |
+| `boaird.task.claim` | `task_id`, `reason` | `task.assign` + `task.transition` for an unassigned READY task in a project where the Agent has persisted membership; `task.transition` for a task already assigned to that Agent |
 | `boaird.task.update` | `task_id`, `status` (`WORKING`, `REVIEW`, `BLOCKED`), `reason` | `task.transition`; exact assignment |
 | `boaird.task.complete` | `task_id`, `reason` | `task.complete`; exact assignment, domain workflow and Human Review policy |
 | `boaird.task.fail` | `task_id`, `reason` | `task.transition`; exact assignment |
@@ -1210,10 +1210,12 @@ curl --request POST http://127.0.0.1:3110/api/v1/mcp/tokens \
 
 Token lifecycle operations are recorded in immutable audit events without
 token material. MCP sessions expire after 30 minutes of inactivity.
-`boaird.task.claim` may self-assign an unassigned READY task only when the
-authenticated Agent has persisted project membership and the explicit
-`task.assign` capability. Competing claims are guarded by task version checks;
-tasks assigned to another Agent or outside READY are denied.
+`boaird.task.claim` atomically assigns and starts an unassigned READY task only
+when the authenticated Agent has persisted project membership and both
+`task.assign` and `task.transition`. The task version observed by the MCP
+handler is passed through the service compare-and-swap, so concurrent claims
+cannot overwrite an assignment or both succeed. A task already assigned to the
+Agent requires `task.transition`; claims of another Agent's task are denied.
 
 ---
 

@@ -62,20 +62,35 @@ func (s taskStub) List(_ context.Context, projectID string, status task.Status, 
 	}
 	return values, nil
 }
-func (s taskStub) Assign(_ context.Context, id, agentID, _ string, _ task.Actor) (task.Task, error) {
+func (s taskStub) Claim(_ context.Context, id, agentID string, expectedVersion int64, reason string, actor task.Actor) (task.Task, error) {
 	value, ok := s.values[id]
 	if !ok {
 		return task.Task{}, task.ErrNotFound
 	}
-	if value.AssignedTo() != "" {
+	if value.Version() != expectedVersion || value.Status() != task.StatusReady || value.AssignedTo() != "" && value.AssignedTo() != agentID {
 		return task.Task{}, task.ErrConflict
 	}
-	updated, err := value.Assign(agentID)
+	var err error
+	if value.AssignedTo() == "" {
+		value, err = value.Assign(agentID)
+		if err != nil {
+			return task.Task{}, err
+		}
+	}
+	value, err = value.Transition(task.StatusWorking)
 	if err != nil {
 		return task.Task{}, err
 	}
-	s.values[id] = updated
-	return updated, nil
+	value, err = value.RecordMutation(actor, reason)
+	if err != nil {
+		return task.Task{}, err
+	}
+	value, err = value.AdvanceVersion()
+	if err != nil {
+		return task.Task{}, err
+	}
+	s.values[id] = value
+	return value, nil
 }
 func (s taskStub) Transition(_ context.Context, id string, to task.Status, _ string, _ task.Actor) (task.Task, error) {
 	value, ok := s.values[id]

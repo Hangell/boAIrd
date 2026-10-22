@@ -50,7 +50,7 @@ type ProjectService interface {
 type TaskService interface {
 	Get(context.Context, string) (task.Task, error)
 	List(context.Context, string, task.Status, string, int, int) ([]task.Task, error)
-	Assign(context.Context, string, string, string, task.Actor) (task.Task, error)
+	Claim(context.Context, string, string, int64, string, task.Actor) (task.Task, error)
 	Transition(context.Context, string, task.Status, string, task.Actor) (task.Task, error)
 }
 type ConversationService interface {
@@ -479,17 +479,15 @@ func (s *Server) taskClaim(ctx context.Context, _ *mcp.CallToolRequest, in taskA
 		return nil, taskOutput{}, toolError(task.ErrForbidden)
 	}
 	if value.AssignedTo() == "" {
-		if !s.hasProjectScope(ctx, a, value.ProjectID()) || s.authorizeProject(ctx, a, "task.assign", value.ProjectID()) != nil {
+		if !projectInScope(a, value.ProjectID()) || s.authorizeProject(ctx, a, "task.assign", value.ProjectID()) != nil || s.authorizeProject(ctx, a, "task.transition", value.ProjectID()) != nil {
 			return nil, taskOutput{}, toolError(task.ErrForbidden)
-		}
-		value, err = s.services.Tasks.Assign(ctx, value.ID(), a.ID(), in.Reason, task.Actor{Type: task.ActorAgent, ID: a.ID()})
-		if err != nil {
-			return nil, taskOutput{}, toolError(err)
 		}
 	} else if value.AssignedTo() != a.ID() {
 		return nil, taskOutput{}, toolError(task.ErrForbidden)
+	} else if s.authorizeAssignedTask(ctx, a, "task.transition", value) != nil {
+		return nil, taskOutput{}, toolError(task.ErrForbidden)
 	}
-	value, err = s.services.Tasks.Transition(ctx, value.ID(), task.StatusWorking, in.Reason, task.Actor{Type: task.ActorAgent, ID: a.ID()})
+	value, err = s.services.Tasks.Claim(ctx, value.ID(), a.ID(), value.Version(), in.Reason, task.Actor{Type: task.ActorAgent, ID: a.ID()})
 	if err != nil {
 		return nil, taskOutput{}, toolError(err)
 	}
