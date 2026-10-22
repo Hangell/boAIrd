@@ -85,10 +85,14 @@ func (conversationStub) Append(context.Context, string, conversation.SenderType,
 	return conversation.Message{}, nil
 }
 
-type brainStub struct{}
+type brainStub struct{ values map[string]brain.Brain }
 
-func (brainStub) Get(context.Context, string) (brain.Brain, error) {
-	return brain.Brain{}, brain.ErrNotFound
+func (s brainStub) Get(_ context.Context, projectID string) (brain.Brain, error) {
+	value, ok := s.values[projectID]
+	if !ok {
+		return brain.Brain{}, brain.ErrNotFound
+	}
+	return value, nil
 }
 func (brainStub) Execute(context.Context, string, string, int) (brain.Execution, error) {
 	return brain.Execution{}, brain.ErrNotFound
@@ -97,6 +101,13 @@ func (brainStub) Execute(context.Context, string, string, int) (brain.Execution,
 type runStub struct{}
 
 func (runStub) Get(context.Context, string) (run.Run, error) { return run.Run{}, run.ErrNotFound }
+
+type denialStub struct{ records []string }
+
+func (s *denialStub) RecordAuthorizationDenial(_ context.Context, _, projectID, required, _, reason string) error {
+	s.records = append(s.records, projectID+":"+required+":"+reason)
+	return nil
+}
 
 type bearerRoundTripper struct {
 	token func() string
@@ -221,6 +232,87 @@ func TestNewRejectsTokenForUnregisteredAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("New() accepted a token for an unregistered Agent")
 	}
+}
+
+func TestActiveBrainProvidesOnlyItsProjectScope(t *testing.T) {
+	a := testAgent(t, "brain-agent")
+	active, err := brain.New("brain-one", "project-one", a.ID(), brain.AutonomyManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inactive := active.Deactivate()
+	s := &Server{services: Services{
+		Brains: brainStub{values: map[string]brain.Brain{"project-one": active, "project-two": inactive}},
+	}}
+	if !s.hasProjectScope(context.Background(), a, "project-one") {
+		t.Fatal("active Brain does not have scope for its project")
+	}
+	if s.hasProjectScope(context.Background(), a, "project-two") {
+		t.Fatal("inactive Brain granted project scope")
+	}
+	if s.hasProjectScope(context.Background(), a, "project-three") {
+		t.Fatal("Brain granted scope to an unrelated project")
+	}
+	if err := s.authorizeProject(context.Background(), a, "project.read", "project-one"); err != nil {
+		t.Fatalf("authorize active Brain with project.read: %v", err)
+	}
+	if err := s.authorizeProject(context.Background(), a, "project.delete", "project-one"); err == nil {
+		t.Fatal("active Brain bypassed the required capability")
+	}
+}
+
+func TestAssignedTaskScopeRemainsTaskSpecific(t *testing.T) {
+	a := testAgent(t, "worker-agent")
+	other, err := testAgentWithCapabilities(t, "other-agent", []string{"agent.read", "project.read", "task.read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assigned := newAssignedTask(t, "assigned", "project-one", a.ID())
+	unassigned := newAssignedTask(t, "unassigned", "project-one", other.ID())
+	unscoped := &Server{services: Services{Brains: brainStub{}}}
+	if err := unscoped.taskVisible(context.Background(), a, assigned, "task.read"); err != nil {
+		t.Fatalf("assigned task should be visible without project scope: %v", err)
+	}
+	if err := unscoped.taskVisible(context.Background(), a, unassigned, "task.read"); err == nil {
+		t.Fatal("unscoped Agent read an unassigned task")
+	}
+	brainValue, err := brain.New("brain-one", "project-one", a.ID(), brain.AutonomyManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denials := &denialStub{}
+	s := &Server{services: Services{Brains: brainStub{values: map[string]brain.Brain{"project-one": brainValue}}, Denials: denials}}
+	if err := s.taskVisible(context.Background(), a, assigned, "task.read"); err != nil {
+		t.Fatalf("assigned task should remain visible: %v", err)
+	}
+	if err := s.taskVisible(context.Background(), a, unassigned, "task.read"); err != nil {
+		t.Fatalf("active Brain should read an unassigned task in its project: %v", err)
+	}
+	crossProject := newAssignedTask(t, "cross-project", "project-two", other.ID())
+	if err := s.taskVisible(context.Background(), a, crossProject, "task.read"); err == nil {
+		t.Fatal("active Brain granted access to a different project")
+	}
+	if len(denials.records) != 1 || denials.records[0] != "project-two:task.read:project_scope_or_task_assignment_required" {
+		t.Fatalf("cross-project authorization denials = %#v", denials.records)
+	}
+}
+
+func testAgentWithCapabilities(t *testing.T, id string, capabilities []string) (agent.Agent, error) {
+	t.Helper()
+	return agent.NewConfigured(id, agent.Configuration{Name: id, Role: "worker", Runtime: agent.RuntimeMCP, Capabilities: capabilities})
+}
+
+func newAssignedTask(t *testing.T, id, projectID, assignedTo string) task.Task {
+	t.Helper()
+	value, err := task.New(id, projectID, id, "details", assignedTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err = value.Assign(assignedTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func testAgent(t *testing.T, id string) agent.Agent {

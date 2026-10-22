@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -85,6 +86,80 @@ func TestAgentRepositoryEnforcesCredentialReferences(t *testing.T) {
 	_, err = manager.Create(context.Background(), agent.CreateInput{Name: "Mismatch", Role: "worker", Runtime: agent.RuntimeAPI, Provider: "anthropic", Model: "claude", CredentialID: "cred-1"})
 	if err != agent.ErrCredentialMismatch {
 		t.Fatalf("create with mismatched provider credential error = %v", err)
+	}
+}
+
+func TestAgentProjectScopePersistsAndAuditsOnlyRealChanges(t *testing.T) {
+	ctx := context.Background()
+	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.ExecContext(ctx, `INSERT INTO projects(id, name, status, human_review_required) VALUES ('project-1', 'Project One', 'CREATED', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := agent.NewManager(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := manager.Create(ctx, agent.CreateInput{Name: "Scoped agent", Role: "worker", Runtime: agent.RuntimeMCP, Capabilities: []string{"project.read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.AddProject(ctx, value.ID(), "project-1", "local-administrator"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.AddProject(ctx, value.ID(), "project-1", "local-administrator"); err != nil {
+		t.Fatal(err)
+	}
+	loadedRepository, err := NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedManager, err := agent.NewManager(loadedRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadedManager.Get(ctx, value.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.ProjectIDs(); len(got) != 1 || got[0] != "project-1" {
+		t.Fatalf("persisted project IDs = %#v, want [project-1]", got)
+	}
+	assertAgentProjectAuditCount(t, ctx, database, "agent.project.joined", 1)
+	if _, err := database.ExecContext(ctx, `UPDATE audit_events SET reason = 'tampered' WHERE event_type = 'agent.project.joined'`); err == nil {
+		t.Fatal("audit event update was allowed")
+	}
+	if err := loadedManager.RemoveProject(ctx, value.ID(), "project-1", "local-administrator"); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadedManager.RemoveProject(ctx, value.ID(), "project-1", "local-administrator"); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := loadedManager.Get(ctx, value.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revoked.ProjectIDs()) != 0 {
+		t.Fatalf("revoked scope remained after reload: %#v", revoked.ProjectIDs())
+	}
+	assertAgentProjectAuditCount(t, ctx, database, "agent.project.left", 1)
+}
+
+func assertAgentProjectAuditCount(t *testing.T, ctx context.Context, database *sql.DB, eventType string, want int) {
+	t.Helper()
+	var got int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events WHERE event_type = ?`, eventType).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("audit count for %q = %d, want %d", eventType, got, want)
 	}
 }
 

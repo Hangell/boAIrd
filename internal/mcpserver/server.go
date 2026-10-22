@@ -268,6 +268,16 @@ func projectInScope(a agent.Agent, projectID string) bool {
 	}
 	return false
 }
+
+// hasProjectScope combines persisted project membership with the active Brain
+// relationship. The Brain relationship grants scope only to its own project.
+func (s *Server) hasProjectScope(ctx context.Context, a agent.Agent, projectID string) bool {
+	if projectInScope(a, projectID) {
+		return true
+	}
+	b, err := s.services.Brains.Get(ctx, projectID)
+	return err == nil && b.Active() && b.AgentID() == a.ID() && b.ProjectID() == projectID
+}
 func agentView(a agent.Agent) agentOutput {
 	caps := make([]string, 0, len(a.Capabilities()))
 	for _, c := range a.Capabilities() {
@@ -306,6 +316,21 @@ func (s *Server) authorize(ctx context.Context, a agent.Agent, required, project
 	}
 	return err
 }
+func (s *Server) authorizeProject(ctx context.Context, a agent.Agent, required, projectID string) error {
+	if !s.hasProjectScope(ctx, a, projectID) {
+		s.recordDenial(ctx, a, projectID, required, "project_scope_required")
+		return capability.ErrDenied
+	}
+	grant, err := capability.New(required)
+	if err != nil {
+		return err
+	}
+	err = (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: []string{projectID}}, grant, projectID)
+	if err != nil {
+		s.recordDenial(ctx, a, projectID, required, "capability_or_project_scope_denied")
+	}
+	return err
+}
 func (s *Server) authorizeAssignedTask(ctx context.Context, a agent.Agent, required string, t task.Task) error {
 	grant, err := capability.New(required)
 	if err != nil {
@@ -335,8 +360,8 @@ func (s *Server) taskVisible(ctx context.Context, a agent.Agent, t task.Task, re
 	if t.AssignedTo() == a.ID() {
 		return s.authorizeAssignedTask(ctx, a, required, t)
 	}
-	if projectInScope(a, t.ProjectID()) {
-		return s.authorize(ctx, a, required, t.ProjectID())
+	if s.hasProjectScope(ctx, a, t.ProjectID()) {
+		return s.authorizeProject(ctx, a, required, t.ProjectID())
 	}
 	s.recordDenial(ctx, a, t.ProjectID(), required, "project_scope_or_task_assignment_required")
 	return task.ErrForbidden
@@ -346,8 +371,8 @@ func (s *Server) projectVisible(ctx context.Context, a agent.Agent, id string) (
 	if err != nil {
 		return project.Project{}, err
 	}
-	if projectInScope(a, id) {
-		if err := s.authorize(ctx, a, "project.read", id); err != nil {
+	if s.hasProjectScope(ctx, a, id) {
+		if err := s.authorizeProject(ctx, a, "project.read", id); err != nil {
 			return project.Project{}, task.ErrForbidden
 		}
 		return p, nil
@@ -419,8 +444,8 @@ func (s *Server) taskList(ctx context.Context, _ *mcp.CallToolRequest, in taskLi
 	skip := in.Offset
 	for _, p := range projects {
 		assignedTo := a.ID()
-		if projectInScope(a, p.ID()) {
-			if err := s.authorize(ctx, a, "task.read", p.ID()); err == nil {
+		if s.hasProjectScope(ctx, a, p.ID()) {
+			if err := s.authorizeProject(ctx, a, "task.read", p.ID()); err == nil {
 				assignedTo = ""
 			}
 		}
@@ -547,8 +572,8 @@ func (s *Server) contextGet(ctx context.Context, r *mcp.CallToolRequest, in task
 		return nil, contextOutput{}, toolError(task.ErrForbidden)
 	}
 	var projectContext *projectOutput
-	if projectInScope(a, t.ProjectID()) {
-		p, err := s.projectVisible(ctx, a, t.ProjectID())
+	if s.hasProjectScope(ctx, a, t.ProjectID()) && s.authorizeProject(ctx, a, "project.read", t.ProjectID()) == nil {
+		p, err := s.services.Projects.Get(ctx, t.ProjectID())
 		if err != nil {
 			return nil, contextOutput{}, toolError(err)
 		}
@@ -570,12 +595,11 @@ func (s *Server) brainRequest(ctx context.Context, _ *mcp.CallToolRequest, in br
 		return nil, brainOutput{}, toolError(e)
 	}
 	b, e := s.services.Brains.Get(ctx, in.ProjectID)
-	if e != nil || b.AgentID() != a.ID() {
+	if e != nil || !b.Active() || b.AgentID() != a.ID() || b.ProjectID() != in.ProjectID {
 		s.recordDenial(ctx, a, in.ProjectID, "brain.execute", "active_brain_identity_required")
 		return nil, brainOutput{}, toolError(task.ErrForbidden)
 	}
-	grant, e := capability.New("brain.execute")
-	if e != nil || !b.Active() || (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: []string{b.ProjectID()}}, grant, b.ProjectID()) != nil {
+	if e := s.authorizeProject(ctx, a, "brain.execute", b.ProjectID()); e != nil {
 		s.recordDenial(ctx, a, b.ProjectID(), "brain.execute", "active_brain_scope_denied")
 		return nil, brainOutput{}, toolError(task.ErrForbidden)
 	}
@@ -597,11 +621,11 @@ func (s *Server) runGet(ctx context.Context, _ *mcp.CallToolRequest, in runInput
 	if e != nil {
 		return nil, runOutput{}, toolError(e)
 	}
-	if !projectInScope(a, v.ProjectID()) {
+	if !s.hasProjectScope(ctx, a, v.ProjectID()) {
 		s.recordDenial(ctx, a, v.ProjectID(), "run.read", "project_membership_required")
 		return nil, runOutput{}, toolError(task.ErrForbidden)
 	}
-	if s.authorize(ctx, a, "run.read", v.ProjectID()) != nil {
+	if s.authorizeProject(ctx, a, "run.read", v.ProjectID()) != nil {
 		return nil, runOutput{}, toolError(task.ErrForbidden)
 	}
 	return nil, runOutput{ID: v.ID(), ProjectID: v.ProjectID(), TaskID: v.TaskID(), AgentID: v.AgentID(), Status: string(v.Status()), Output: v.Output(), Error: v.Error()}, nil
