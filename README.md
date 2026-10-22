@@ -2008,6 +2008,8 @@ Runs can be listed with `GET /api/v1/projects/{id}/runs`, filtered by `task_id` 
 
 Tasks can be created and listed with `POST` and `GET /api/v1/projects/{id}/tasks`, retrieved with `GET /api/v1/tasks/{id}`, assigned with `PUT /api/v1/tasks/{id}/assignment`, and moved through validated workflow transitions with `POST /api/v1/tasks/{id}/transitions`. Mutations require a reason and create immutable audit events. Project human-review policy requires a human-controlled transition through `HUMAN_REVIEW` before `DONE`. The API has no caller authentication: requests are attributed to a fixed local API actor and the service binds only to loopback, so other same-host processes share that authority.
 
+Each task has a persisted conversation. `GET` and `POST /api/v1/tasks/{id}/messages` retrieve history or append a message with an opaque content payload, content type, and JSON metadata. The API assigns the sender as `local-api`; it rejects caller-supplied sender identity. Agent messages are accepted only from the agent assigned to that task, and Brain messages only from the project's active Brain. Common secret patterns and sensitive metadata fields are redacted before storage and return. Human user authentication and per-user project membership are not implemented yet.
+
 ---
 
 # Tasks

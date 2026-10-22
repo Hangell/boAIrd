@@ -390,6 +390,44 @@ paths:
         '403': { description: Actor lacks the required task capability or human review is required. }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/tasks/{id}/messages:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listTaskMessages
+      summary: Retrieve the task conversation history
+      description: The conversation is created with its task. Message content and metadata are redacted before persistence and return. Sender identity is assigned by the server.
+      responses:
+        '200':
+          description: Conversation and messages ordered by creation time.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createTaskMessage
+      summary: Add a message to a task conversation
+      description: This local API identifies its caller as the fixed local-api principal. Caller-supplied sender identity is rejected; human user authentication is not implemented.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConversationMessage' }
+      responses:
+        '201':
+          description: Message created with redacted content and metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Sender is not authorized for this task. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The project is archived and cannot accept messages. }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/credentials/{id}:
     parameters:
       - name: id
@@ -619,6 +657,34 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/Task' } }
         limit: { type: integer }
         offset: { type: integer }
+    CreateConversationMessage:
+      type: object
+      additionalProperties: false
+      required: [content, content_type]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 1048576, description: Opaque message payload; its interpretation follows content_type. }
+        content_type: { type: string, minLength: 1, maxLength: 128, example: application/json }
+        metadata: { type: object, additionalProperties: true, description: Sensitive keys and common secret patterns are redacted before storage. }
+    ConversationMessage:
+      type: object
+      required: [id, conversation_id, sender_type, sender_id, content, content_type, metadata, created_at]
+      properties:
+        id: { type: string }
+        conversation_id: { type: string }
+        sender_type: { type: string, enum: [USER, AGENT, BRAIN, SYSTEM] }
+        sender_id: { type: string, description: Server-derived sender identity. }
+        content: { type: string, description: Opaque payload with sensitive patterns redacted. }
+        content_type: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    Conversation:
+      type: object
+      required: [id, project_id, task_id, messages]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        task_id: { type: string }
+        messages: { type: array, items: { $ref: '#/components/schemas/ConversationMessage' } }
     CreateAgent:
       type: object
       additionalProperties: false

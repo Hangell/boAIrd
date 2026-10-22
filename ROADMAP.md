@@ -617,6 +617,13 @@ format
 metadata
 ```
 
+## Current implementation
+
+- SQLite creates one conversation for each task, including tasks that existed when the migration is applied.
+- Messages retain opaque content, content type, JSON metadata, sender type/ID, and timestamp; sensitive text and metadata are redacted before persistence.
+- `GET` and `POST /api/v1/tasks/{id}/messages` retrieve task history and add local API messages. The sender identity is set by the server, and callers cannot provide it in JSON.
+- Trusted service calls may add messages from the agent assigned to the task or the active Brain for its project. Human authentication and per-user project membership are not implemented, so the fixed `local-api` identity is a local management principal rather than an authenticated human user.
+
 ## Formats
 
 Do not limit communication to human-readable text.

@@ -2523,6 +2523,14 @@ Message
 conversation history
 ```
 
+The implementation stores one Conversation per Task in SQLite. Messages preserve
+opaque content with a content type and JSON metadata. The service attributes
+local HTTP messages to the server-owned `local-api` principal, checks Agent
+senders against task assignment, and checks Brain senders against the active
+project Brain. Secret-pattern redaction runs before message content and metadata
+are stored. User authentication and per-user project membership remain future
+work; `local-api` is not a verified human identity.
+
 ---
 
 ## `orchestrator`
