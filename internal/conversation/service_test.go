@@ -21,7 +21,11 @@ func TestConversationPersistsStructuredMessagesWithScopedActorsAndRedaction(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	projectRepository, _ := storage.NewProjectRepository(database)
 	projects, err := project.NewManager(projectRepository)

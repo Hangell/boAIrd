@@ -11,7 +11,11 @@ func TestProjectExecutionRequiresExactlyOneActiveBrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	if _, err := database.Exec(`INSERT INTO projects(id, name, status, human_review_required)
 		VALUES ('p1', 'Project', 'CREATED', 1)`); err != nil {

@@ -69,18 +69,20 @@ func (r *CredentialRepository) List(ctx context.Context) ([]credential.Record, e
 	if err != nil {
 		return nil, fmt.Errorf("query credential metadata: %w", err)
 	}
-	defer rows.Close()
 
 	records := make([]credential.Record, 0)
 	for rows.Next() {
 		var record credential.Record
 		if err := rows.Scan(&record.ID, &record.Name, &record.Provider); err != nil {
-			return nil, fmt.Errorf("scan credential metadata: %w", err)
+			return nil, closeRowsAfter(rows, "credential metadata", fmt.Errorf("scan credential metadata: %w", err))
 		}
 		records = append(records, record)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate credential metadata: %w", err)
+		return nil, closeRowsAfter(rows, "credential metadata", fmt.Errorf("iterate credential metadata: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close credential metadata rows: %w", err)
 	}
 	return records, nil
 }

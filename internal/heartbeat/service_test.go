@@ -35,7 +35,11 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	agentRepository, err := storage.NewAgentRepository(database)
 	if err != nil {
@@ -50,7 +54,6 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	values := map[string]string{"agent-one": "External One", "agent-two": "External Two"}
-	ids := make([]string, 0, len(values))
 	for id, name := range values {
 		value, err := agent.NewConfigured(id, agent.Configuration{Name: name, Role: "worker", Runtime: agent.RuntimeMCP})
 		if err != nil {
@@ -59,7 +62,6 @@ func newFixture(t *testing.T) *fixture {
 		if err := agentRepository.Create(ctx, value); err != nil {
 			t.Fatal(err)
 		}
-		ids = append(ids, id)
 	}
 	tokenRepository, err := storage.NewMCPTokenRepository(database)
 	if err != nil {

@@ -102,11 +102,7 @@ func (m *Manager) Events(ctx context.Context, agentID string, limit int) ([]Stat
 }
 
 func (m *Manager) Create(ctx context.Context, input CreateInput) (Agent, error) {
-	configuration := Configuration{
-		Name: input.Name, Avatar: input.Avatar, Description: input.Description, Role: input.Role,
-		Runtime: input.Runtime, Provider: input.Provider, ProviderBaseURL: input.ProviderBaseURL, Model: input.Model, CredentialID: input.CredentialID,
-		Instructions: input.Instructions, LanguagePreferences: input.LanguagePreferences, Capabilities: input.Capabilities,
-	}
+	configuration := Configuration(input)
 	id, err := newID()
 	if err != nil {
 		return Agent{}, fmt.Errorf("generate agent ID: %w", err)

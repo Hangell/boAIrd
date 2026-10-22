@@ -499,9 +499,7 @@ func authorizeAgentCapability(a agent.Agent, projectID, required string, scope [
 		return ErrForbidden
 	}
 	grants := make([]capability.Capability, 0, len(a.Capabilities()))
-	for _, value := range a.Capabilities() {
-		grants = append(grants, value)
-	}
+	grants = append(grants, a.Capabilities()...)
 	if err := (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: grants, ProjectIDs: scope}, grant, projectID); err != nil {
 		return ErrForbidden
 	}

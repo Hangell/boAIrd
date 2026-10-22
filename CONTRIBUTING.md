@@ -924,15 +924,42 @@ final final
 
 # Go Contribution Guidelines
 
-Follow standard Go conventions.
+Follow standard Go conventions. The repository pins `golangci-lint` in
+`.golangci-lint-version` and uses its standard linter set, including
+`errcheck`, `govet`, `staticcheck`, `ineffassign`, and `unused`. CI and the
+pre-commit hook run the full-repository analysis, so every committed file must
+be lint-clean.
 
-Always format Go code with:
+Install the pinned linter binary using the official installer:
 
 ```bash
-gofmt
+curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "$(go env GOPATH)/bin" "$(cat .golangci-lint-version)"
 ```
 
-Before submitting:
+Lefthook is pinned as a Go tool in `go.mod`. Install the Git hooks after cloning
+or switching to this repository:
+
+```bash
+go tool lefthook install
+```
+
+Before committing, Lefthook formats staged Go files with `gofmt`, stages the
+formatted files, and runs the full linter. If the linter reports an
+issue, fix it before committing. To run the full analysis manually:
+
+```bash
+golangci-lint run
+```
+
+The `gofmt` hook uses `stage_fixed`, so only the formatted version of the staged
+hunks is added back to the index. Unstaged changes in the same file are
+preserved and are never silently staged into the commit. The pinned Lefthook
+version includes the upstream fixes for partial staging, and
+`scripts/verify-lefthook-partial-stage.sh` reproduces this guarantee with a
+partially staged Go file. CI runs that script as the `Lefthook partial staging`
+job.
+
+Always format Go code with `gofmt`. Before submitting, run:
 
 ```bash
 gofmt -w .
@@ -970,13 +997,15 @@ go test -race ./...
 
 # Continuous Integration
 
-Pull requests targeting `main` run the Go checks, Angular tests/builds, OpenAPI
-YAML parsing, and a changed-line whitespace check in GitHub Actions. The
-workflow uses the versions from `go.mod` and `web/package-lock.json` and does
-not require repository secrets.
+Pull requests targeting `main` run the Go checks, full `golangci-lint`
+analysis, Angular tests/builds, OpenAPI YAML parsing, and a changed-line
+whitespace check in GitHub Actions. The workflow uses the versions from
+`go.mod` and `web/package-lock.json` and does not require repository secrets.
 
-The job checks are named `CI / Go`, `CI / Angular`, `CI / OpenAPI`, and
-`CI / Diff whitespace`. Repository branch protection or a ruleset must require
+The job checks are named `CI / golangci-lint`, `CI / Lefthook partial staging`,
+`CI / Go`, `CI / Angular`,
+`CI / OpenAPI`, and `CI / Diff whitespace`. Repository branch protection or a
+ruleset must require
 these checks to block merges when a job fails; the workflow itself cannot turn
 on repository protection settings.
 
@@ -984,6 +1013,7 @@ Run the same checks locally with:
 
 ```bash
 gofmt -w .
+golangci-lint run
 go vet ./...
 go test ./...
 go test -race ./...

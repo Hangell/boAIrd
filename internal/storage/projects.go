@@ -50,18 +50,20 @@ func (r *ProjectRepository) List(ctx context.Context, limit, offset int) ([]proj
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
-	defer rows.Close()
 
 	projects := make([]project.Project, 0)
 	for rows.Next() {
 		value, err := scanProject(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan project: %w", err)
+			return nil, closeRowsAfter(rows, "projects", fmt.Errorf("scan project: %w", err))
 		}
 		projects = append(projects, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate projects: %w", err)
+		return nil, closeRowsAfter(rows, "projects", fmt.Errorf("iterate projects: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close project rows: %w", err)
 	}
 	return projects, nil
 }

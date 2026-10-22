@@ -252,7 +252,7 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
-	defer httpServer.Close()
+	t.Cleanup(httpServer.Close)
 	current := firstToken
 	httpClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return current }, base: http.DefaultTransport}}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
@@ -260,7 +260,11 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	defer session.Close()
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close MCP session: %v", err)
+		}
+	})
 	result, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
@@ -413,7 +417,7 @@ func TestHandlerRejectsMissingOrInvalidBearerToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
-	defer httpServer.Close()
+	t.Cleanup(httpServer.Close)
 	for _, token := range []string{"", "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"} {
 		req, err := http.NewRequest(http.MethodPost, httpServer.URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`))
 		if err != nil {
@@ -428,7 +432,9 @@ func TestHandlerRejectsMissingOrInvalidBearerToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close unauthorized response body: %v", err)
+		}
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("token %q status = %d, want 401", token, resp.StatusCode)
 		}
@@ -444,14 +450,18 @@ func TestRevokedTokenCannotReuseAnExistingSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
-	defer httpServer.Close()
+	t.Cleanup(httpServer.Close)
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 	httpClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return rawToken }, base: http.DefaultTransport}}
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL, HTTPClient: httpClient, DisableStandaloneSSE: true}, nil)
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	defer session.Close()
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close MCP session: %v", err)
+		}
+	})
 	if _, err := session.ListTools(context.Background(), nil); err != nil {
 		t.Fatalf("initial authenticated request failed: %v", err)
 	}
@@ -607,14 +617,18 @@ func TestHeartbeatBindsAuthenticatedIdentityAndRejectsSpoofing(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
-	defer httpServer.Close()
+	t.Cleanup(httpServer.Close)
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 	httpClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return rawToken }, base: http.DefaultTransport}}
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL, HTTPClient: httpClient, DisableStandaloneSSE: true}, nil)
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	defer session.Close()
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close MCP session: %v", err)
+		}
+	})
 
 	// Connecting is authenticated MCP activity, so liveness is refreshed from
 	// the verified credential alone.
