@@ -195,6 +195,7 @@ type taskOutput struct {
 	Priority    string `json:"priority"`
 	AssignedTo  string `json:"assigned_to,omitempty"`
 	HumanReview bool   `json:"human_review"`
+	Version     int64  `json:"version"`
 }
 type conversationReadInput struct {
 	TaskID string `json:"task_id"`
@@ -258,6 +259,9 @@ func toolError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, task.ErrConflict) {
+		return errors.New("task changed concurrently; reload and retry")
+	}
 	return errors.New("operation denied or unavailable")
 }
 func projectInScope(a agent.Agent, projectID string) bool {
@@ -286,7 +290,7 @@ func agentView(a agent.Agent) agentOutput {
 	return agentOutput{ID: a.ID(), Name: a.Name(), Role: a.Role(), Status: string(a.Status()), Runtime: string(a.Runtime()), Capabilities: caps}
 }
 func taskView(t task.Task) taskOutput {
-	return taskOutput{ID: t.ID(), ProjectID: t.ProjectID(), Title: t.Title(), Description: t.Description(), Status: string(t.Status()), Priority: t.Priority(), AssignedTo: t.AssignedTo(), HumanReview: t.HumanReview()}
+	return taskOutput{ID: t.ID(), ProjectID: t.ProjectID(), Title: t.Title(), Description: t.Description(), Status: string(t.Status()), Priority: t.Priority(), AssignedTo: t.AssignedTo(), HumanReview: t.HumanReview(), Version: t.Version()}
 }
 func messageView(m conversation.Message) messageOutput {
 	return messageOutput{ID: m.ID(), SenderType: string(m.SenderType()), SenderID: m.SenderID(), Content: m.Content(), ContentType: m.ContentType(), CreatedAt: m.CreatedAt()}

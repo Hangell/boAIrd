@@ -587,6 +587,8 @@ Create a card and move it through the entire workflow.
 - The task service checks allowed transitions, active project state, agent capabilities for creation/assignment, and the mandatory human-review gate before completion.
 - The local HTTP API supports task create/list/get, assignment, and status transitions. Each mutation requires an audit reason; callers cannot supply actor identity through request JSON.
 - SQLite records immutable task creation, assignment, and status-change audit events. Integration tests cover capability denial, the complete review workflow, invalid terminal transitions, and audit attribution.
+- Task mutations use persisted optimistic versions; stale assignment or transition writes return a conflict and cannot overwrite newer state or create duplicate audit decisions.
+- REST and MCP task results expose the current version and tell callers to reload and retry after a concurrent update conflict.
 - REST routes require the local administrator bearer token or HttpOnly session cookie (health/status remain public). Each route declares a capability; project-scoped operations check `project_members`. Task services reject the legacy local actor and require explicit grants. Authorization denials are stored immutably. The MCP adapter is implemented as a separate authenticated endpoint and uses explicit Agent capabilities, project scope, or exact task assignment before invoking the same domain services.
 
 ---

@@ -333,3 +333,10 @@ func decodeToken(t *testing.T, value string) [32]byte {
 	copy(out[:], decoded)
 	return out
 }
+
+func TestToolErrorReportsTaskConflictRetryGuidance(t *testing.T) {
+	err := toolError(task.ErrConflict)
+	if err == nil || err.Error() != "task changed concurrently; reload and retry" {
+		t.Fatalf("toolError(ErrConflict) = %v, want safe retry guidance", err)
+	}
+}

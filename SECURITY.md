@@ -393,6 +393,10 @@ with a required rationale. Immutable events record the reviewer, timestamp,
 decision (`task.human_review.approved` or `task.human_review.rejected`), and
 rationale. Brain and worker actors cannot bypass a pending review.
 
+Task updates use optimistic version checks. If two actors mutate the same task
+from the same prior state, only the first write succeeds; the stale write is
+rejected without recording a second status or Human Review decision.
+
 ---
 
 # Critical Actions
