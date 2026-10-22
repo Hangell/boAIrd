@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/api"
@@ -12,6 +13,7 @@ import (
 	"boAIrd/internal/config"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
+	"boAIrd/internal/mcpserver"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/storage"
@@ -25,6 +27,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	}
 	defer clear(cfg.MasterKey[:])
 	defer clear(cfg.LocalAuthToken[:])
+	defer func() {
+		for i := range cfg.MCPAgentTokens {
+			clear(cfg.MCPAgentTokens[i].Token[:])
+		}
+	}()
 
 	database, err := storage.OpenSQLite(ctx, cfg.DatabasePath)
 	if err != nil {
@@ -93,7 +100,16 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize conversation service: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithConversations(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:]), logger); err != nil {
+	var mcpHandler http.Handler
+	if len(cfg.MCPAgentTokens) > 0 {
+		mcp, err := mcpserver.New(ctx, mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Conversations: conversationService, Brains: brainService, Runs: runManager}, cfg.MCPAgentTokens)
+		if err != nil {
+			return fmt.Errorf("initialize MCP server: %w", err)
+		}
+		mcpHandler = mcp.Handler()
+		logger.Info("MCP endpoint enabled", "path", "/mcp", "registered_agents", len(cfg.MCPAgentTokens))
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithConversations(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpHandler), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

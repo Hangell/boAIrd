@@ -587,7 +587,7 @@ Create a card and move it through the entire workflow.
 - The task service checks allowed transitions, active project state, agent capabilities for creation/assignment, and the mandatory human-review gate before completion.
 - The local HTTP API supports task create/list/get, assignment, and status transitions. Each mutation requires an audit reason; callers cannot supply actor identity through request JSON.
 - SQLite records immutable task creation, assignment, and status-change audit events. Integration tests cover capability denial, the complete review workflow, invalid terminal transitions, and audit attribution.
-- REST routes require the local administrator bearer token or HttpOnly session cookie (health/status remain public). Each route declares a capability; project-scoped operations check `project_members`. Task services reject the legacy local actor and require explicit grants. Authorization denials are stored immutably. MCP and tool entry points are not yet executable and must use this authorizer when introduced.
+- REST routes require the local administrator bearer token or HttpOnly session cookie (health/status remain public). Each route declares a capability; project-scoped operations check `project_members`. Task services reject the legacy local actor and require explicit grants. Authorization denials are stored immutably. The MCP adapter is implemented as a separate authenticated endpoint and uses explicit Agent capabilities, project scope, or exact task assignment before invoking the same domain services.
 
 ---
 
@@ -955,7 +955,7 @@ Role != Permission
 - Authorization denies by default, independent of role labels or UI state.
 - Project-scoped reads and writes require local administrator project membership.
 - Denials fail closed and create immutable audit records.
-- The capability package is reusable by future MCP and tool adapters; neither adapter is currently executable.
+- The capability package is used by REST and MCP entry points; tool-level tests cover MCP authentication, session identity binding, and scoped operations.
 - Tests cover explicit grants, missing grants, anonymous REST access, and cross-project denial.
 
 ## Current implementation
@@ -963,7 +963,7 @@ Role != Permission
 - The local bearer token authenticates every `/api/v1` route except status; the browser exchanges it for a SameSite=Strict HttpOnly cookie.
 - Route policies map project, credential, agent, Brain, run, task, and conversation operations to explicit capabilities. Project-scoped routes validate the single administrator's membership before invoking managers.
 - Task services independently require explicit capabilities and project scope for administrator actors, check active Brain/agent grants, reject the legacy unprivileged local actor, and audit denied operations.
-- The API records denied requests in an immutable SQLite table. No MCP server or tool executor is wired yet.
+- The API records denied requests in an immutable SQLite table. MCP Agent task mutations also use the task service, which records authorization denials and transition audit events.
 
 A Backend agent may have:
 
@@ -1093,6 +1093,7 @@ boaird.project.get
 
 boaird.agent.list
 boaird.agent.get
+boaird.agent.status
 
 boaird.task.list
 boaird.task.get
@@ -1105,6 +1106,8 @@ boaird.conversation.read
 boaird.conversation.send
 
 boaird.context.get
+boaird.brain.request
+boaird.run.get
 ```
 
 ## Criteria
@@ -1122,6 +1125,15 @@ send update
 ↓
 complete task
 ```
+
+## Current implementation
+
+- `/mcp` uses authenticated Streamable HTTP and is disabled unless `BOAIRD_MCP_AGENT_TOKENS` maps bearer tokens to existing Agents.
+- The authenticated token determines Agent identity; stateful MCP sessions reject requests authenticated as a different Agent.
+- Tools use explicit capabilities and project scope. Task assignment grants access only to that assigned task; MCP cannot self-assign.
+- Task transitions, Human Review checks, conversation access, and Brain autonomy rules remain enforced by domain services.
+- Tokens are static process configuration and become invalid after replacement plus restart. MCP sessions idle for 30 minutes are closed.
+- Integration tests cover authentication, session binding, task-completion policy, and assigned-Agent conversation scope.
 
 ---
 

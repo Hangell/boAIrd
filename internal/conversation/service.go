@@ -70,6 +70,25 @@ func NewService(repository Repository, tasks TaskReader, projects ProjectReader,
 }
 
 func (s *Service) GetPage(ctx context.Context, taskID, userID, before string, limit int) (Conversation, []Message, string, error) {
+	return s.getPage(ctx, taskID, before, limit, func(work task.Task) error {
+		return s.authorizeProjectMember(ctx, work.ProjectID(), userID)
+	})
+}
+
+// GetPageForAgent grants an Agent access only to a task assigned to that Agent.
+func (s *Service) GetPageForAgent(ctx context.Context, taskID, agentID, before string, limit int) (Conversation, []Message, string, error) {
+	return s.getPage(ctx, taskID, before, limit, func(work task.Task) error {
+		if strings.TrimSpace(agentID) == "" || work.AssignedTo() != strings.TrimSpace(agentID) {
+			return ErrForbidden
+		}
+		if _, err := s.agents.Get(ctx, agentID); err != nil {
+			return ErrForbidden
+		}
+		return nil
+	})
+}
+
+func (s *Service) getPage(ctx context.Context, taskID, before string, limit int, authorize func(task.Task) error) (Conversation, []Message, string, error) {
 	if limit == 0 {
 		limit = defaultMessagePageSize
 	}
@@ -80,7 +99,7 @@ func (s *Service) GetPage(ctx context.Context, taskID, userID, before string, li
 	if err != nil {
 		return Conversation{}, nil, "", mapTaskError(err)
 	}
-	if err := s.authorizeProjectMember(ctx, work.ProjectID(), userID); err != nil {
+	if err := authorize(work); err != nil {
 		return Conversation{}, nil, "", err
 	}
 	value, err := s.repository.GetByTask(ctx, work.ID())

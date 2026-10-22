@@ -1680,6 +1680,22 @@ The MCP layer must remain an adapter over boAIrd domain services.
 
 It must not contain business logic that only exists inside MCP.
 
+The optional `/mcp` endpoint uses the official Go SDK Streamable HTTP
+transport. It is enabled by a server-side mapping from unique bearer tokens to
+existing Agent IDs. The authenticated Agent ID comes from token verification,
+never from tool arguments, and each stateful MCP session is bound to that ID.
+Tokens are configured through `BOAIRD_MCP_AGENT_TOKENS` and are held only in
+process memory. The current static tokens have no individual expiry; rotate
+them by changing configuration and restarting the service. Idle MCP sessions
+expire after 30 minutes.
+
+Each tool checks explicit capabilities and project scope, with task assignment
+providing scope only for that exact assigned task. The MCP adapter calls
+existing project, task, conversation, Brain, and run services. Claim means
+starting work on a task already assigned by an authorized administrator or
+Brain; an MCP Agent cannot assign a task to itself. Agent completion requires
+`task.complete` and the existing task workflow and Human Review policy.
+
 ---
 
 # 69. MCP Architecture
@@ -2561,8 +2577,10 @@ administrator membership. Message history is bounded and cursor-paginated. The
 service checks Agent senders against task assignment and Brain senders against the
 active project Brain. Secret-pattern redaction runs before message content and
 metadata are stored. Multi-user identity and membership management remain future
-work. No executable MCP server or tool executor is currently connected; future
-adapters must use the same capability authorizer and project scope checks.
+work. The MCP server is an executable adapter over these services. Its Agent
+tokens are registered in configuration and its tool calls apply explicit
+capabilities, project scope, or exact task-assignment checks before accessing
+project, task, conversation, Brain, or run data.
 
 ---
 
