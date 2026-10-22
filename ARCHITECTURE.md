@@ -2974,6 +2974,36 @@ RabbitMQ
 
 The Orchestrator should depend on an abstraction rather than a specific distributed queue.
 
+## Decision gate
+
+A distributed queue is gated on measured need, not on architectural availability.
+Until [ADR 0001](docs/adr/0001-gate-distributed-workers.md) is approved by a
+maintainer:
+
+```text
+no broker
+no queue service
+no distributed worker runtime
+```
+
+Execution remains pull-based over MCP. Task state is owned by one process and
+serialized by SQLite's single writer connection, so the current bound is
+structural: synchronous handlers, one write connection, and no background
+execution pool. The trigger criteria and the measurements behind them live in
+the ADR; the reproduction tool is `tests/load`.
+
+When the gate trips, the response order is fixed:
+
+```text
+measure again
+    ↓
+optimize the single node
+    ↓
+Phase 36 (PostgreSQL)
+    ↓
+broker / distributed runtime
+```
+
 ---
 
 # 111. Scalability Strategy
@@ -2993,6 +3023,12 @@ Distributed Runtime
 ```
 
 Scaling should happen incrementally.
+
+The distributed queue and distributed runtime steps are gated by
+[ADR 0001](docs/adr/0001-gate-distributed-workers.md): they are not implemented
+until measurements show the single-process design cannot carry the workload, and
+the ADR is approved. Pull-based external Agents are already supported today and
+are not part of that gate.
 
 ---
 
