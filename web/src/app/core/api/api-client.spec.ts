@@ -1,4 +1,4 @@
-import { provideHttpClient } from '@angular/common/http';
+import { HttpClient, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -78,6 +78,24 @@ describe('ApiClient', () => {
     expect(request.request.withCredentials).toBe(true);
     expect(request.request.body).toEqual({});
     request.flush(null, { status: 204, statusText: 'No Content' });
+
+    client.get('tasks').subscribe();
+    const dashboardRequest = http.expectOne('http://127.0.0.1:3110/tasks');
+    expect(dashboardRequest.request.headers.has('Authorization')).toBe(false);
+    expect(dashboardRequest.request.withCredentials).toBe(true);
+    dashboardRequest.flush({});
+  });
+
+  it('does not attach administrator credentials to requests outside the API client', () => {
+    client.createLocalSession('admin-token').subscribe();
+    http.expectOne('http://127.0.0.1:3110/session').flush(null, { status: 204, statusText: 'No Content' });
+
+    TestBed.inject(HttpClient).get('https://third-party.example/data').subscribe();
+
+    const request = http.expectOne('https://third-party.example/data');
+    expect(request.request.headers.has('Authorization')).toBe(false);
+    expect(request.request.withCredentials).toBe(false);
+    request.flush({});
   });
 
   it('appends pagination parameters after existing filters', () => {
