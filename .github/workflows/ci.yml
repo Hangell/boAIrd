@@ -35,6 +35,23 @@ jobs:
         with:
           version-file: .golangci-lint-version
 
+  lefthook-partial-stage:
+    name: Lefthook partial staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify staged-only formatting
+        run: bash scripts/verify-lefthook-partial-stage.sh
+
   go:
     name: Go
     runs-on: ubuntu-24.04

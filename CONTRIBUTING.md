@@ -926,10 +926,9 @@ final final
 
 Follow standard Go conventions. The repository pins `golangci-lint` in
 `.golangci-lint-version` and uses its standard linter set, including
-`errcheck`, `govet`, `staticcheck`, `ineffassign`, and `unused`. CI checks
-findings on changed lines; the pre-commit hook analyzes staged Go changes since
-`HEAD`. Existing findings outside changed lines remain a baseline for separate
-cleanup tasks.
+`errcheck`, `govet`, `staticcheck`, `ineffassign`, and `unused`. CI and the
+pre-commit hook run the full-repository analysis, so every committed file must
+be lint-clean.
 
 Install the pinned linter binary using the official installer:
 
@@ -951,6 +950,14 @@ issue, fix it before committing. To run the full analysis manually:
 ```bash
 golangci-lint run
 ```
+
+The `gofmt` hook uses `stage_fixed`, so only the formatted version of the staged
+hunks is added back to the index. Unstaged changes in the same file are
+preserved and are never silently staged into the commit. The pinned Lefthook
+version includes the upstream fixes for partial staging, and
+`scripts/verify-lefthook-partial-stage.sh` reproduces this guarantee with a
+partially staged Go file. CI runs that script as the `Lefthook partial staging`
+job.
 
 Always format Go code with `gofmt`. Before submitting, run:
 
@@ -995,7 +1002,8 @@ analysis, Angular tests/builds, OpenAPI YAML parsing, and a changed-line
 whitespace check in GitHub Actions. The workflow uses the versions from
 `go.mod` and `web/package-lock.json` and does not require repository secrets.
 
-The job checks are named `CI / golangci-lint`, `CI / Go`, `CI / Angular`,
+The job checks are named `CI / golangci-lint`, `CI / Lefthook partial staging`,
+`CI / Go`, `CI / Angular`,
 `CI / OpenAPI`, and `CI / Diff whitespace`. Repository branch protection or a
 ruleset must require
 these checks to block merges when a job fails; the workflow itself cannot turn
