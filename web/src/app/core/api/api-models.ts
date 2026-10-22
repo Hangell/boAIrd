@@ -20,6 +20,7 @@ export interface TaskSummary {
   status: string;
   priority: string;
   assigned_to?: string;
+  updated_at?: string;
 }
 
 export interface TaskAuditEvent {
@@ -128,7 +129,23 @@ export interface RunSummary {
   project_id: string;
   task_id?: string;
   agent_id: string;
+  runtime?: string;
   model: string;
   status: string;
+  started_at?: string;
+  finished_at?: string;
+  input?: string;
   output?: string;
+  error?: string;
+  audit_events?: RunAuditEvent[];
+}
+
+export interface RunAuditEvent {
+  id: string;
+  event_type: string;
+  actor_type: string;
+  actor_id: string;
+  from_status?: string;
+  to_status?: string;
+  created_at: string;
 }
