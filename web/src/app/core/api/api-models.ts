@@ -55,6 +55,7 @@ export interface TaskConversation {
   project_id: string;
   task_id: string;
   messages: TaskConversationMessage[];
+  next_before?: string;
 }
 
 export interface AgentSummary {

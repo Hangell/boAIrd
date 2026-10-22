@@ -8,7 +8,7 @@ import { ApiPage, RunSummary, TaskConversation, TaskDetail } from '../../core/ap
 
 interface TaskDetailData {
   task: TaskDetail;
-  conversation: TaskConversation;
+  conversation: TaskConversation | null;
   runs: RunSummary[];
 }
 
@@ -65,7 +65,12 @@ interface TaskDetailData {
 
         <section class="detail-card" aria-labelledby="conversation-heading">
           <h2 id="conversation-heading" i18n="@@taskDetail.conversationHeading">Conversation</h2>
-          @if (detail.conversation.messages.length > 0) {
+          @if (detail.conversation) {
+            @if (detail.conversation.next_before) {
+              <button class="button older-button" type="button" [disabled]="loadingOlder()" (click)="loadOlderMessages()" i18n="@@taskDetail.loadOlder">{{ loadingOlder() ? loadingLabel : loadOlderLabel }}</button>
+            }
+            @if (olderError()) { <p class="notice notice-error" role="alert" i18n="@@taskDetail.olderError">Older messages could not be loaded. Try again.</p> }
+            @if (detail.conversation.messages.length > 0) {
             <ol class="message-list">
               @for (message of detail.conversation.messages; track message.id) {
                 <li>
@@ -81,8 +86,12 @@ interface TaskDetailData {
                 </li>
               }
             </ol>
-          } @else {
+            } @else {
             <p class="secondary" i18n="@@taskDetail.noMessages">No messages have been added to this conversation.</p>
+            }
+          } @else {
+            <p class="notice notice-error" role="alert"><span i18n="@@taskDetail.conversationAuthError">The conversation could not be loaded. Configure or update the local administrator token in </span><a routerLink="/settings" i18n="@@taskDetail.settingsLink">Settings</a>.</p>
+            <button class="button" type="button" [disabled]="loadingConversation()" (click)="retryConversation()" i18n="@@taskDetail.retryConversation">{{ loadingConversation() ? loadingLabel : retryConversationLabel }}</button>
           }
         </section>
 
@@ -130,6 +139,7 @@ interface TaskDetailData {
     .notice { background: var(--boaird-surface); border: 1px solid var(--boaird-border); border-radius: .9rem; color: var(--boaird-muted); padding: 1.25rem; }
     .notice-error { border-color: var(--boaird-danger); }
     .button { background: var(--boaird-ink); border: 0; border-radius: .5rem; color: var(--boaird-on-ink); cursor: pointer; font: inherit; font-weight: 700; padding: .65rem 1rem; }
+    .older-button { margin-bottom: .75rem; }
   `,
 })
 export class TaskDetailComponent implements OnInit {
@@ -140,7 +150,13 @@ export class TaskDetailComponent implements OnInit {
 
   protected readonly state = signal<'loading' | 'error' | 'loaded'>('loading');
   protected readonly data = signal<TaskDetailData | null>(null);
+  protected readonly loadingOlder = signal(false);
+  protected readonly loadingConversation = signal(false);
+  protected readonly olderError = signal(false);
   protected readonly projectId = signal('');
+  protected readonly loadingLabel = $localize`:@@common.loading:Loading…`;
+  protected readonly loadOlderLabel = $localize`:@@taskDetail.loadOlderLabel:Load older messages`;
+  protected readonly retryConversationLabel = $localize`:@@taskDetail.retryConversationLabel:Retry conversation`;
   protected readonly emptyDescription = $localize`:@@taskDetail.emptyDescription:No description provided.`;
 
   ngOnInit(): void {
@@ -165,12 +181,16 @@ export class TaskDetailComponent implements OnInit {
 
   private loadTask(taskId: string) {
     this.state.set('loading');
+    this.loadingOlder.set(false);
+    this.loadingConversation.set(false);
+    this.olderError.set(false);
     if (!taskId) return of(null);
     const encodedID = encodeURIComponent(taskId);
+    this.olderError.set(false);
     return this.api.get<TaskDetail>(`tasks/${encodedID}`).pipe(
       switchMap((task) => forkJoin({
         task: of(task),
-        conversation: this.api.get<TaskConversation>(`tasks/${encodedID}/messages`),
+        conversation: this.api.get<TaskConversation>(`tasks/${encodedID}/messages?limit=50`).pipe(catchError(() => of(null))),
         runs: this.api.get<ApiPage<RunSummary>>(`projects/${encodeURIComponent(task.project_id)}/runs?task_id=${encodeURIComponent(taskId)}&limit=10&offset=0`).pipe(map((page) => page.items)),
       })),
       map((data): TaskDetailData | null => data),
@@ -186,5 +206,52 @@ export class TaskDetailComponent implements OnInit {
     }
     this.data.set(data);
     this.state.set('loaded');
+  }
+
+  protected loadOlderMessages(): void {
+    const current = this.data();
+    const taskID = this.taskId;
+    const cursor = current?.conversation?.next_before;
+    if (!current || !cursor || this.loadingOlder()) return;
+
+    this.loadingOlder.set(true);
+    this.olderError.set(false);
+    const path = `tasks/${encodeURIComponent(this.taskId)}/messages?limit=50&before=${encodeURIComponent(cursor)}`;
+    this.api.get<TaskConversation>(path).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (older) => {
+        const latest = this.data();
+        if (!latest?.conversation || latest.task.id !== taskID) {
+          this.loadingOlder.set(false);
+          return;
+        }
+        const knownIDs = new Set(latest.conversation.messages.map((message) => message.id));
+        const messages = [...older.messages.filter((message) => !knownIDs.has(message.id)), ...latest.conversation.messages];
+        this.data.set({
+          ...latest,
+          conversation: { ...latest.conversation, messages, next_before: older.next_before },
+        });
+        this.loadingOlder.set(false);
+      },
+      error: () => {
+        if (this.data()?.task.id === taskID) this.olderError.set(true);
+        this.loadingOlder.set(false);
+      },
+    });
+  }
+
+  protected retryConversation(): void {
+    const current = this.data();
+    if (!current || this.loadingConversation()) return;
+    this.loadingConversation.set(true);
+    this.api.get<TaskConversation>(`tasks/${encodeURIComponent(current.task.id)}/messages?limit=50`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (conversation) => {
+          const latest = this.data();
+          if (latest?.task.id === current.task.id) this.data.set({ ...latest, conversation });
+          this.loadingConversation.set(false);
+        },
+        error: () => this.loadingConversation.set(false),
+      });
   }
 }

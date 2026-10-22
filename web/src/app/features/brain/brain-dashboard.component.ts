@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { catchError, forkJoin, map, of, switchMap, throwError } from 'rxjs';
 import { ApiClient } from '../../core/api/api-client';
+import { LocalAuthService } from '../../core/auth/local-auth.service';
 import { ApiPage, BrainAgent, BrainConfiguration, BrainSummary, ProjectSummary, RunSummary, TaskSummary } from '../../core/api/api-models';
 
 type DashboardState = 'loading' | 'error' | 'empty' | 'ready';
@@ -54,9 +55,9 @@ const autonomyModes: BrainConfiguration['autonomy'][] = ['MANUAL', 'SEMI_AUTO', 
           @for (mode of autonomyOptions; track mode) { <option [value]="mode">{{ mode }}</option> }
         </select></label>
         @if (brain()) {
-          <label><span i18n="@@brainDashboard.adminToken">Local administrator bearer token</span><input name="adminToken" type="password" autocomplete="off" required [(ngModel)]="adminToken"></label>
+          @if (!auth.configured()) { <p class="field-note"><a routerLink="/settings" i18n="@@brainDashboard.configureToken">Set the local administrator token in Settings before replacing the Brain.</a></p> }
           <label><span i18n="@@brainDashboard.reason">Replacement reason</span><textarea name="reason" required maxlength="1000" rows="3" [(ngModel)]="replacementReason"></textarea></label>
-          <p class="field-note" i18n="@@brainDashboard.tokenHint">The token is sent only with this replacement request and is cleared after the response. It is not saved in browser storage.</p>
+          <p class="field-note" i18n="@@brainDashboard.tokenHint">The token is held in memory and sent only to the configured local API. It is not saved in browser storage.</p>
         }
         @if (validationError()) { <p class="notice notice-error" role="alert">{{ validationError() }}</p> }
         @if (saveError()) { <p class="notice notice-error" role="alert" i18n="@@brainDashboard.saveError">Brain configuration could not be saved. Check agent eligibility, administrator authorization, and the replacement reason. Internal server details are hidden.</p> }
@@ -103,6 +104,7 @@ const autonomyModes: BrainConfiguration['autonomy'][] = ['MANUAL', 'SEMI_AUTO', 
 })
 export class BrainDashboardComponent implements OnInit {
   private readonly api = inject(ApiClient);
+  protected readonly auth = inject(LocalAuthService);
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly state = signal<DashboardState>('loading');
@@ -119,7 +121,6 @@ export class BrainDashboardComponent implements OnInit {
   protected readonly saveError = signal(false);
   protected readonly saved = signal(false);
   protected readonly saving = signal(false);
-  protected adminToken = '';
   protected replacementReason = '';
   protected readonly autonomyOptions = autonomyModes;
   protected readonly inactiveLabel = $localize`:@@brainDashboard.agentStatusUnknown:Status unavailable`;
@@ -182,19 +183,19 @@ export class BrainDashboardComponent implements OnInit {
     if (!this.eligibleAgents().some((agent) => agent.id === this.configuration.agent_id)) {
       this.validationError.set($localize`:@@brainDashboard.invalidAgent:Choose an API agent with the explicit brain.execute capability.`); return;
     }
-    if (this.brain() && (!this.adminToken.trim() || !this.replacementReason.trim())) {
-      this.validationError.set($localize`:@@brainDashboard.authRequired:Provide the local administrator token and a reason to replace the Brain.`); return;
+    if (this.brain() && (!this.auth.configured() || !this.replacementReason.trim())) {
+      this.validationError.set($localize`:@@brainDashboard.authRequired:Set the local administrator token in Settings and provide a replacement reason.`); return;
     }
     const body = { ...this.configuration };
     const request = this.brain()
-      ? this.api.putWithBearer<BrainConfiguration & { reason: string }, BrainSummary>(
-        `projects/${encodeURIComponent(this.projectId())}/brain`, { ...body, reason: this.replacementReason.trim() }, this.adminToken.trim(),
+      ? this.api.put<BrainConfiguration & { reason: string }, BrainSummary>(
+        `projects/${encodeURIComponent(this.projectId())}/brain`, { ...body, reason: this.replacementReason.trim() },
       )
       : this.api.post<BrainConfiguration, BrainSummary>(`projects/${encodeURIComponent(this.projectId())}/brain`, body);
     this.saving.set(true);
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (brain) => { this.brain.set(brain); this.adminToken = ''; this.replacementReason = ''; this.saved.set(true); this.saving.set(false); this.selectProject(this.projectId()); },
-      error: () => { this.adminToken = ''; this.saveError.set(true); this.saving.set(false); },
+      next: (brain) => { this.brain.set(brain); this.replacementReason = ''; this.saved.set(true); this.saving.set(false); this.selectProject(this.projectId()); },
+      error: () => { this.saveError.set(true); this.saving.set(false); },
     });
   }
 

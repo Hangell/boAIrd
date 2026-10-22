@@ -105,7 +105,7 @@ export const routes: Routes = [
   },
   {
     path: 'settings',
-    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
+    loadComponent: () => import('./features/settings/local-auth-settings.component').then((module) => module.LocalAuthSettingsComponent),
     title: $localize`:@@page.settings.title:Settings`,
     data: {
       title: $localize`:@@page.settings.heading:Settings`,
