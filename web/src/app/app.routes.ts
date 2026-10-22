@@ -94,9 +94,10 @@ export const routes: Routes = [
   {
     path: 'runs',
     canActivate: [localSessionGuard],
-    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
+    loadComponent: () => import('./features/observability/observability.component').then((module) => module.ObservabilityComponent),
     title: $localize`:@@page.runs.title:Runs`,
     data: {
+      view: 'runs',
       title: $localize`:@@page.runs.heading:Run history`,
       description: $localize`:@@page.runs.description:Review model execution status and outputs.`,
     },
@@ -104,9 +105,10 @@ export const routes: Routes = [
   {
     path: 'logs',
     canActivate: [localSessionGuard],
-    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
+    loadComponent: () => import('./features/observability/observability.component').then((module) => module.ObservabilityComponent),
     title: $localize`:@@page.logs.title:Logs`,
     data: {
+      view: 'logs',
       title: $localize`:@@page.logs.heading:Activity logs`,
       description: $localize`:@@page.logs.description:Inspect project and task activity.`,
     },
