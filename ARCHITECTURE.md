@@ -2541,8 +2541,11 @@ accessing project-scoped resources. Task mutations receive a server-derived
 administrator actor with explicit capability grants; caller JSON cannot set an
 actor. Authorization denials are written to an immutable SQLite audit table.
 The browser exchanges the token at `/api/v1/session`, keeps it out of persistent
-application storage, and uses a SameSite=Strict HttpOnly cookie. The cookie
-mutation path checks a fixed dashboard-origin allowlist. Brain replacement also
+application storage, and receives a SameSite=Strict HttpOnly cookie containing
+a random opaque session ID. The server stores the ID and its 30-minute expiry in
+memory; logout revokes it, and service restart invalidates all sessions. The
+cookie mutation path checks a fixed dashboard-origin allowlist, including logout.
+Direct Bearer authentication remains available to local API clients. Brain replacement also
 records its required reason in the existing immutable project audit stream.
 
 ---

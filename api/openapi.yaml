@@ -7,8 +7,10 @@ info:
     remote mode exists, the server binds only to a loopback IP address. Every
     operation requires the local administrator bearer token unless an endpoint
     explicitly documents otherwise. After POST /api/v1/session, same-origin
-    browser clients may use the HttpOnly session cookie instead of retaining
-    the token in application storage. The server evaluates a required
+    browser clients may use a short-lived opaque HttpOnly session cookie instead
+    of retaining the token in application storage. Session identifiers are stored
+    in memory by the server, expire after 30 minutes, and are revoked at logout
+    or service restart. The server evaluates a required
     capability and project membership for each operation.
 servers:
   - url: http://127.0.0.1:3110
@@ -20,11 +22,11 @@ paths:
     post:
       operationId: createLocalSession
       summary: Exchange the local administrator token for a browser session cookie
-      description: Accepts the configured token in the Authorization header and sets an HttpOnly, SameSite=Strict cookie. The token is not returned or persisted by the server.
+      description: Accepts the configured token in the Authorization header and sets an HttpOnly, SameSite=Strict cookie containing a random opaque session identifier. The identifier is stored server-side, expires after 30 minutes, and is not the administrator token.
       security:
         - localBearerAuth: []
       responses:
-        '204': { description: Session cookie created. }
+        '204': { description: A 30-minute browser session cookie was created. }
         '401': { description: Missing or invalid local administrator bearer token. }
     get:
       operationId: getLocalSession
@@ -37,8 +39,9 @@ paths:
         '401': { description: Missing or invalid local administrator credentials. }
     delete:
       operationId: deleteLocalSession
-      summary: Clear the browser session cookie
+      summary: Revoke the current browser session and clear its cookie
       security: []
+      description: If a browser session cookie is present, a trusted dashboard Origin is required and that session is revoked. This endpoint clears the client cookie; it does not revoke the configured direct Bearer credential.
       responses:
         '204': { description: Session cookie cleared. }
   /api/v1/projects:
@@ -639,6 +642,7 @@ components:
       type: apiKey
       in: cookie
       name: boaird_local_auth
+      description: Random opaque session identifier issued for 30 minutes and validated against server-side in-memory state.
   schemas:
     CreateBrain:
       type: object

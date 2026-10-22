@@ -47,8 +47,15 @@ func TestLocalSessionExchangesBearerForHttpOnlyCookie(t *testing.T) {
 		t.Fatalf("session status = %d, body = %s", loginResponse.Code, loginResponse.Body.String())
 	}
 	cookies := loginResponse.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != localAuthCookieName || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
-		t.Fatalf("session cookie = %+v, expected HttpOnly SameSite=Strict cookie", cookies)
+	if len(cookies) != 1 || cookies[0].Name != localAuthCookieName || cookies[0].Value == testLocalAuthToken || len(cookies[0].Value) != localSessionIDLength || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode || cookies[0].MaxAge != int(localSessionLifetime.Seconds()) {
+		t.Fatalf("session cookie = %+v, expected opaque HttpOnly SameSite=Strict cookie with bounded lifetime", cookies)
+	}
+	validate := httptest.NewRequest(http.MethodGet, "http://localhost:3110/api/v1/session", nil)
+	validate.AddCookie(cookies[0])
+	validateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(validateResponse, validate)
+	if validateResponse.Code != http.StatusNoContent {
+		t.Fatalf("cookie session validation status = %d, body = %s", validateResponse.Code, validateResponse.Body.String())
 	}
 	projectRead := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
 	projectRead.AddCookie(cookies[0])
@@ -65,11 +72,66 @@ func TestLocalSessionExchangesBearerForHttpOnlyCookie(t *testing.T) {
 	if csrfResponse.Code != http.StatusForbidden {
 		t.Fatalf("cross-site cookie mutation status = %d, body = %s", csrfResponse.Code, csrfResponse.Body.String())
 	}
-	logout := httptest.NewRequest(http.MethodDelete, "/api/v1/session", nil)
+	logout := httptest.NewRequest(http.MethodDelete, "http://localhost:3110/api/v1/session", nil)
+	logout.AddCookie(cookies[0])
+	logout.Header.Set("Origin", "http://localhost:4200")
 	logoutResponse := httptest.NewRecorder()
 	handler.ServeHTTP(logoutResponse, logout)
 	if logoutResponse.Code != http.StatusNoContent || logoutResponse.Result().Cookies()[0].MaxAge >= 0 {
 		t.Fatalf("logout response status = %d, cookies = %+v", logoutResponse.Code, logoutResponse.Result().Cookies())
+	}
+	revoked := httptest.NewRequest(http.MethodGet, "http://localhost:3110/api/v1/session", nil)
+	revoked.AddCookie(cookies[0])
+	revokedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(revokedResponse, revoked)
+	if revokedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked session status = %d, want %d", revokedResponse.Code, http.StatusUnauthorized)
+	}
+	bearerRead := authorizedTestRequest(http.MethodGet, "/api/v1/projects", nil)
+	bearerResponse := httptest.NewRecorder()
+	handler.ServeHTTP(bearerResponse, bearerRead)
+	if bearerResponse.Code != http.StatusOK {
+		t.Fatalf("direct bearer status after logout = %d, want %d", bearerResponse.Code, http.StatusOK)
+	}
+}
+
+func TestLocalSessionRejectsInvalidCookieAndLogoutOrigin(t *testing.T) {
+	handler, _ := newProjectHandler(t)
+	invalid := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	invalid.AddCookie(&http.Cookie{Name: localAuthCookieName, Value: "not-a-session"})
+	invalidResponse := httptest.NewRecorder()
+	handler.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid session status = %d, want %d", invalidResponse.Code, http.StatusUnauthorized)
+	}
+
+	login := authorizedTestRequest(http.MethodPost, "/api/v1/session", nil)
+	loginResponse := httptest.NewRecorder()
+	handler.ServeHTTP(loginResponse, login)
+	cookie := loginResponse.Result().Cookies()[0]
+	logout := httptest.NewRequest(http.MethodDelete, "/api/v1/session", nil)
+	logout.AddCookie(cookie)
+	logout.Header.Set("Origin", "http://attacker.example")
+	logoutResponse := httptest.NewRecorder()
+	handler.ServeHTTP(logoutResponse, logout)
+	if logoutResponse.Code != http.StatusForbidden {
+		t.Fatalf("untrusted-origin logout status = %d, want %d", logoutResponse.Code, http.StatusForbidden)
+	}
+
+	stillValid := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	stillValid.AddCookie(cookie)
+	stillValidResponse := httptest.NewRecorder()
+	handler.ServeHTTP(stillValidResponse, stillValid)
+	if stillValidResponse.Code != http.StatusNoContent {
+		t.Fatalf("session status after rejected logout = %d, want %d", stillValidResponse.Code, http.StatusNoContent)
+	}
+
+	exchangeWithCookie := httptest.NewRequest(http.MethodPost, "/api/v1/session", nil)
+	exchangeWithCookie.AddCookie(cookie)
+	exchangeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(exchangeResponse, exchangeWithCookie)
+	if exchangeResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("cookie-only exchange status = %d, want %d", exchangeResponse.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -125,7 +187,7 @@ func TestRESTAuditsDomainAuthorizationDenials(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "forbidden", "domain policy denied the operation")
 	})
-	handler := secureAPI(next, database, nil, nil, nil, testLocalAuthTokenBytes())
+	handler := secureAPI(next, database, nil, nil, nil, testLocalAuthTokenBytes(), newLocalSessionStore())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/agents", nil))
 	if response.Code != http.StatusForbidden {

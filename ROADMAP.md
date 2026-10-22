@@ -625,7 +625,7 @@ metadata
 - Messages retain opaque content, content type, JSON metadata, sender type/ID, and timestamp; sensitive text and metadata are redacted before persistence.
 - `GET` and `POST /api/v1/tasks/{id}/messages` require `BOAIRD_LOCAL_AUTH_TOKEN` and a project membership for the single `local-administrator` principal. The sender identity is set by the server, and callers cannot provide it in JSON.
 - Existing projects are backfilled with local administrator membership, and new projects receive that membership automatically. Trusted service calls may add messages from the agent assigned to the task or the active Brain for its project.
-- The one configured administrator is the only HTTP principal. Multi-user identity and membership administration remain future work. The dashboard exchanges the token for a transient HttpOnly cookie session; same-origin writes are protected by SameSite and a dashboard-origin allowlist.
+- The one configured administrator is the only HTTP principal. Multi-user identity and membership administration remain future work. The dashboard exchanges the root token for a random opaque HttpOnly cookie session ID stored in server memory for 30 minutes; logout revokes it and restart invalidates all sessions. Cookie writes and logout require SameSite and a trusted dashboard Origin.
 
 ## Formats
 

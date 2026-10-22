@@ -37,7 +37,7 @@ type brainExecutionResponse struct {
 	Content  string `json:"content,omitempty"`
 }
 
-func registerBrainRoutes(mux *http.ServeMux, manager BrainManager, localAuthToken []byte) {
+func registerBrainRoutes(mux *http.ServeMux, manager BrainManager, localAuthToken []byte, sessions *localSessionStore) {
 	mux.HandleFunc("POST /api/v1/projects/{id}/brain", func(w http.ResponseWriter, r *http.Request) {
 		var input createBrainRequest
 		if err := decodeJSON(w, r, &input); err != nil {
@@ -54,7 +54,7 @@ func registerBrainRoutes(mux *http.ServeMux, manager BrainManager, localAuthToke
 	})
 	if replacer, ok := manager.(BrainReplacementManager); ok {
 		mux.HandleFunc("PUT /api/v1/projects/{id}/brain", func(w http.ResponseWriter, r *http.Request) {
-			actorID, authorized := localConversationPrincipal(r, localAuthToken)
+			actorID, authorized := localConversationPrincipal(r, localAuthToken, sessions)
 			if !authorized {
 				writeConversationUnauthorized(w)
 				return
