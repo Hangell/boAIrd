@@ -1445,7 +1445,7 @@ while normal developer agents do not.
 
 # 54. Context Engine
 
-The Context Engine determines what information should be provided to an Agent.
+The Context Engine determines what information should be provided to an Agent. The current implementation uses a deterministic, bounded selector and emits JSON entries with source and trust provenance. Every candidate must match the requested project; task-bound entries must also match the task. The worker orchestrator uses the selection for API Agent input and includes selected/omitted items in the dispatch outcome.
 
 Final context is derived from:
 
@@ -1497,9 +1497,9 @@ less sensitive exposure
 
 # 57. Context Trust
 
-Context should eventually carry trust metadata.
+Context entries carry trust metadata.
 
-Potential levels:
+Implemented trust levels:
 
 ```text
 SYSTEM
@@ -1511,6 +1511,8 @@ REPOSITORY
 EXTERNAL
 UNTRUSTED
 ```
+
+Context entries are data, not authority. Selection does not grant capabilities or change policy. The current worker context includes project/task metadata, Brain/Agent instructions, authorized task conversation, and same-task/same-Agent Run output. File, memory, and repository readers are not implemented; they are reported as unavailable and no workspace or repository access is inferred from project metadata. Byte and estimated-token budgets default to 16 KiB and 4096.
 
 This helps defend against prompt injection.
 

@@ -157,9 +157,12 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	}
 	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
-		Brains: brainRepository, Executor: executor, Conversations: conversationService,
+		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService,
 		Escalations: auditRepository, Advisor: brainAdvisor{service: brainService},
-		Config: orchestrator.Config{MaxAttempts: cfg.OrchestratorMaxAttempts, ExecutionTimeout: cfg.OrchestratorTimeout},
+		Config: orchestrator.Config{
+			MaxAttempts: cfg.OrchestratorMaxAttempts, ExecutionTimeout: cfg.OrchestratorTimeout,
+			ContextMaxBytes: cfg.ContextMaxBytes, ContextMaxTokens: cfg.ContextMaxTokens,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("initialize orchestrator: %w", err)
