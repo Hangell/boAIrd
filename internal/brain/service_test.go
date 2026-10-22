@@ -92,6 +92,36 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	if created.Autonomy() != brain.AutonomyAutonomous {
 		t.Fatalf("autonomy = %s", created.Autonomy())
 	}
+	replacementAgent, err := agentManager.Create(ctx, agent.CreateInput{
+		Name: "Replacement Brain", Role: "coordinator", Runtime: agent.RuntimeAPI, Provider: "openai-compatible",
+		ProviderBaseURL: server.URL + "/v1", Model: "test-model", CredentialID: metadata.ID,
+		Capabilities: []string{"brain.execute"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := service.Replace(ctx, projects.ID(), brain.CreateInput{AgentID: replacementAgent.ID(), Autonomy: brain.AutonomyManual}, project.LocalAdministratorID, "administrator rotation api_key=must-not-persist")
+	if err != nil {
+		t.Fatalf("replace Brain: %v", err)
+	}
+	if replaced.ID() != created.ID() || replaced.AgentID() != replacementAgent.ID() || replaced.Autonomy() != brain.AutonomyManual {
+		t.Fatalf("replacement = id:%s agent:%s autonomy:%s", replaced.ID(), replaced.AgentID(), replaced.Autonomy())
+	}
+	var auditCount int
+	var auditReason string
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*), MAX(reason) FROM audit_events WHERE project_id=? AND resource_type='brain' AND resource_id=? AND event_type='brain.replaced' AND actor_id=?`,
+		projects.ID(), created.ID(), project.LocalAdministratorID).Scan(&auditCount, &auditReason); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("Brain replacement audit events = %d, want 1", auditCount)
+	}
+	if strings.Contains(auditReason, "must-not-persist") {
+		t.Fatalf("Brain replacement audit reason leaked a secret: %q", auditReason)
+	}
+	if _, err := service.Replace(ctx, projects.ID(), brain.CreateInput{AgentID: replacementAgent.ID(), Autonomy: brain.AutonomyManual}, project.LocalAdministratorID, "no-op"); err == nil {
+		t.Fatal("expected an unchanged Brain replacement to be rejected")
+	}
 	result, err := service.Execute(ctx, projects.ID(), "Plan a small feature", 64)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +146,7 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	if storedRun.FinishedAt().IsZero() || storedRun.Status() != result.Run.Status() {
 		t.Fatalf("retrieved run = %+v", storedRun.Snapshot())
 	}
-	listed, err := runRepository.List(ctx, projects.ID(), "", configuredAgent.ID(), 10, 0)
+	listed, err := runRepository.List(ctx, projects.ID(), "", replacementAgent.ID(), 10, 0)
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("list runs = %d, %v", len(listed), err)
 	}

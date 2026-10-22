@@ -1,6 +1,5 @@
 import type {} from '@angular/localize';
 import { Routes } from '@angular/router';
-import { FeaturePageComponent } from './shared/feature-page.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'overview' },
@@ -33,7 +32,7 @@ export const routes: Routes = [
   },
   {
     path: 'tasks',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.tasks.title:Kanban`,
     data: {
       title: $localize`:@@page.tasks.heading:Task board`,
@@ -42,7 +41,7 @@ export const routes: Routes = [
   },
   {
     path: 'conversations',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.conversations.title:Conversations`,
     data: {
       title: $localize`:@@page.conversations.heading:Conversations`,
@@ -70,7 +69,7 @@ export const routes: Routes = [
   },
   {
     path: 'providers',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.providers.title:Providers`,
     data: {
       title: $localize`:@@page.providers.heading:Providers`,
@@ -79,7 +78,7 @@ export const routes: Routes = [
   },
   {
     path: 'runs',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.runs.title:Runs`,
     data: {
       title: $localize`:@@page.runs.heading:Run history`,
@@ -88,7 +87,7 @@ export const routes: Routes = [
   },
   {
     path: 'logs',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.logs.title:Logs`,
     data: {
       title: $localize`:@@page.logs.heading:Activity logs`,
@@ -97,7 +96,7 @@ export const routes: Routes = [
   },
   {
     path: 'brain',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./features/brain/brain-dashboard.component').then((module) => module.BrainDashboardComponent),
     title: $localize`:@@page.brain.title:Brain`,
     data: {
       title: $localize`:@@page.brain.heading:Project Brain`,
@@ -106,7 +105,7 @@ export const routes: Routes = [
   },
   {
     path: 'settings',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.settings.title:Settings`,
     data: {
       title: $localize`:@@page.settings.heading:Settings`,

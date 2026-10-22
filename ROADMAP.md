@@ -447,6 +447,7 @@ Each response must also have a persisted Run.
 ## Current implementation
 
 - Projects can attach one active Brain to an API agent with the explicit `brain.execute` capability.
+- Active Brain configuration can be replaced only with the local administrator bearer token and a required reason; the replacement is recorded as an immutable audit event.
 - The Brain can request a provider response through the configured provider adapter and credential reference.
 - Each execution persists its project, agent, provider, model, objective, status, and response in `runs`.
 - The current runtime returns a proposed plan as text. It does not apply task mutations or grant capabilities.
@@ -457,6 +458,7 @@ Each response must also have a persisted Run.
 ```text
 POST /api/v1/projects/{id}/brain
 GET  /api/v1/projects/{id}/brain
+PUT  /api/v1/projects/{id}/brain (local administrator bearer token + audit reason)
 POST /api/v1/projects/{id}/brain/runs
 ```
 
@@ -623,7 +625,7 @@ metadata
 - Messages retain opaque content, content type, JSON metadata, sender type/ID, and timestamp; sensitive text and metadata are redacted before persistence.
 - `GET` and `POST /api/v1/tasks/{id}/messages` require `BOAIRD_LOCAL_AUTH_TOKEN` and a project membership for the single `local-administrator` principal. The sender identity is set by the server, and callers cannot provide it in JSON.
 - Existing projects are backfilled with local administrator membership, and new projects receive that membership automatically. Trusted service calls may add messages from the agent assigned to the task or the active Brain for its project.
-- Multi-user identity and membership management remain future work. Other HTTP API routes remain unauthenticated and use the fixed local API actor.
+- Multi-user identity and membership management remain future work. Other HTTP API routes remain unauthenticated and use the fixed local API actor, except active Brain replacement, which requires the local administrator bearer token.
 
 ## Formats
 
@@ -901,6 +903,8 @@ tasks managed
 failures
 notifications
 ```
+
+The first dashboard iteration uses project selection, the active Brain and agent status, recent Brain Runs as proposals, and tasks waiting in `HUMAN_REVIEW`. Replacing an active Brain requires the local administrator bearer token and records a reasoned audit event.
 
 ---
 

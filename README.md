@@ -1973,7 +1973,7 @@ The service reads these optional environment variables:
 | `BOAIRD_PORT` | `3110` | HTTP listen port |
 | `BOAIRD_DATABASE_PATH` | `./data/boaird.db` | SQLite database file |
 | `BOAIRD_MASTER_KEY` | Required | 32-byte encryption key encoded as 64 hexadecimal characters; never store it in SQLite or commit it. |
-| `BOAIRD_LOCAL_AUTH_TOKEN` | Required | 32-byte bearer token encoded as 64 hexadecimal characters; required to read or write task conversations. |
+| `BOAIRD_LOCAL_AUTH_TOKEN` | Required | 32-byte bearer token encoded as 64 hexadecimal characters; required for task conversations and Brain replacement. |
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 
@@ -2003,7 +2003,7 @@ boaird agents list
 
 The local API supports `POST /api/v1/agents`, `GET /api/v1/agents`, `GET /api/v1/agents/{id}`, and `PATCH /api/v1/agents/{id}`. API-backed agents identify a provider, model, and stored credential by ID; raw provider keys are not part of agent configuration. `role` is descriptive and does not grant capabilities. Agent status is managed by the runtime and is read-only through these endpoints.
 
-Projects can attach one active API Brain with `POST /api/v1/projects/{id}/brain`; the selected agent must explicitly have the `brain.execute` capability. `GET /api/v1/projects/{id}/brain` returns its configuration. `POST /api/v1/projects/{id}/brain/runs` sends an objective to the configured provider and persists a run. The Brain returns a proposed plan as text; this runtime does not apply task or project mutations. Autonomy mode does not grant permissions, and project human review remains in force.
+Projects can attach one active API Brain with `POST /api/v1/projects/{id}/brain`; the selected agent must explicitly have the `brain.execute` capability. `GET /api/v1/projects/{id}/brain` returns its configuration. Replacing an active Brain uses `PUT /api/v1/projects/{id}/brain` with `Authorization: Bearer <BOAIRD_LOCAL_AUTH_TOKEN>` and a required audit reason; the server attributes the event to `local-administrator`. The dashboard keeps this token in memory only for the replacement request. `POST /api/v1/projects/{id}/brain/runs` sends an objective to the configured provider and persists a run. The Brain returns a proposed plan as text; this runtime does not apply task or project mutations. Autonomy mode does not grant permissions, and project human review remains in force.
 
 Runs can be listed with `GET /api/v1/projects/{id}/runs`, filtered by `task_id` or `agent_id`, or fetched individually with `GET /api/v1/runs/{id}`. Responses include immutable audit events for run creation and status transitions. Common credential patterns are redacted from run input, output, tool names, and errors before persistence and display.
 
@@ -2013,7 +2013,7 @@ Each task has a persisted conversation. `GET` and `POST /api/v1/tasks/{id}/messa
 
 ## Dashboard foundation
 
-The standalone Angular dashboard lives in [`web/`](web/README.md). It uses Angular Material, SCSS, strict TypeScript, feature routes, a server-owned state model, and a local API base URL of `http://127.0.0.1:3110/api/v1` during development. The project list opens a project scoped overview of its Brain, assigned agents, task status, blocked work, and recent runs. The Agents screen lists, creates, and edits agent configuration through the versioned API; it displays only stored credential metadata, treats status as read-only, and keeps capabilities explicit rather than deriving them from role labels. Run `npm install`, `npm start`, and `npm run build` from `web/`.
+The standalone Angular dashboard lives in [`web/`](web/README.md). It uses Angular Material, SCSS, strict TypeScript, feature routes, a server-owned state model, and a local API base URL of `http://127.0.0.1:3110/api/v1` during development. The project list opens a project scoped overview of its Brain, assigned agents, task status, blocked work, and recent runs. The Agents screen lists, creates, and edits agent configuration through the versioned API; it displays only stored credential metadata, treats status as read-only, and keeps capabilities explicit rather than deriving them from role labels. The Kanban view groups tasks by backend status, submits reasoned transitions to the API, and links to task history, conversations, and runs. The Brain dashboard selects a project Brain, shows its recent proposals and blocked or human-review tasks, and requires the local administrator token plus a reason to replace an active Brain. Run `npm install`, `npm start`, and `npm run build` from `web/`.
 
 ---
 

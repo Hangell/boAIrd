@@ -44,12 +44,13 @@ const (
 
 var ErrUnauthorizedAction = errors.New("Brain action is not authorized")
 var (
-	ErrNotFound           = errors.New("Brain not found")
-	ErrProjectNotFound    = errors.New("project not found")
-	ErrProjectUnavailable = errors.New("project cannot receive a Brain")
-	ErrInvalidAgent       = errors.New("agent is not eligible to be a Brain")
-	ErrInvalidInput       = errors.New("invalid Brain input")
-	ErrAlreadyExists      = errors.New("project already has a Brain")
+	ErrNotFound             = errors.New("Brain not found")
+	ErrProjectNotFound      = errors.New("project not found")
+	ErrProjectUnavailable   = errors.New("project cannot receive a Brain")
+	ErrInvalidAgent         = errors.New("agent is not eligible to be a Brain")
+	ErrInvalidInput         = errors.New("invalid Brain input")
+	ErrAlreadyExists        = errors.New("project already has a Brain")
+	ErrConfigurationChanged = errors.New("Brain configuration changed during replacement")
 )
 
 func newID() (string, error) {

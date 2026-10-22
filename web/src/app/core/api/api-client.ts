@@ -1,7 +1,8 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
+import { EMPTY, expand, map, Observable, reduce } from 'rxjs';
 import { API_BASE_URL } from './api-config';
+import { ApiPage } from './api-models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiClient {
@@ -18,6 +19,24 @@ export class ApiClient {
 
   patch<TRequest, TResponse>(path: string, body: TRequest): Observable<TResponse> {
     return this.http.patch<TResponse>(this.endpoint(path), body);
+  }
+
+  putWithBearer<TRequest, TResponse>(path: string, body: TRequest, token: string): Observable<TResponse> {
+    return this.http.put<TResponse>(this.endpoint(path), body, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+
+  getAllPages<TItem>(path: string): Observable<TItem[]> {
+    const separator = path.includes('?') ? '&' : '?';
+    const firstPage = (offset: number): Observable<ApiPage<TItem>> =>
+      this.get<ApiPage<TItem>>(`${path}${separator}limit=100&offset=${offset}`);
+
+    return firstPage(0).pipe(
+      expand((page) => page.items.length === 100 ? firstPage(page.offset + page.limit) : EMPTY),
+      map((page) => page.items),
+      reduce((items, nextPage) => items.concat(nextPage), [] as TItem[]),
+    );
   }
 
   private endpoint(path: string): string {
