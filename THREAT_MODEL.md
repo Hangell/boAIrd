@@ -2099,13 +2099,7 @@ Such changes require explicit discussion or project direction.
 
 # 94. License
 
-boAIrd uses:
-
-```text
-boAIrd Community License 1.0
-```
-
-Read:
+boAIrd is distributed under the MIT License. Read:
 
 ```text
 LICENSE
@@ -2119,11 +2113,8 @@ Do not copy source code from incompatible licenses.
 
 # 95. Commercial Restrictions
 
-The boAIrd license allows free personal and non-commercial usage under its terms.
-
-Commercial and enterprise usage requires separate authorization.
-
-Do not change licensing headers or licensing behavior unless explicitly requested by project maintainers.
+The MIT License permits commercial and non-commercial use, subject to its terms.
+Do not add restrictions or replace the project license unless explicitly requested by project maintainers.
 
 ---
 
