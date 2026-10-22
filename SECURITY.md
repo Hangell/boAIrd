@@ -1989,10 +1989,13 @@ The user must be aware that information sent to external providers leaves the lo
 Built-in provider defaults are allowed. A custom provider host must be listed
 exactly in `BOAIRD_PROVIDER_ALLOWED_HOSTS`; DNS results are validated when
 dialing and the validated IP is used for the connection. Private, link-local,
-metadata, and listed special-purpose IP ranges are denied unless their CIDR is
-explicitly listed in `BOAIRD_PROVIDER_ALLOWED_IP_RANGES`. Loopback URLs remain
-available for explicit local development. Only approve endpoints whose
-operators are trusted with the configured provider credential and request data.
+metadata, and special-purpose IP ranges recognized by the endpoint policy are
+denied unless their CIDR is explicitly listed in
+`BOAIRD_PROVIDER_ALLOWED_IP_RANGES`. The IPv6 policy covers the active IANA
+special-purpose prefixes and translation/transition ranges, including NAT64,
+Teredo, and 6to4. Loopback URLs remain available for explicit local
+development. Only approve endpoints whose operators are trusted with the
+configured provider credential and request data.
 
 boAIrd must show which provider will receive specific context.
 

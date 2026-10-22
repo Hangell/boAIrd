@@ -979,7 +979,7 @@ components:
         role: { type: string, minLength: 1, maxLength: 100, description: Descriptive label only; it grants no permissions. }
         runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
         provider: { type: string, maxLength: 100 }
-        provider_base_url: { type: string, maxLength: 2048, format: uri, description: Optional custom provider endpoint; HTTP is restricted to loopback hosts. }
+        provider_base_url: { type: string, maxLength: 2048, format: uri, description: "Optional provider endpoint. Built-in vendor defaults and explicit loopback development URLs are allowed; custom hosts require an exact BOAIRD_PROVIDER_ALLOWED_HOSTS entry. HTTP is restricted to loopback. Private, link-local, metadata, and special-purpose resolved IP ranges recognized by the endpoint policy are denied unless explicitly covered by BOAIRD_PROVIDER_ALLOWED_IP_RANGES. Redirects and proxies are disabled." }
         model: { type: string, maxLength: 200 }
         credential_id: { type: string, maxLength: 200, description: Reference to a stored credential; raw secrets are never accepted here. }
         instructions: { type: string, maxLength: 16000 }
@@ -1008,7 +1008,7 @@ components:
         role: { type: string, minLength: 1, maxLength: 100, description: Descriptive label only; it grants no permissions. }
         runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
         provider: { type: string, maxLength: 100 }
-        provider_base_url: { type: string, maxLength: 2048, format: uri, description: Optional custom provider endpoint; HTTP is restricted to loopback hosts. }
+        provider_base_url: { type: string, maxLength: 2048, format: uri, description: "Optional provider endpoint. Built-in vendor defaults and explicit loopback development URLs are allowed; custom hosts require an exact BOAIRD_PROVIDER_ALLOWED_HOSTS entry. HTTP is restricted to loopback. Private, link-local, metadata, and special-purpose resolved IP ranges recognized by the endpoint policy are denied unless explicitly covered by BOAIRD_PROVIDER_ALLOWED_IP_RANGES. Redirects and proxies are disabled." }
         model: { type: string, maxLength: 200 }
         credential_id: { type: string, maxLength: 200, description: Assigning a credential is administrator-only; runtime use is further restricted to this Agent's persisted project scope. }
         instructions: { type: string, maxLength: 16000 }
@@ -1031,7 +1031,7 @@ components:
         role: { type: string, description: Descriptive label only; it grants no permissions. }
         runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
         provider: { type: string }
-        provider_base_url: { type: string }
+        provider_base_url: { type: string, description: "Built-in vendor defaults and explicit loopback development URLs are allowed; custom hosts require an exact BOAIRD_PROVIDER_ALLOWED_HOSTS entry. HTTP is restricted to loopback. Private, link-local, metadata, and special-purpose resolved IP ranges recognized by the endpoint policy are denied unless explicitly covered by BOAIRD_PROVIDER_ALLOWED_IP_RANGES. Redirects and proxies are disabled." }
         model: { type: string }
         credential_id: { type: string, description: Reference only; never a raw credential. Resolution also requires this Agent's project membership or active-Brain relationship. }
         instructions: { type: string }

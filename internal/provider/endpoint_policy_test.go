@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"strconv"
@@ -39,7 +40,12 @@ func TestEndpointPolicyRejectsPrivateAndMetadataAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"10.0.0.1", "169.254.169.254", "100.64.0.1", "168.63.129.16", "192.0.2.1", "fd00::1", "2001:2::1", "2001:db8::1", "::ffff:192.168.1.2"} {
+	for _, value := range []string{
+		"10.0.0.1", "169.254.169.254", "100.64.0.1", "168.63.129.16", "192.0.2.1",
+		"fd00::1", "64:ff9b::a9fe:a9fe", "64:ff9b:1::1", "100::1", "100:0:0:1::1",
+		"2001::1", "2001:2::1", "2001:db8::1", "2002:a9fe:a9fe::1", "2620:4f:8000::1",
+		"3fff::1", "5f00::1", "::ffff:192.168.1.2",
+	} {
 		address := netip.MustParseAddr(value)
 		if policy.addressAllowed(address, "provider.example") {
 			t.Errorf("address %s was allowed without an explicit IP range", address)
@@ -47,6 +53,63 @@ func TestEndpointPolicyRejectsPrivateAndMetadataAddresses(t *testing.T) {
 	}
 	if !policy.addressAllowed(netip.MustParseAddr("127.0.0.1"), "localhost") {
 		t.Fatal("explicit loopback development host was denied")
+	}
+}
+
+func TestEndpointPolicyRejectsSpecialIPv6DNSAnswersUnlessCIDRIsAllowed(t *testing.T) {
+	addresses := []string{
+		"64:ff9b::a9fe:a9fe", // NAT64 encoding of the link-local metadata address.
+		"64:ff9b:1::1",       // Local-use translation prefix.
+		"100::1",             // Discard-only.
+		"100:0:0:1::1",       // Dummy IPv6 prefix.
+		"2001:2::1",          // Benchmarking.
+		"2001:db8::1",        // Documentation.
+		"2002:a9fe:a9fe::1",  // 6to4 encoding of the link-local metadata address.
+		"3fff::1",            // Documentation.
+		"5f00::1",            // SRv6 SID.
+	}
+
+	for _, value := range addresses {
+		t.Run(value, func(t *testing.T) {
+			address := netip.MustParseAddr(value)
+			policy, err := NewEndpointPolicy([]string{"provider.example"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy.lookupIP = func(context.Context, string) ([]netip.Addr, error) {
+				return []netip.Addr{address}, nil
+			}
+			dialCalled := false
+			policy.dialer = func(context.Context, string, string) (net.Conn, error) {
+				dialCalled = true
+				return nil, errors.New("unexpected dial")
+			}
+			if _, err := policy.dialContext(context.Background(), "tcp", "provider.example:443"); err == nil {
+				t.Fatal("special IPv6 DNS answer was allowed")
+			}
+			if dialCalled {
+				t.Fatal("network dial occurred before the special IPv6 answer was rejected")
+			}
+
+			policy, err = NewEndpointPolicy([]string{"provider.example"}, []string{address.String() + "/128"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy.lookupIP = func(context.Context, string) ([]netip.Addr, error) {
+				return []netip.Addr{address}, nil
+			}
+			var dialErr = errors.New("approved address reached dialer")
+			policy.dialer = func(context.Context, string, string) (net.Conn, error) {
+				dialCalled = true
+				return nil, dialErr
+			}
+			if _, err := policy.dialContext(context.Background(), "tcp", "provider.example:443"); !errors.Is(err, dialErr) {
+				t.Fatalf("explicitly allowed CIDR did not reach the dialer: %v", err)
+			}
+			if !dialCalled {
+				t.Fatal("explicitly allowed CIDR was not honored")
+			}
+		})
 	}
 }
 

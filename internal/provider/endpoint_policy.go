@@ -18,6 +18,9 @@ type EndpointPolicy struct {
 	dialer          func(context.Context, string, string) (net.Conn, error)
 }
 
+// specialPurposePrefixes mirrors the active IPv6 entries in the IANA Special-Purpose
+// Address Registry (updated 2025-10-09), plus transition prefixes that can carry
+// embedded IPv4 destinations. Review this list when the registry changes.
 var specialPurposePrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),
@@ -28,8 +31,17 @@ var specialPurposePrefixes = []netip.Prefix{
 	netip.MustParsePrefix("198.51.100.0/24"),
 	netip.MustParsePrefix("203.0.113.0/24"),
 	netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("2001:2::/48"), // IPv6 benchmarking range.
+	netip.MustParsePrefix("64:ff9b::/96"), // Well-known IPv4/IPv6 translation; may encode non-public IPv4 targets.
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("2001::/23"), // IETF assignments, including Teredo.
+	netip.MustParsePrefix("2001:2::/48"),
 	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"), // 6to4 embeds an IPv4 destination.
+	netip.MustParsePrefix("2620:4f:8000::/48"),
+	netip.MustParsePrefix("3fff::/20"),
+	netip.MustParsePrefix("5f00::/16"),
 }
 
 // NewEndpointPolicy creates a policy from exact hostnames and explicit destination ranges.

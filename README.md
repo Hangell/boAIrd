@@ -2047,7 +2047,7 @@ The service reads these optional environment variables:
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 
-Custom HTTPS provider URLs are rejected unless their exact host is listed in `BOAIRD_PROVIDER_ALLOWED_HOSTS`. Every DNS answer is checked when a connection is opened and the selected validated IP is dialed directly. Loopback is allowed for explicit local development URLs. Private, link-local, metadata, and listed special-purpose IP ranges are blocked unless they fall within `BOAIRD_PROVIDER_ALLOWED_IP_RANGES`; only add ranges needed by a trusted provider, because credentials are sent to the configured endpoint.
+Custom HTTPS provider URLs are rejected unless their exact host is listed in `BOAIRD_PROVIDER_ALLOWED_HOSTS`. Every DNS answer is checked when a connection is opened and the selected validated IP is dialed directly. Loopback is allowed for explicit local development URLs. Private, link-local, metadata, and special-purpose IP ranges recognized by the endpoint policy are blocked unless they fall within `BOAIRD_PROVIDER_ALLOWED_IP_RANGES`. For IPv6, this includes the active IANA special-purpose prefixes and translation/transition ranges such as NAT64, Teredo, and 6to4; review the registry when updating this policy. Only add ranges needed by a trusted provider, because credentials are sent to the configured endpoint.
 
 ---
 
