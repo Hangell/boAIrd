@@ -180,8 +180,168 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/agents:
+    post:
+      operationId: createAgent
+      summary: Create a specialized agent
+      description: Role is descriptive and never grants capabilities. API runtimes require provider, model, and an existing credential reference.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgent'
+      responses:
+        '201':
+          description: Agent created with IDLE status.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listAgents
+      summary: List agents
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Agents ordered by name and ID.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentPage' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/agents/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getAgent
+      summary: Get an agent
+      responses:
+        '200':
+          description: Agent configuration. Status is managed by the runtime.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      operationId: updateAgent
+      summary: Update agent configuration
+      description: Status is read-only; role labels do not grant capabilities. Switching away from API clears provider configuration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAgent' }
+      responses:
+        '200':
+          description: Updated agent configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   schemas:
+    CreateAgent:
+      type: object
+      additionalProperties: false
+      required: [name, role, runtime]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        avatar: { type: string, maxLength: 1000 }
+        description: { type: string, maxLength: 4000 }
+        role: { type: string, minLength: 1, maxLength: 100, description: Descriptive label only; it grants no permissions. }
+        runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        provider: { type: string, maxLength: 100 }
+        model: { type: string, maxLength: 200 }
+        credential_id: { type: string, maxLength: 200, description: Reference to a stored credential; raw secrets are never accepted here. }
+        instructions: { type: string, maxLength: 16000 }
+        language_preferences:
+          type: array
+          maxItems: 20
+          items: { type: string, minLength: 1, maxLength: 100 }
+        capabilities:
+          type: array
+          maxItems: 100
+          description: Explicit capability identifiers; never derived from role.
+          items: { type: string, pattern: '^[a-z][a-z0-9]*(?:\.[a-z0-9]+)*$' }
+      allOf:
+        - if:
+            properties: { runtime: { const: API } }
+          then:
+            required: [provider, model, credential_id]
+    UpdateAgent:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        avatar: { type: string, maxLength: 1000 }
+        description: { type: string, maxLength: 4000 }
+        role: { type: string, minLength: 1, maxLength: 100, description: Descriptive label only; it grants no permissions. }
+        runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        provider: { type: string, maxLength: 100 }
+        model: { type: string, maxLength: 200 }
+        credential_id: { type: string, maxLength: 200 }
+        instructions: { type: string, maxLength: 16000 }
+        language_preferences:
+          type: array
+          maxItems: 20
+          items: { type: string, minLength: 1, maxLength: 100 }
+        capabilities:
+          type: array
+          maxItems: 100
+          items: { type: string, pattern: '^[a-z][a-z0-9]*(?:\.[a-z0-9]+)*$' }
+    Agent:
+      type: object
+      required: [id, name, avatar, description, role, runtime, instructions, language_preferences, capabilities, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        avatar: { type: string }
+        description: { type: string }
+        role: { type: string, description: Descriptive label only; it grants no permissions. }
+        runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        provider: { type: string }
+        model: { type: string }
+        credential_id: { type: string, description: Reference only; never a raw credential. }
+        instructions: { type: string }
+        language_preferences: { type: array, items: { type: string } }
+        capabilities: { type: array, items: { type: string } }
+        status: { type: string, readOnly: true, enum: [ONLINE, IDLE, BUSY, WAITING, OFFLINE, STALE, ERROR] }
+    AgentPage:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Agent' }
+        limit: { type: integer }
+        offset: { type: integer }
     CreateCredential:
       type: object
       additionalProperties: false
@@ -295,7 +455,7 @@ components:
               type: string
   responses:
     BadRequest:
-      description: Invalid request body, query parameter, or project value.
+      description: Invalid request body, query parameter, project value, or agent configuration.
       content:
         application/json:
           schema:
