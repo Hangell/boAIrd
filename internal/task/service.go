@@ -194,6 +194,61 @@ func (s *Service) Assign(ctx context.Context, id, agentID, reason string, actor 
 	return value, nil
 }
 
+// Claim atomically assigns an unowned READY task to an Agent and starts it.
+// expectedVersion is the version observed by the caller; repository.Update
+// performs the final compare-and-swap so concurrent claims cannot both win.
+func (s *Service) Claim(ctx context.Context, id, agentID string, expectedVersion int64, reason string, actor Actor) (Task, error) {
+	if actor.Type != ActorAgent || actor.ID != agentID || expectedVersion < 1 || strings.TrimSpace(reason) == "" {
+		return Task{}, invalidTaskInput(errors.New("claim requires the authenticated Agent, expected version, and reason"))
+	}
+	value, err := s.tasks.Get(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return Task{}, err
+	}
+	if value.Version() != expectedVersion {
+		return Task{}, ErrConflict
+	}
+	if err := s.ensureProjectActive(ctx, value.ProjectID()); err != nil {
+		return Task{}, err
+	}
+	if value.Status() != StatusReady {
+		return Task{}, ErrConflict
+	}
+	if value.AssignedTo() != "" && value.AssignedTo() != agentID {
+		return Task{}, ErrForbidden
+	}
+	if value.AssignedTo() == "" {
+		if err := s.authorizeCapability(ctx, value.ProjectID(), actor, "task.assign"); err != nil {
+			s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.assign", "task:"+value.ID(), authorizationDenialReason(err))
+			return Task{}, err
+		}
+		value, err = value.Assign(agentID)
+		if err != nil {
+			return Task{}, invalidTaskInput(err)
+		}
+	}
+	if err := s.authorizeTransition(ctx, value, StatusWorking, actor); err != nil {
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.transition", "task:"+value.ID(), authorizationDenialReason(err))
+		return Task{}, err
+	}
+	value, err = value.Transition(StatusWorking)
+	if err != nil {
+		return Task{}, err
+	}
+	value, err = value.RecordMutation(actor, reason)
+	if err != nil {
+		return Task{}, invalidTaskInput(err)
+	}
+	value, err = value.AdvanceVersion()
+	if err != nil {
+		return Task{}, err
+	}
+	if err := s.tasks.Update(ctx, value); err != nil {
+		return Task{}, err
+	}
+	return value, nil
+}
+
 func (s *Service) Transition(ctx context.Context, id string, to Status, reason string, actor Actor) (Task, error) {
 	value, err := s.tasks.Get(ctx, id)
 	if err != nil {

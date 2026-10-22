@@ -3,6 +3,7 @@ package task_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -248,6 +249,108 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	}
 	if !rejected {
 		t.Fatal("human review rejection was not fully recorded")
+	}
+}
+
+func TestConcurrentExternalClaimsAreAtomicWithSQLiteRepository(t *testing.T) {
+	ctx := context.Background()
+	database, err := storage.OpenSQLite(ctx, filepath.Join(t.TempDir(), "claims.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	projectRepository, err := storage.NewProjectRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := project.NewManager(projectRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := projects.Create(ctx, project.CreateInput{Name: "Concurrent claims"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRepository, err := storage.NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := agent.NewManager(agentRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workers := make([]agent.Agent, 2)
+	for i := range workers {
+		workers[i], err = agents.Create(ctx, agent.CreateInput{Name: fmt.Sprintf("Worker %d", i), Role: "worker", Runtime: agent.RuntimeMCP, Capabilities: []string{"task.assign", "task.transition"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := agents.AddProject(ctx, workers[i].ID(), p.ID(), "local-administrator"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	brainRepository, err := storage.NewBrainRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskRepository, err := storage.NewTaskRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := task.NewService(taskRepository, projects, agents, brainRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := task.Actor{Type: task.ActorAdministrator, ID: "local-administrator", Capabilities: []string{"task.create", "task.transition"}, ProjectIDs: []string{p.ID()}}
+	value, err := service.Create(ctx, p.ID(), task.CreateInput{Title: "Race claim", Reason: "test setup"}, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err = service.Transition(ctx, value.ID(), task.StatusReady, "publish for external work", admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedVersion := value.Version()
+	start := make(chan struct{})
+	type claimResult struct {
+		workerID string
+		err      error
+	}
+	results := make(chan claimResult, len(workers))
+	var wait sync.WaitGroup
+	for _, worker := range workers {
+		worker := worker
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			_, err := service.Claim(ctx, value.ID(), worker.ID(), expectedVersion, "claim external task", task.Actor{Type: task.ActorAgent, ID: worker.ID()})
+			results <- claimResult{workerID: worker.ID(), err: err}
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	winners := 0
+	winnerID := ""
+	for result := range results {
+		if result.err == nil {
+			winners++
+			winnerID = result.workerID
+		} else if !errors.Is(result.err, task.ErrConflict) {
+			t.Errorf("Claim() error = %v, want success or ErrConflict", result.err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful claims = %d, want exactly 1", winners)
+	}
+	stored, err := taskRepository.Get(ctx, value.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AssignedTo() != winnerID || stored.Status() != task.StatusWorking || stored.Version() != expectedVersion+1 {
+		t.Fatalf("stored claim = assignee %q, status %s, version %d; want winner %q, WORKING, version %d", stored.AssignedTo(), stored.Status(), stored.Version(), winnerID, expectedVersion+1)
 	}
 }
 
