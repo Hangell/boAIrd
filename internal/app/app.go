@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/api"
@@ -14,6 +13,7 @@ import (
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/mcpserver"
+	"boAIrd/internal/mcptoken"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/storage"
@@ -68,6 +68,26 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize agent manager: %w", err)
 	}
+	mcpTokenRepository, err := storage.NewMCPTokenRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize MCP token repository: %w", err)
+	}
+	mcpTokenService, err := mcptoken.NewService(mcpTokenRepository, agentManager)
+	if err != nil {
+		return fmt.Errorf("initialize MCP token service: %w", err)
+	}
+	legacyTokenCount := len(cfg.MCPAgentTokens)
+	bootstrapped, err := mcpTokenService.Bootstrap(ctx, cfg.MCPAgentTokens, project.LocalAdministratorID)
+	if err != nil {
+		return fmt.Errorf("bootstrap legacy MCP tokens: %w", err)
+	}
+	for i := range cfg.MCPAgentTokens {
+		clear(cfg.MCPAgentTokens[i].Token[:])
+	}
+	cfg.MCPAgentTokens = nil
+	if bootstrapped && legacyTokenCount > 0 {
+		logger.Info("legacy MCP tokens imported with a 90-day expiration", "registered_agents", legacyTokenCount)
+	}
 	brainRepository, err := storage.NewBrainRepository(database)
 	if err != nil {
 		return fmt.Errorf("initialize Brain repository: %w", err)
@@ -100,16 +120,12 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize conversation service: %w", err)
 	}
-	var mcpHandler http.Handler
-	if len(cfg.MCPAgentTokens) > 0 {
-		mcp, err := mcpserver.New(ctx, mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository, Conversations: conversationService, Brains: brainService, Runs: runManager}, cfg.MCPAgentTokens)
-		if err != nil {
-			return fmt.Errorf("initialize MCP server: %w", err)
-		}
-		mcpHandler = mcp.Handler()
-		logger.Info("MCP endpoint enabled", "path", "/mcp", "registered_agents", len(cfg.MCPAgentTokens))
+	mcp, err := mcpserver.New(mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository, Conversations: conversationService, Brains: brainService, Runs: runManager}, mcpTokenService)
+	if err != nil {
+		return fmt.Errorf("initialize MCP server: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithConversations(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpHandler), logger); err != nil {
+	logger.Info("MCP endpoint initialized", "path", "/mcp")
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithMCPTokenManagement(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, mcp.Handler()), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

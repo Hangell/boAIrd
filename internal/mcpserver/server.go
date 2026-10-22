@@ -3,8 +3,6 @@ package mcpserver
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -14,7 +12,6 @@ import (
 	"boAIrd/internal/agent"
 	"boAIrd/internal/brain"
 	"boAIrd/internal/capability"
-	"boAIrd/internal/config"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
@@ -34,6 +31,10 @@ type Services struct {
 	Conversations ConversationService
 	Brains        BrainService
 	Runs          RunService
+}
+
+type TokenVerifier interface {
+	Verify(context.Context, string) (string, error)
 }
 type AuthorizationDenialService interface {
 	RecordAuthorizationDenial(context.Context, string, string, string, string, string) error
@@ -65,35 +66,17 @@ type RunService interface {
 
 type Server struct {
 	services Services
-	tokens   []config.MCPAgentToken
+	tokens   TokenVerifier
 }
 
-func New(ctx context.Context, services Services, tokens []config.MCPAgentToken) (*Server, error) {
+func New(services Services, tokens TokenVerifier) (*Server, error) {
 	if services.Agents == nil || services.Projects == nil || services.Tasks == nil || services.Conversations == nil || services.Brains == nil || services.Runs == nil {
 		return nil, errors.New("MCP services are required")
 	}
-	if len(tokens) == 0 {
-		return nil, errors.New("at least one MCP Agent token is required")
+	if tokens == nil {
+		return nil, errors.New("MCP token verifier is required")
 	}
-	seenAgents := make(map[string]struct{}, len(tokens))
-	seenTokens := make(map[[32]byte]struct{}, len(tokens))
-	for _, token := range tokens {
-		if strings.TrimSpace(token.AgentID) == "" || strings.TrimSpace(token.AgentID) != token.AgentID || token.Token == ([32]byte{}) {
-			return nil, errors.New("MCP Agent token registration is invalid")
-		}
-		if _, exists := seenAgents[token.AgentID]; exists {
-			return nil, errors.New("MCP Agent token registrations must be unique")
-		}
-		if _, exists := seenTokens[token.Token]; exists {
-			return nil, errors.New("MCP Agent token registrations must be unique")
-		}
-		if _, err := services.Agents.Get(ctx, token.AgentID); err != nil {
-			return nil, errors.New("MCP token references an unknown Agent")
-		}
-		seenAgents[token.AgentID] = struct{}{}
-		seenTokens[token.Token] = struct{}{}
-	}
-	return &Server{services: services, tokens: append([]config.MCPAgentToken(nil), tokens...)}, nil
+	return &Server{services: services, tokens: tokens}, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -104,22 +87,8 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) verifyToken(ctx context.Context, raw string, _ *http.Request) (*auth.TokenInfo, error) {
-	decoded, err := hex.DecodeString(raw)
-	if err != nil || len(decoded) != 32 {
-		clear(decoded)
-		return nil, auth.ErrInvalidToken
-	}
-	defer clear(decoded)
-	matched := 0
-	agentID := ""
-	for _, configured := range s.tokens {
-		equal := subtle.ConstantTimeCompare(decoded, configured.Token[:])
-		matched |= equal
-		if equal == 1 {
-			agentID = configured.AgentID
-		}
-	}
-	if matched != 1 {
+	agentID, err := s.tokens.Verify(ctx, raw)
+	if err != nil || strings.TrimSpace(agentID) == "" {
 		return nil, auth.ErrInvalidToken
 	}
 	if _, err := s.services.Agents.Get(ctx, agentID); err != nil {

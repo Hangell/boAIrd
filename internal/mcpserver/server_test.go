@@ -2,8 +2,8 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +11,6 @@ import (
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/brain"
-	"boAIrd/internal/config"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
@@ -102,6 +101,16 @@ type runStub struct{}
 
 func (runStub) Get(context.Context, string) (run.Run, error) { return run.Run{}, run.ErrNotFound }
 
+type staticVerifier map[string]string
+
+func (s staticVerifier) Verify(_ context.Context, raw string) (string, error) {
+	value, ok := s[raw]
+	if !ok {
+		return "", errors.New("invalid token")
+	}
+	return value, nil
+}
+
 type denialStub struct{ records []string }
 
 func (s *denialStub) RecordAuthorizationDenial(_ context.Context, _, projectID, required, _, reason string) error {
@@ -124,7 +133,8 @@ func (r bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	first := testAgent(t, "agent-one")
 	second := testAgent(t, "agent-two")
-	tokens := []config.MCPAgentToken{{AgentID: first.ID(), Token: decodeToken(t, "0101010101010101010101010101010101010101010101010101010101010101")}, {AgentID: second.ID(), Token: decodeToken(t, "0202020202020202020202020202020202020202020202020202020202020202")}}
+	firstToken := "0101010101010101010101010101010101010101010101010101010101010101"
+	secondToken := "0202020202020202020202020202020202020202020202020202020202020202"
 	assigned, err := task.New("task-a", "project-a", "Assigned task", "details", first.ID())
 	if err != nil {
 		t.Fatal(err)
@@ -141,13 +151,13 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(context.Background(), Services{Agents: agentStub{map[string]agent.Agent{first.ID(): first, second.ID(): second}}, Projects: projectStub{}, Tasks: taskStub{map[string]task.Task{"task-a": assigned, "task-b": other}}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, tokens)
+	server, err := New(Services{Agents: agentStub{map[string]agent.Agent{first.ID(): first, second.ID(): second}}, Projects: projectStub{}, Tasks: taskStub{map[string]task.Task{"task-a": assigned, "task-b": other}}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, staticVerifier{firstToken: first.ID(), secondToken: second.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
-	current := "0101010101010101010101010101010101010101010101010101010101010101"
+	current := firstToken
 	httpClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return current }, base: http.DefaultTransport}}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL, HTTPClient: httpClient, DisableStandaloneSSE: true}, nil)
@@ -191,7 +201,7 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if strings.Contains(string(encoded), "task not found") {
 		t.Fatalf("tool leaked internal error: %s", encoded)
 	}
-	current = "0202020202020202020202020202020202020202020202020202020202020202"
+	current = secondToken
 	if _, err := session.ListTools(context.Background(), nil); err == nil || !strings.Contains(strings.ToLower(err.Error()), "forbidden") {
 		t.Fatalf("session accepted a different Agent token: %v", err)
 	}
@@ -199,7 +209,8 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 
 func TestHandlerRejectsMissingOrInvalidBearerToken(t *testing.T) {
 	a := testAgent(t, "agent-one")
-	server, err := New(context.Background(), Services{Agents: agentStub{map[string]agent.Agent{a.ID(): a}}, Projects: projectStub{}, Tasks: taskStub{}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, []config.MCPAgentToken{{AgentID: a.ID(), Token: decodeToken(t, "0101010101010101010101010101010101010101010101010101010101010101")}})
+	token := "0101010101010101010101010101010101010101010101010101010101010101"
+	server, err := New(Services{Agents: agentStub{map[string]agent.Agent{a.ID(): a}}, Projects: projectStub{}, Tasks: taskStub{}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, staticVerifier{token: a.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,11 +237,41 @@ func TestHandlerRejectsMissingOrInvalidBearerToken(t *testing.T) {
 	}
 }
 
+func TestRevokedTokenCannotReuseAnExistingSession(t *testing.T) {
+	value := testAgent(t, "agent-one")
+	rawToken := strings.Repeat("01", 32)
+	verifier := staticVerifier{rawToken: value.ID()}
+	server, err := New(Services{Agents: agentStub{map[string]agent.Agent{value.ID(): value}}, Projects: projectStub{}, Tasks: taskStub{}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	httpClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return rawToken }, base: http.DefaultTransport}}
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL, HTTPClient: httpClient, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer session.Close()
+	if _, err := session.ListTools(context.Background(), nil); err != nil {
+		t.Fatalf("initial authenticated request failed: %v", err)
+	}
+	delete(verifier, rawToken)
+	if _, err := session.ListTools(context.Background(), nil); err == nil || !strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
+		t.Fatalf("revoked token reused an existing session: %v", err)
+	}
+}
+
 func TestNewRejectsTokenForUnregisteredAgent(t *testing.T) {
 	services := Services{Agents: agentStub{values: map[string]agent.Agent{}}, Projects: projectStub{}, Tasks: taskStub{}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}
-	_, err := New(context.Background(), services, []config.MCPAgentToken{{AgentID: "missing-agent", Token: decodeToken(t, "0101010101010101010101010101010101010101010101010101010101010101")}})
-	if err == nil {
-		t.Fatal("New() accepted a token for an unregistered Agent")
+	token := "0101010101010101010101010101010101010101010101010101010101010101"
+	server, err := New(services, staticVerifier{token: "missing-agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.verifyToken(context.Background(), token, nil); err == nil {
+		t.Fatal("verifyToken() accepted an unregistered Agent")
 	}
 }
 
@@ -323,17 +364,6 @@ func testAgent(t *testing.T, id string) agent.Agent {
 	}
 	return value
 }
-func decodeToken(t *testing.T, value string) [32]byte {
-	t.Helper()
-	var out [32]byte
-	decoded, err := hex.DecodeString(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	copy(out[:], decoded)
-	return out
-}
-
 func TestToolErrorReportsTaskConflictRetryGuidance(t *testing.T) {
 	err := toolError(task.ErrConflict)
 	if err == nil || err.Error() != "task changed concurrently; reload and retry" {

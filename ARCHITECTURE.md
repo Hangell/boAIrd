@@ -1686,14 +1686,16 @@ The MCP layer must remain an adapter over boAIrd domain services.
 
 It must not contain business logic that only exists inside MCP.
 
-The optional `/mcp` endpoint uses the official Go SDK Streamable HTTP
-transport. It is enabled by a server-side mapping from unique bearer tokens to
-existing Agent IDs. The authenticated Agent ID comes from token verification,
-never from tool arguments, and each stateful MCP session is bound to that ID.
-Tokens are configured through `BOAIRD_MCP_AGENT_TOKENS` and are held only in
-process memory. The current static tokens have no individual expiry; rotate
-them by changing configuration and restarting the service. Idle MCP sessions
-expire after 30 minutes.
+The `/mcp` endpoint uses the official Go SDK Streamable HTTP transport and
+checks a persisted token verifier on every request. A token maps to one existing
+MCP Agent; its identity comes from verification, never tool arguments, and each
+stateful MCP session is bound to that ID. Only a SHA-256 verifier and token
+metadata are stored in SQLite; the random 32-byte plaintext is returned once.
+Tokens have explicit expiry (maximum 365 days), atomic rotation, and immediate
+revocation on the next HTTP request. Lifecycle events are immutable and contain
+no token material. Legacy `BOAIRD_MCP_AGENT_TOKENS` entries are imported once on
+the first database startup with a 90-day expiry. Idle MCP sessions expire after
+30 minutes; revoking a token prevents further requests on its existing session.
 
 Each tool checks explicit capabilities and project scope, with task assignment
 providing scope only for that exact assigned task. The MCP adapter calls
