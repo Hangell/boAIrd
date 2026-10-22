@@ -13,8 +13,34 @@ func TestNewRequiresReferencesAndInitializesBacklog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.Status() != StatusBacklog || task.CreatedAt().IsZero() || task.UpdatedAt().IsZero() {
+	if task.Status() != StatusBacklog || task.CreatedAt().IsZero() || task.UpdatedAt().IsZero() || task.Version() != 1 {
 		t.Fatalf("unexpected task defaults: status=%s created=%s updated=%s", task.Status(), task.CreatedAt(), task.UpdatedAt())
+	}
+}
+
+func TestAdvanceVersionAndRestore(t *testing.T) {
+	value, err := New("t1", "p1", "Title", "", "user1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := value.AdvanceVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Version() != 1 || next.Version() != 2 {
+		t.Fatalf("versions = original %d, next %d; want 1 and 2", value.Version(), next.Version())
+	}
+	restored, err := Restore(next.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Version() != 2 {
+		t.Fatalf("restored version = %d, want 2", restored.Version())
+	}
+	invalid := value.Snapshot()
+	invalid.Version = 0
+	if _, err := Restore(invalid); err == nil {
+		t.Fatal("Restore() accepted a snapshot without a valid version")
 	}
 }
 

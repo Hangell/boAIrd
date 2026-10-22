@@ -18,6 +18,7 @@ import (
 
 var (
 	ErrNotFound        = errors.New("task not found")
+	ErrConflict        = errors.New("task changed concurrently")
 	ErrProjectNotFound = errors.New("project not found")
 	ErrForbidden       = errors.New("task action is not authorized")
 	ErrInvalidInput    = errors.New("invalid task input")
@@ -183,6 +184,10 @@ func (s *Service) Assign(ctx context.Context, id, agentID, reason string, actor 
 	if err != nil {
 		return Task{}, invalidTaskInput(err)
 	}
+	value, err = value.AdvanceVersion()
+	if err != nil {
+		return Task{}, err
+	}
 	if err := s.tasks.Update(ctx, value); err != nil {
 		return Task{}, err
 	}
@@ -223,6 +228,10 @@ func (s *Service) Transition(ctx context.Context, id string, to Status, reason s
 	value, err = value.RecordMutation(actor, reason)
 	if err != nil {
 		return Task{}, invalidTaskInput(err)
+	}
+	value, err = value.AdvanceVersion()
+	if err != nil {
+		return Task{}, err
 	}
 	if err := s.tasks.Update(ctx, value); err != nil {
 		return Task{}, err

@@ -442,6 +442,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { description: Actor lacks the required task capability. }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Task changed after it was read; reload the task and retry. }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/tasks/{id}/transitions:
     post:
@@ -468,6 +469,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { description: Actor lacks the required task capability, human review is required, or a HUMAN_REVIEW action was attempted by a non-administrator. }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Task changed after it was read; reload the task and retry. }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/tasks/{id}/messages:
     parameters:
@@ -799,7 +801,7 @@ components:
         reason: { type: string, minLength: 1, maxLength: 2000 }
     Task:
       type: object
-      required: [id, project_id, title, description, status, priority, created_by, created_by_type, human_review_required, created_at, updated_at]
+      required: [id, project_id, title, description, status, priority, created_by, created_by_type, human_review_required, created_at, updated_at, version]
       properties:
         id: { type: string }
         project_id: { type: string }
@@ -814,6 +816,7 @@ components:
         parent_id: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        version: { type: integer, minimum: 1, description: Monotonically increasing task version for detecting stale concurrent mutations. }
         audit_events: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
     TaskPage:
       type: object

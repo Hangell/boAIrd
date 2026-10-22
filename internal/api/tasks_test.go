@@ -64,3 +64,24 @@ func TestCreateTaskRejectsCallerSuppliedActor(t *testing.T) {
 		t.Fatalf("manager received caller-supplied actor: %+v", manager.actor)
 	}
 }
+
+func TestTaskConflictUsesRetryableConflictResponse(t *testing.T) {
+	response := httptest.NewRecorder()
+	writeTaskError(response, task.ErrConflict)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusConflict)
+	}
+	if !strings.Contains(response.Body.String(), "task changed concurrently; reload and retry") {
+		t.Fatalf("body = %s, want safe conflict guidance", response.Body.String())
+	}
+}
+
+func TestTaskResponseIncludesVersion(t *testing.T) {
+	value, err := task.New("task-1", "project-1", "Task", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := toTaskResponse(value, nil); response.Version != 1 {
+		t.Fatalf("task response version = %d, want 1", response.Version)
+	}
+}

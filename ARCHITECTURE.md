@@ -2557,6 +2557,12 @@ cookie mutation path checks a fixed dashboard-origin allowlist, including logout
 Direct Bearer authentication remains available to local API clients. Brain replacement also
 records its required reason in the existing immutable project audit stream.
 
+Task records carry a monotonically increasing version. Assignment and status
+updates use a SQLite compare-and-swap against the version that was read, so a
+stale mutation returns a conflict instead of replacing a newer state or adding
+an audit decision. REST task responses expose the version and return HTTP 409
+on conflict; callers should reload before retrying.
+
 ---
 
 ## `board`

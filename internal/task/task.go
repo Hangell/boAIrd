@@ -4,6 +4,7 @@ package task
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,7 +32,10 @@ const (
 	ActorAgent         ActorType = "AGENT"
 )
 
-var ErrInvalidTransition = errors.New("invalid task status transition")
+var (
+	ErrInvalidTransition = errors.New("invalid task status transition")
+	ErrVersionExhausted  = errors.New("task version exhausted")
+)
 
 type Task struct {
 	id            string
@@ -50,6 +54,7 @@ type Task struct {
 	lastActorType ActorType
 	lastActorID   string
 	lastReason    string
+	version       int64
 }
 
 type Actor struct {
@@ -76,6 +81,7 @@ type Snapshot struct {
 	LastActorType ActorType
 	LastActorID   string
 	LastReason    string
+	Version       int64
 }
 
 func New(id, projectID, title, description, createdBy string) (Task, error) {
@@ -95,7 +101,7 @@ func NewWithActor(id, projectID, title, description string, actor Actor) (Task, 
 	return Task{
 		id: id, projectID: projectID, title: title, description: description,
 		status: StatusBacklog, priority: "NORMAL", createdBy: actor.ID, createdByType: actor.Type, lastActorType: actor.Type,
-		lastActorID: actor.ID, createdAt: now, updatedAt: now,
+		lastActorID: actor.ID, createdAt: now, updatedAt: now, version: 1,
 	}, nil
 }
 
@@ -115,23 +121,33 @@ func (t Task) UpdatedAt() time.Time     { return t.updatedAt }
 func (t Task) LastActorType() ActorType { return t.lastActorType }
 func (t Task) LastActorID() string      { return t.lastActorID }
 func (t Task) LastReason() string       { return t.lastReason }
+func (t Task) Version() int64           { return t.version }
 
 func (t Task) Snapshot() Snapshot {
 	return Snapshot{ID: t.id, ProjectID: t.projectID, Title: t.title, Description: t.description, Status: t.status, Priority: t.priority,
 		CreatedBy: t.createdBy, CreatedByType: t.createdByType, AssignedTo: t.assignedTo, HumanReview: t.humanReview, ParentID: t.parentID,
-		CreatedAt: t.createdAt, UpdatedAt: t.updatedAt, LastActorType: t.lastActorType, LastActorID: t.lastActorID, LastReason: t.lastReason}
+		CreatedAt: t.createdAt, UpdatedAt: t.updatedAt, LastActorType: t.lastActorType, LastActorID: t.lastActorID, LastReason: t.lastReason, Version: t.version}
 }
 
 func Restore(snapshot Snapshot) (Task, error) {
 	if strings.TrimSpace(snapshot.ID) == "" || strings.TrimSpace(snapshot.ProjectID) == "" || strings.TrimSpace(snapshot.Title) == "" ||
 		strings.TrimSpace(snapshot.CreatedBy) == "" || !validActorType(snapshot.CreatedByType) || !validStatus(snapshot.Status) ||
-		!validActorType(snapshot.LastActorType) || strings.TrimSpace(snapshot.LastActorID) == "" || snapshot.CreatedAt.IsZero() || snapshot.UpdatedAt.IsZero() {
+		!validActorType(snapshot.LastActorType) || strings.TrimSpace(snapshot.LastActorID) == "" || snapshot.CreatedAt.IsZero() || snapshot.UpdatedAt.IsZero() || snapshot.Version < 1 {
 		return Task{}, errors.New("invalid task snapshot")
 	}
 	return Task{id: snapshot.ID, projectID: snapshot.ProjectID, title: snapshot.Title, description: snapshot.Description, status: snapshot.Status,
 		priority: snapshot.Priority, createdBy: snapshot.CreatedBy, createdByType: snapshot.CreatedByType, assignedTo: snapshot.AssignedTo,
 		humanReview: snapshot.HumanReview, parentID: snapshot.ParentID, createdAt: snapshot.CreatedAt.UTC(), updatedAt: snapshot.UpdatedAt.UTC(),
-		lastActorType: snapshot.LastActorType, lastActorID: snapshot.LastActorID, lastReason: snapshot.LastReason}, nil
+		lastActorType: snapshot.LastActorType, lastActorID: snapshot.LastActorID, lastReason: snapshot.LastReason, version: snapshot.Version}, nil
+}
+
+// AdvanceVersion prepares a mutation snapshot for a compare-and-swap update.
+func (t Task) AdvanceVersion() (Task, error) {
+	if t.version < 1 || t.version == math.MaxInt64 {
+		return Task{}, ErrVersionExhausted
+	}
+	t.version++
+	return t, nil
 }
 
 func (t Task) SetPriority(priority string) (Task, error) {

@@ -53,6 +53,7 @@ type taskResponse struct {
 	ParentID      string            `json:"parent_id,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
+	Version       int64             `json:"version"`
 	AuditEvents   []task.AuditEvent `json:"audit_events,omitempty"`
 }
 
@@ -151,7 +152,7 @@ func toTaskResponse(value task.Task, events []task.AuditEvent) taskResponse {
 	return taskResponse{ID: snapshot.ID, ProjectID: snapshot.ProjectID, Title: snapshot.Title, Description: snapshot.Description,
 		Status: snapshot.Status, Priority: snapshot.Priority, CreatedBy: snapshot.CreatedBy, CreatedByType: snapshot.CreatedByType,
 		AssignedTo: snapshot.AssignedTo, HumanReview: snapshot.HumanReview, ParentID: snapshot.ParentID,
-		CreatedAt: snapshot.CreatedAt, UpdatedAt: snapshot.UpdatedAt, AuditEvents: events}
+		CreatedAt: snapshot.CreatedAt, UpdatedAt: snapshot.UpdatedAt, Version: snapshot.Version, AuditEvents: events}
 }
 
 func writeTaskError(w http.ResponseWriter, err error) {
@@ -162,6 +163,8 @@ func writeTaskError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
 	case errors.Is(err, task.ErrForbidden):
 		writeAPIError(w, http.StatusForbidden, "forbidden", "task action is not authorized")
+	case errors.Is(err, task.ErrConflict):
+		writeAPIError(w, http.StatusConflict, "task_conflict", "task changed concurrently; reload and retry")
 	case errors.Is(err, task.ErrInvalidInput), errors.Is(err, task.ErrInvalidTransition), errors.Is(err, task.ErrProjectArchived), errors.Is(err, agent.ErrInvalidInput):
 		writeAPIError(w, http.StatusBadRequest, "invalid_task", err.Error())
 	default:

@@ -86,9 +86,9 @@ func (r *TaskRepository) List(ctx context.Context, projectID string, status task
 
 func (r *TaskRepository) Update(ctx context.Context, value task.Task) error {
 	result, err := r.database.ExecContext(ctx, `UPDATE tasks SET title=?, description=?, status=?, priority=?, assigned_to=NULLIF(?,''),
-		human_review=?, parent_id=NULLIF(?,''), updated_at=?, last_actor_type=?, last_actor_id=?, last_reason=? WHERE id=?`,
+		human_review=?, parent_id=NULLIF(?,''), updated_at=?, last_actor_type=?, last_actor_id=?, last_reason=?, version=? WHERE id=? AND version=?`,
 		value.Title(), value.Description(), value.Status(), value.Priority(), value.AssignedTo(), value.HumanReview(), value.ParentID(),
-		formatDatabaseTime(value.UpdatedAt()), value.LastActorType(), value.LastActorID(), value.LastReason(), value.ID())
+		formatDatabaseTime(value.UpdatedAt()), value.LastActorType(), value.LastActorID(), value.LastReason(), value.Version(), value.ID(), value.Version()-1)
 	if err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
@@ -97,7 +97,14 @@ func (r *TaskRepository) Update(ctx context.Context, value task.Task) error {
 		return fmt.Errorf("count updated tasks: %w", err)
 	}
 	if count == 0 {
-		return task.ErrNotFound
+		var exists bool
+		if err := r.database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?)", value.ID()).Scan(&exists); err != nil {
+			return fmt.Errorf("check task after update conflict: %w", err)
+		}
+		if !exists {
+			return task.ErrNotFound
+		}
+		return task.ErrConflict
 	}
 	return nil
 }
@@ -132,14 +139,14 @@ func (r *TaskRepository) ListAuditEvents(ctx context.Context, id string) ([]task
 type taskRowScanner interface{ Scan(...any) error }
 
 const taskSelect = `SELECT id, project_id, title, description, status, priority, created_by_type, created_by,
-	COALESCE(assigned_to,''), human_review, COALESCE(parent_id,''), created_at, updated_at, last_actor_type, last_actor_id, last_reason FROM tasks`
+	COALESCE(assigned_to,''), human_review, COALESCE(parent_id,''), created_at, updated_at, last_actor_type, last_actor_id, last_reason, version FROM tasks`
 
 func scanTask(row taskRowScanner) (task.Task, error) {
 	var value task.Snapshot
 	var createdAt, updatedAt string
 	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
 		&value.CreatedByType, &value.CreatedBy, &value.AssignedTo, &value.HumanReview, &value.ParentID, &createdAt, &updatedAt,
-		&value.LastActorType, &value.LastActorID, &value.LastReason); err != nil {
+		&value.LastActorType, &value.LastActorID, &value.LastReason, &value.Version); err != nil {
 		return task.Task{}, err
 	}
 	var err error
@@ -157,11 +164,11 @@ func scanTask(row taskRowScanner) (task.Task, error) {
 func writeTask(ctx context.Context, executor sqlExecutor, value task.Task) error {
 	snapshot := value.Snapshot()
 	_, err := executor.ExecContext(ctx, `INSERT INTO tasks(id,project_id,title,description,status,priority,created_by_type,created_by,assigned_to,
-		human_review,parent_id,created_at,updated_at,last_actor_type,last_actor_id,last_reason)
-		VALUES(?,?,?,?,?,?,?, ?,NULLIF(?,''),?,NULLIF(?,''),?,?,?,?,?)`,
+		human_review,parent_id,created_at,updated_at,last_actor_type,last_actor_id,last_reason,version)
+		VALUES(?,?,?,?,?,?,?, ?,NULLIF(?,''),?,NULLIF(?,''),?,?,?,?,?,?)`,
 		snapshot.ID, snapshot.ProjectID, snapshot.Title, snapshot.Description, snapshot.Status, snapshot.Priority, snapshot.CreatedByType,
 		snapshot.CreatedBy, snapshot.AssignedTo, snapshot.HumanReview, snapshot.ParentID, formatDatabaseTime(snapshot.CreatedAt),
-		formatDatabaseTime(snapshot.UpdatedAt), snapshot.LastActorType, snapshot.LastActorID, snapshot.LastReason)
+		formatDatabaseTime(snapshot.UpdatedAt), snapshot.LastActorType, snapshot.LastActorID, snapshot.LastReason, snapshot.Version)
 	return err
 }
 

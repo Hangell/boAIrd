@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"boAIrd/internal/agent"
@@ -247,6 +248,137 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	}
 	if !rejected {
 		t.Fatal("human review rejection was not fully recorded")
+	}
+}
+
+type synchronizedTaskRepository struct {
+	task.Repository
+	mu      sync.Mutex
+	reads   int
+	ready   chan struct{}
+	release chan struct{}
+}
+
+func (r *synchronizedTaskRepository) Get(ctx context.Context, id string) (task.Task, error) {
+	value, err := r.Repository.Get(ctx, id)
+	if err != nil {
+		return task.Task{}, err
+	}
+	r.mu.Lock()
+	r.reads++
+	if r.reads == 2 {
+		close(r.ready)
+	}
+	r.mu.Unlock()
+	select {
+	case <-r.release:
+		return value, nil
+	case <-ctx.Done():
+		return task.Task{}, ctx.Err()
+	}
+}
+
+func TestConcurrentHumanReviewDecisionsRejectStaleMutation(t *testing.T) {
+	ctx := context.Background()
+	database, err := storage.OpenSQLite(ctx, filepath.Join(t.TempDir(), "tasks.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	projectRepository, err := storage.NewProjectRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := project.NewManager(projectRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewRequired := true
+	p, err := projects.Create(ctx, project.CreateInput{Name: "Concurrent review", HumanReviewRequired: &reviewRequired})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRepository, err := storage.NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := agent.NewManager(agentRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	brainRepository, err := storage.NewBrainRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseRepository, err := storage.NewTaskRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseService, err := task.NewService(baseRepository, projects, agents, brainRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := task.Actor{Type: task.ActorAdministrator, ID: "admin", Capabilities: []string{"task.create", "task.transition", "task.review", "task.complete"}, ProjectIDs: []string{p.ID()}}
+	value, err := baseService.Create(ctx, p.ID(), task.CreateInput{Title: "Review decision", Reason: "test concurrency"}, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []task.Status{task.StatusReady, task.StatusWorking, task.StatusReview, task.StatusHumanReview} {
+		value, err = baseService.Transition(ctx, value.ID(), status, "advance to review", admin)
+		if err != nil {
+			t.Fatalf("transition to %s: %v", status, err)
+		}
+	}
+	gated := &synchronizedTaskRepository{Repository: baseRepository, ready: make(chan struct{}), release: make(chan struct{})}
+	concurrentService, err := task.NewService(gated, projects, agents, brainRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	go func() {
+		_, err := concurrentService.Transition(ctx, value.ID(), task.StatusDone, "approve review", admin)
+		results <- err
+	}()
+	go func() {
+		_, err := concurrentService.Transition(ctx, value.ID(), task.StatusWorking, "reject review", admin)
+		results <- err
+	}()
+	<-gated.ready
+	close(gated.release)
+	first, second := <-results, <-results
+	successes, conflicts := 0, 0
+	for _, result := range []error{first, second} {
+		switch {
+		case result == nil:
+			successes++
+		case errors.Is(result, task.ErrConflict):
+			conflicts++
+		default:
+			t.Fatalf("concurrent review decision error = %v, want success or ErrConflict", result)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent decisions: successes=%d conflicts=%d, want one each", successes, conflicts)
+	}
+	current, err := baseRepository.Get(ctx, value.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status() != task.StatusDone && current.Status() != task.StatusWorking {
+		t.Fatalf("final status = %s, want DONE or WORKING", current.Status())
+	}
+	events, err := baseRepository.ListAuditEvents(ctx, value.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions := 0
+	for _, event := range events {
+		if event.EventType == "task.human_review.approved" || event.EventType == "task.human_review.rejected" {
+			decisions++
+		}
+	}
+	if decisions != 1 {
+		t.Fatalf("Human Review decision audit count = %d, want 1", decisions)
 	}
 }
 
