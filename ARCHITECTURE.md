@@ -2562,6 +2562,14 @@ local runtime
 remote runtime
 ```
 
+`internal/runtime` exposes a provider-independent `AgentRuntime` contract
+(`Runtime`, `RequiredCapabilities`, `Execute`, `Status`). The API adapter
+executes through the provider registry; the MCP, local, and remote adapters fail
+closed until their transports exist, because MCP Agents pull work through
+authenticated tools. A `Registry` resolves adapters by `agent.Runtime` and an
+`Enforcer` applies the same Agent resolution, capability, deadline, and error
+mapping to every adapter.
+
 ---
 
 ## `provider`

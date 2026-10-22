@@ -1239,6 +1239,25 @@ with `run.read`.
 
 ---
 
+# Agent Runtime Execution Boundary
+
+The shared `runtime.Enforcer` runs an injected `ScopeAuthorizer` before
+resolving adapter capabilities or invoking any registered runtime adapter.
+Each execution must name a project. The application permits persisted Agent
+membership for project-scoped executions. When a task is named, it additionally
+requires that exact task to be `WORKING`, belong to the requested project, and
+be assigned to that Agent; an exact assignment may provide task-only scope.
+Every adapter's declared capabilities are checked after scope authorization.
+Runtime selection and an adapter's implementation do not grant authority.
+Missing or mismatched scope is denied before adapter execution for API, MCP,
+LOCAL, and REMOTE runtimes;
+credential resolution remains an additional API-provider boundary, not a
+substitute for this check. Adapters must not broaden the scope validated by the
+Enforcer. The active Brain uses its separate Brain/project authorization path
+and is not implicitly exempted by the runtime Enforcer.
+
+---
+
 # Agent Registration
 
 An external client must not be able to simply declare:

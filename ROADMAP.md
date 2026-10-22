@@ -1310,6 +1310,26 @@ Local Runtime
 Remote Runtime
 ```
 
+## Current implementation
+
+- `internal/runtime` defines the provider-independent `AgentRuntime` contract:
+  `Runtime()`, `RequiredCapabilities()`, `Execute`, and `Status`. Domain services
+  depend only on this contract.
+- `APIExecutor` executes API-runtime Agents through their configured provider and
+  declares `task.transition` as its required capability.
+- MCP, local, and remote adapters fail closed: their `Execute` returns
+  `ErrUnsupportedRuntime` because MCP Agents pull work through authenticated
+  tools and local/remote execution are not yet implemented, while `Status` still
+  reports the persisted Agent state.
+- `Registry` resolves adapters by `agent.Runtime`, and `Enforcer` applies the
+  shared policy to every adapter: Agent resolution, declared capability checks,
+  a bounded deadline, and uniform cancellation/timeout/denial/failure error
+  mapping.
+- The orchestrator consumes the abstraction through the `Executor` interface; it
+  still schedules only push-executable Agents and owns the per-execution
+  deadline. Contract tests run against every adapter and cover success, denial,
+  cancellation, timeout, and failure.
+
 ---
 
 # Phase 24 — Context Engine

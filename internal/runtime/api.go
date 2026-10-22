@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/capability"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/provider"
 	"boAIrd/internal/provider/adapters"
@@ -31,13 +32,38 @@ type APIExecutor struct {
 	agents         AgentReader
 	credentials    CredentialResolver
 	endpointPolicy provider.EndpointPolicy
+	required       []capability.Capability
 }
 
 func NewAPIExecutor(agents AgentReader, credentials CredentialResolver, endpointPolicy provider.EndpointPolicy) (*APIExecutor, error) {
 	if agents == nil || credentials == nil {
 		return nil, errors.New("agent reader and credential resolver are required")
 	}
-	return &APIExecutor{agents: agents, credentials: credentials, endpointPolicy: endpointPolicy}, nil
+	transition, err := capability.New("task.transition")
+	if err != nil {
+		return nil, fmt.Errorf("define API runtime required capability: %w", err)
+	}
+	return &APIExecutor{
+		agents: agents, credentials: credentials, endpointPolicy: endpointPolicy,
+		required: []capability.Capability{transition},
+	}, nil
+}
+
+func (e *APIExecutor) Runtime() agent.Runtime { return agent.RuntimeAPI }
+
+func (e *APIExecutor) RequiredCapabilities() []capability.Capability {
+	return append([]capability.Capability(nil), e.required...)
+}
+
+func (e *APIExecutor) Status(ctx context.Context, agentID string) (agent.Status, error) {
+	a, err := e.agents.Get(ctx, agentID)
+	if err != nil {
+		return agent.Status(""), err
+	}
+	if a.Runtime() != agent.RuntimeAPI {
+		return agent.Status(""), fmt.Errorf("%w: %s", ErrUnsupportedRuntime, a.Runtime())
+	}
+	return a.Status(), nil
 }
 
 func (e *APIExecutor) Execute(ctx context.Context, request Request) (Result, error) {
