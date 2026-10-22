@@ -1363,7 +1363,9 @@ SYSTEM INSTRUCTION
 
 # Context Trust Levels
 
-The Context Engine should eventually work with trust levels.
+The worker Context Engine assigns trust levels to selected entries and serializes them as data with source provenance. It enforces project scope for every candidate and task scope for task-bound entries, then applies configurable byte and estimated-token budgets. Conversation access uses the existing assigned-Agent check; Run history is limited to the same project, task, and Agent. File, memory, and repository readers are not implemented, so stored paths and URLs are not accessed. Omitted sources are reported instead of silently fetched. Context entries cannot grant capabilities or override system, administrator, or project policy.
+
+Limits are configurable with `BOAIRD_CONTEXT_MAX_BYTES` (512 bytes–1 MiB) and `BOAIRD_CONTEXT_MAX_TOKENS` (128–100,000). Secret-like content is redacted before serialization. Selection failures block execution and are escalated rather than falling back to an unbounded prompt.
 
 Example:
 

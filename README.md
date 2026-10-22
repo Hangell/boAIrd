@@ -1455,7 +1455,11 @@ boAIrd Context Engine
 
 # Context Engine
 
-boAIrd can select:
+The worker orchestrator builds a bounded, project/task-scoped JSON context for each API Agent execution. Entries keep their source and trust label; the serialized notice treats entry content as data that cannot grant authority or override policy. The dispatch outcome reports selected and omitted entries, including budget and unavailable-source reasons. Limits default to 16 KiB and 4096 estimated tokens and can be configured with `BOAIRD_CONTEXT_MAX_BYTES` and `BOAIRD_CONTEXT_MAX_TOKENS`.
+
+Currently available inputs are project and task metadata, Agent/Brain instructions, authorized task conversation, and prior Runs for the same task and Agent. Files, memory, and repository history remain unavailable until dedicated scoped readers exist; the engine reports those omissions and does not access workspace paths or repository URLs.
+
+The context model includes these planned sources; those without a scoped reader are reported unavailable:
 
 - files;
 - documentation;
@@ -2090,6 +2094,8 @@ The service reads these optional environment variables:
 | `BOAIRD_AGENT_STATUS_INTERVAL` | `30s` | How often silent sessions are expired and status transitions are recorded. Between `1s` and `1h`. |
 | `BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS` | `3` | Maximum Runs the orchestrator creates for one task before leaving it BLOCKED and escalating to the administrator. |
 | `BOAIRD_ORCHESTRATOR_TIMEOUT` | `5m` | Maximum duration of one worker execution. Timeouts are recorded as cancelled Runs and handled through the bounded retry flow. |
+| `BOAIRD_CONTEXT_MAX_BYTES` | `16384` | Maximum serialized worker context size in bytes; valid range is 512 bytes to 1 MiB. |
+| `BOAIRD_CONTEXT_MAX_TOKENS` | `4096` | Maximum estimated worker context tokens; valid range is 128 to 100,000. |
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 

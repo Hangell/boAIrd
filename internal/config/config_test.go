@@ -11,6 +11,7 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES",
 		"BOAIRD_AGENT_STALE_AFTER", "BOAIRD_AGENT_OFFLINE_AFTER", "BOAIRD_AGENT_STATUS_INTERVAL",
 		"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS", "BOAIRD_ORCHESTRATOR_TIMEOUT")
+	unsetEnvironment(t, "BOAIRD_CONTEXT_MAX_BYTES", "BOAIRD_CONTEXT_MAX_TOKENS")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -26,6 +27,41 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.OrchestratorMaxAttempts != defaultOrchestratorMaxAttempts || cfg.OrchestratorTimeout != defaultOrchestratorExecutionTimeout {
 		t.Fatalf("orchestrator defaults = %d/%s", cfg.OrchestratorMaxAttempts, cfg.OrchestratorTimeout)
+	}
+	if cfg.ContextMaxBytes != defaultContextMaxBytes || cfg.ContextMaxTokens != defaultContextMaxTokens {
+		t.Fatalf("context defaults = %d bytes/%d tokens", cfg.ContextMaxBytes, cfg.ContextMaxTokens)
+	}
+}
+
+func TestLoadParsesContextLimits(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_CONTEXT_MAX_BYTES", "32768")
+	t.Setenv("BOAIRD_CONTEXT_MAX_TOKENS", "8192")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ContextMaxBytes != 32768 || cfg.ContextMaxTokens != 8192 {
+		t.Fatalf("context limits = %d bytes/%d tokens", cfg.ContextMaxBytes, cfg.ContextMaxTokens)
+	}
+}
+
+func TestLoadRejectsInvalidContextLimits(t *testing.T) {
+	for name, values := range map[string][2]string{
+		"bytes below minimum":   {"BOAIRD_CONTEXT_MAX_BYTES", "256"},
+		"bytes above maximum":   {"BOAIRD_CONTEXT_MAX_BYTES", "2097152"},
+		"malformed byte limit":  {"BOAIRD_CONTEXT_MAX_BYTES", "large"},
+		"tokens below minimum":  {"BOAIRD_CONTEXT_MAX_TOKENS", "64"},
+		"tokens above maximum":  {"BOAIRD_CONTEXT_MAX_TOKENS", "100001"},
+		"malformed token limit": {"BOAIRD_CONTEXT_MAX_TOKENS", "many"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setValidSecrets(t)
+			t.Setenv(values[0], values[1])
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() accepted invalid context limits")
+			}
+		})
 	}
 }
 
@@ -212,6 +248,7 @@ func testConfig(host string) Config {
 	return Config{
 		Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, MasterKey: MasterKey{1}, LocalAuthToken: LocalAuthToken{2},
 		AgentStaleAfter: defaultAgentStaleAfter, AgentOfflineAfter: defaultAgentOfflineAfter, AgentStatusInterval: defaultAgentStatusInterval,
+		ContextMaxBytes: defaultContextMaxBytes, ContextMaxTokens: defaultContextMaxTokens,
 	}
 }
 

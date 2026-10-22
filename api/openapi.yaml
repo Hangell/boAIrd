@@ -990,6 +990,38 @@ components:
         run_id: { type: string }
         status: { type: string, enum: [SUCCEEDED, RETRY_SCHEDULED, ESCALATED, SKIPPED] }
         reason: { type: string }
+        context_selection:
+          $ref: '#/components/schemas/ContextSelectionSummary'
+    ContextSelectionSummary:
+      type: object
+      required: [project_id, selected, omitted, bytes, estimated_tokens]
+      properties:
+        project_id: { type: string }
+        task_id: { type: string }
+        selected:
+          type: array
+          items: { $ref: '#/components/schemas/SelectedContextItem' }
+        omitted:
+          type: array
+          items: { $ref: '#/components/schemas/OmittedContextItem' }
+        bytes: { type: integer, minimum: 0 }
+        estimated_tokens: { type: integer, minimum: 0 }
+    SelectedContextItem:
+      type: object
+      required: [id, project_id, source, trust, bytes]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        task_id: { type: string }
+        source: { type: string, enum: [project, task, file, conversation, memory, run, repository, brain, agent, external] }
+        trust: { type: string, enum: [SYSTEM, ADMIN, PROJECT_POLICY, BRAIN, AGENT, REPOSITORY, EXTERNAL, UNTRUSTED] }
+        bytes: { type: integer, minimum: 0 }
+    OmittedContextItem:
+      type: object
+      properties:
+        id: { type: string }
+        source: { type: string, enum: [project, task, file, conversation, memory, run, repository, brain, agent, external] }
+        reason: { type: string }
     DispatchReport:
       type: object
       required: [outcomes]
