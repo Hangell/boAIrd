@@ -1,0 +1,52 @@
+@use '@angular/material' as mat;
+
+@include mat.core();
+
+$boaird-theme: mat.define-theme((
+  color: (
+    theme-type: light,
+    primary: mat.$azure-palette,
+    tertiary: mat.$violet-palette,
+  ),
+  typography: (
+    plain-family: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    brand-family: 'Inter, ui-sans-serif, system-ui, sans-serif',
+  ),
+  density: (scale: -1),
+));
+
+html {
+  @include mat.core-theme($boaird-theme);
+  @include mat.button-theme($boaird-theme);
+  @include mat.card-theme($boaird-theme);
+  @include mat.list-theme($boaird-theme);
+  @include mat.sidenav-theme($boaird-theme);
+  @include mat.toolbar-theme($boaird-theme);
+  color-scheme: light;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  scroll-behavior: smooth;
+}
+
+:root {
+  --boaird-canvas: #f5f7fb;
+  --boaird-sidebar: #fbfcfe;
+  --boaird-surface: #fff;
+  --boaird-surface-muted: #f1f4f8;
+  --boaird-ink: #182230;
+  --boaird-muted: #697586;
+  --boaird-border: #e2e7ef;
+  --boaird-accent: #315eab;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--boaird-canvas); color: var(--boaird-ink); margin: 0; min-height: 100dvh; }
+a { color: inherit; }
+a:focus-visible, button:focus-visible, [tabindex='-1']:focus-visible { outline: 3px solid #315eab; outline-offset: 3px; }
+.skip-link { background: var(--boaird-ink); border-radius: .5rem; color: white; left: 1rem; padding: .75rem 1rem; position: fixed; top: 1rem; transform: translateY(-200%); z-index: 10; }
+.skip-link:focus { transform: translateY(0); }
+.navigation-link-active { background: #e9effa !important; border-radius: .6rem; color: #214b91 !important; font-weight: 650; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}

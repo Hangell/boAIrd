@@ -2110,11 +2110,20 @@ src/app/
 ├── core/
 ├── shared/
 ├── features/
-├── layout/
 ├── app.routes.ts
 ├── app.config.ts
-└── app.component.ts
+├── app.ts
+├── app.html
+└── app.scss
 ```
+
+The current `web/` workspace is a standalone Angular shell using Angular
+Material and SCSS. Its core layer owns the configured API base URL, HTTP/SSE
+clients, and global error handling. Feature routes render projections of
+backend-owned state; they do not maintain a second copy of task status. The
+shell has semantic navigation, keyboard skip navigation, visible focus, and
+reduced-motion support. Angular `i18n` markers and `$localize` IDs establish
+English as the source locale.
 
 ---
 

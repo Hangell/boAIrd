@@ -1,0 +1,50 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ApiClient } from './api-client';
+import { API_BASE_URL } from './api-config';
+
+describe('ApiClient', () => {
+  let client: ApiClient;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: API_BASE_URL, useValue: 'http://127.0.0.1:3110/' },
+      ],
+    });
+    client = TestBed.inject(ApiClient);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  it('joins the configured base URL and a slash-prefixed path', () => {
+    let response: { id: string } | undefined;
+
+    client.get<{ id: string }>('/api/v1/projects/p1').subscribe((value) => (response = value));
+
+    const request = http.expectOne('http://127.0.0.1:3110/api/v1/projects/p1');
+    expect(request.request.method).toBe('GET');
+    request.flush({ id: 'p1' });
+    expect(response).toEqual({ id: 'p1' });
+  });
+
+  it('posts typed payloads to paths without a leading slash', () => {
+    let response: { id: string } | undefined;
+
+    client
+      .post<{ name: string }, { id: string }>('api/v1/projects', { name: 'Example' })
+      .subscribe((value) => (response = value));
+
+    const request = http.expectOne('http://127.0.0.1:3110/api/v1/projects');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ name: 'Example' });
+    request.flush({ id: 'p1' });
+    expect(response).toEqual({ id: 'p1' });
+  });
+});

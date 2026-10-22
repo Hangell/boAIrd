@@ -1,0 +1,40 @@
+<a class="skip-link" href="#main-content" i18n="@@a11y.skipToContent">Skip to main content</a>
+
+<mat-sidenav-container class="app-frame">
+  <mat-sidenav #drawer class="app-navigation" [mode]="isHandset() ? 'over' : 'side'" [opened]="!isHandset()" aria-label="Primary navigation" i18n-aria-label="@@a11y.primaryNavigation">
+    <a class="brand" routerLink="/overview" aria-label="boAIrd dashboard home" i18n-aria-label="@@a11y.dashboardHome">
+      <span class="brand-mark" aria-hidden="true">b</span>
+      <span>boAIrd</span>
+    </a>
+
+    <nav aria-label="Main menu" i18n-aria-label="@@a11y.mainMenu">
+      <mat-nav-list>
+        @for (item of navigation; track item.path) {
+          <a mat-list-item [routerLink]="item.path" routerLinkActive="navigation-link-active" [routerLinkActiveOptions]="{ exact: true }">
+            {{ item.label }}
+          </a>
+        }
+      </mat-nav-list>
+    </nav>
+
+    <div class="navigation-footer">
+      <a mat-button routerLink="/settings" routerLinkActive="navigation-link-active" i18n="@@navigation.settings">Settings</a>
+      <span class="connection-state"><span class="connection-dot" aria-hidden="true"></span><span i18n="@@status.localMode">Local mode</span></span>
+    </div>
+  </mat-sidenav>
+
+  <mat-sidenav-content class="app-content">
+    <mat-toolbar class="top-bar" role="banner">
+      @if (isHandset()) {
+        <button mat-button class="menu-button" (click)="drawer.toggle()" aria-label="Toggle navigation" i18n-aria-label="@@a11y.toggleNavigation" i18n="@@navigation.menu">Menu</button>
+      }
+      <span class="top-bar-title" i18n="@@app.title">Project workspace</span>
+      <span class="toolbar-spacer"></span>
+      <span class="api-indicator"><span class="connection-dot" aria-hidden="true"></span><span i18n="@@status.apiLocal">Local API</span></span>
+    </mat-toolbar>
+
+    <main id="main-content" class="page-content" tabindex="-1">
+      <router-outlet />
+    </main>
+  </mat-sidenav-content>
+</mat-sidenav-container>
