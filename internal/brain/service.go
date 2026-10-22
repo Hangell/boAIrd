@@ -35,11 +35,12 @@ type CredentialResolver interface {
 }
 
 type Service struct {
-	brains      Repository
-	projects    ProjectReader
-	agents      AgentReader
-	runs        RunRepository
-	credentials CredentialResolver
+	brains         Repository
+	projects       ProjectReader
+	agents         AgentReader
+	runs           RunRepository
+	credentials    CredentialResolver
+	endpointPolicy provider.EndpointPolicy
 }
 
 type CreateInput struct {
@@ -51,11 +52,18 @@ type Execution struct {
 	Content string
 }
 
-func NewService(brains Repository, projects ProjectReader, agents AgentReader, runs RunRepository, credentials CredentialResolver) (*Service, error) {
+func NewService(brains Repository, projects ProjectReader, agents AgentReader, runs RunRepository, credentials CredentialResolver, endpointPolicies ...provider.EndpointPolicy) (*Service, error) {
 	if brains == nil || projects == nil || agents == nil || runs == nil || credentials == nil {
 		return nil, errors.New("Brain service dependencies are required")
 	}
-	return &Service{brains: brains, projects: projects, agents: agents, runs: runs, credentials: credentials}, nil
+	if len(endpointPolicies) > 1 {
+		return nil, errors.New("at most one provider endpoint policy may be configured")
+	}
+	var endpointPolicy provider.EndpointPolicy
+	if len(endpointPolicies) > 0 {
+		endpointPolicy = endpointPolicies[0]
+	}
+	return &Service{brains: brains, projects: projects, agents: agents, runs: runs, credentials: credentials, endpointPolicy: endpointPolicy}, nil
 }
 
 func (s *Service) Create(ctx context.Context, projectID string, input CreateInput) (Brain, error) {
@@ -184,7 +192,7 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 		return Execution{}, errors.New("initialize provider registry")
 	}
 	if err := registry.Configure(a.ID(), a.Provider(), provider.Config{
-		BaseURL: a.ProviderBaseURL(), CredentialID: a.CredentialID(), CredentialResolver: s.credentials,
+		BaseURL: a.ProviderBaseURL(), EndpointPolicy: s.endpointPolicy, CredentialID: a.CredentialID(), CredentialResolver: s.credentials,
 		CredentialScope: credential.Scope{AgentID: a.ID(), ProjectID: p.ID()},
 	}); err != nil {
 		return Execution{}, errors.New("configure Brain provider")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -18,12 +19,14 @@ const (
 
 // Config contains the settings required to start the local service.
 type Config struct {
-	Host           string
-	Port           int
-	DatabasePath   string
-	MasterKey      MasterKey
-	LocalAuthToken LocalAuthToken
-	MCPAgentTokens []MCPAgentToken
+	Host                    string
+	Port                    int
+	DatabasePath            string
+	MasterKey               MasterKey
+	LocalAuthToken          LocalAuthToken
+	MCPAgentTokens          []MCPAgentToken
+	ProviderAllowedHosts    []string
+	ProviderAllowedIPRanges []string
 }
 
 // MCPAgentToken registers one MCP bearer token for an existing Agent identity.
@@ -106,6 +109,8 @@ func Load() (Config, error) {
 			cfg.MCPAgentTokens = append(cfg.MCPAgentTokens, configured)
 		}
 	}
+	cfg.ProviderAllowedHosts = splitList(os.Getenv("BOAIRD_PROVIDER_ALLOWED_HOSTS"))
+	cfg.ProviderAllowedIPRanges = splitList(os.Getenv("BOAIRD_PROVIDER_ALLOWED_IP_RANGES"))
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -137,6 +142,16 @@ func (c Config) Validate() error {
 	if c.DatabasePath == "" {
 		return fmt.Errorf("BOAIRD_DATABASE_PATH must not be empty")
 	}
+	for _, host := range c.ProviderAllowedHosts {
+		if !validProviderHost(host) {
+			return fmt.Errorf("BOAIRD_PROVIDER_ALLOWED_HOSTS must contain exact hostnames or IP addresses")
+		}
+	}
+	for _, value := range c.ProviderAllowedIPRanges {
+		if _, err := netip.ParsePrefix(value); err != nil {
+			return fmt.Errorf("BOAIRD_PROVIDER_ALLOWED_IP_RANGES must contain valid CIDR ranges")
+		}
+	}
 	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
 	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))
 	for _, entry := range c.MCPAgentTokens {
@@ -156,6 +171,47 @@ func (c Config) Validate() error {
 		seenTokens[entry.Token] = struct{}{}
 	}
 	return nil
+}
+
+func splitList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, strings.ToLower(strings.TrimSuffix(part, ".")))
+		}
+	}
+	return result
+}
+
+func validProviderHost(host string) bool {
+	if host == "" || strings.ContainsAny(host, "/@?#\t\r\n *") {
+		return false
+	}
+	if address, err := netip.ParseAddr(host); err == nil {
+		if address.Zone() != "" {
+			return false
+		}
+		return true
+	}
+	if len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Address returns the TCP address used by the HTTP server.

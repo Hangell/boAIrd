@@ -15,6 +15,7 @@ import (
 	"boAIrd/internal/mcpserver"
 	"boAIrd/internal/mcptoken"
 	"boAIrd/internal/project"
+	"boAIrd/internal/provider"
 	"boAIrd/internal/run"
 	"boAIrd/internal/storage"
 	"boAIrd/internal/task"
@@ -100,7 +101,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize run manager: %w", err)
 	}
-	brainService, err := brain.NewService(brainRepository, projectManager, agentManager, runRepository, credentialManager)
+	endpointPolicy, err := provider.NewEndpointPolicy(cfg.ProviderAllowedHosts, cfg.ProviderAllowedIPRanges)
+	if err != nil {
+		return fmt.Errorf("configure provider endpoint policy: %w", err)
+	}
+	brainService, err := brain.NewService(brainRepository, projectManager, agentManager, runRepository, credentialManager, endpointPolicy)
 	if err != nil {
 		return fmt.Errorf("initialize Brain service: %w", err)
 	}
