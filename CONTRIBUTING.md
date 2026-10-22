@@ -966,6 +966,33 @@ go test -race ./...
 
 ---
 
+# Continuous Integration
+
+Pull requests targeting `main` run the Go checks, Angular tests/builds, OpenAPI
+YAML parsing, and a changed-line whitespace check in GitHub Actions. The
+workflow uses the versions from `go.mod` and `web/package-lock.json` and does
+not require repository secrets.
+
+The job checks are named `CI / Go`, `CI / Angular`, `CI / OpenAPI`, and
+`CI / Diff whitespace`. Repository branch protection or a ruleset must require
+these checks to block merges when a job fails; the workflow itself cannot turn
+on repository protection settings.
+
+Run the same checks locally with:
+
+```bash
+gofmt -w .
+go vet ./...
+go test ./...
+go test -race ./...
+cd web && npm ci && npm test -- --watch=false && npm run build && npm run build -- --configuration development && npm run extract-i18n -- --out-file=/tmp/boaird-dashboard.xlf
+cd ..
+ruby -r yaml -e 'YAML.parse_file("api/openapi.yaml")'
+git diff --check
+```
+
+---
+
 # Go Package Design
 
 Prefer small, domain-focused packages.
