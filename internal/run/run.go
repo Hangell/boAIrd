@@ -35,7 +35,7 @@ type Run struct {
 	InputRef  string
 	OutputRef string
 	Error     string
-	ToolsUsed []string
+	toolsUsed []string
 }
 
 func New(id, projectID, taskID, agentID string) (Run, error) {
@@ -56,7 +56,18 @@ func (r Run) AgentID() string       { return r.agentID }
 func (r Run) Status() Status        { return r.status }
 func (r Run) StartedAt() time.Time  { return r.startedAt }
 func (r Run) FinishedAt() time.Time { return r.finishedAt }
-func (r Run) UsedTools() []string   { return append([]string(nil), r.ToolsUsed...) }
+func (r Run) UsedTools() []string   { return append([]string(nil), r.toolsUsed...) }
+
+func (r Run) RecordToolUse(name string) (Run, error) {
+	if strings.TrimSpace(name) == "" {
+		return Run{}, errors.New("tool name is required")
+	}
+	if r.status != StatusRunning {
+		return Run{}, fmt.Errorf("tools can only be recorded while a run is %s", StatusRunning)
+	}
+	r.toolsUsed = append(append([]string(nil), r.toolsUsed...), name)
+	return r, nil
+}
 
 func (r Run) Transition(to Status) (Run, error) {
 	if !validStatus(to) {
