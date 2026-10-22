@@ -103,9 +103,11 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("expire agent sessions: %w", err)
 	}
-	expired := make(map[string]struct{}, len(closed))
+	expired := make(map[string]Session, len(closed))
 	for _, session := range closed {
-		expired[session.AgentID] = struct{}{}
+		// CloseSessionsBefore returns sessions ordered by last activity, so the
+		// last value for an Agent is the most recently expired session.
+		expired[session.AgentID] = session
 	}
 	agentIDs, err := s.repository.AgentsWithSessions(ctx)
 	if err != nil {
@@ -120,14 +122,16 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		activity := activities[id]
 		status := Derive(now, s.policy, activity).Status
 		reason := ReasonReconciled
-		if _, ok := expired[id]; ok {
+		sessionID := activity.SessionID
+		if expiredSession, ok := expired[id]; ok && sessionID == "" {
 			reason = ReasonSessionExpired
+			sessionID = expiredSession.ID
 		} else if status == agent.StatusBusy || status == agent.StatusWaiting || status == agent.StatusError {
 			reason = ReasonWorkChanged
 		}
 		if _, _, err := s.repository.ApplyStatus(ctx, StatusChange{
 			AgentID:   id,
-			SessionID: activity.SessionID,
+			SessionID: sessionID,
 			To:        status,
 			Reason:    reason,
 			At:        now,

@@ -178,6 +178,15 @@ func (f *fixture) sessionCount(agentID string) int {
 	return count
 }
 
+func (f *fixture) sessionID(tokenID string) string {
+	f.t.Helper()
+	var id string
+	if err := f.database.QueryRowContext(context.Background(), "SELECT id FROM agent_sessions WHERE agent_id = ? AND token_id = ? AND ended_at IS NULL", f.agentID, tokenID).Scan(&id); err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
 func TestHeartbeatOpensSessionAndRecordsTransition(t *testing.T) {
 	f := newFixture(t)
 	if status := f.status(f.agentID); status != agent.StatusIdle {
@@ -251,6 +260,51 @@ func TestSilenceBecomesStaleThenOfflineAndReconnects(t *testing.T) {
 	events := f.events(f.agentID)
 	if events[0].From != agent.StatusOffline || events[0].To != agent.StatusOnline || events[0].Reason != heartbeat.ReasonSessionResumed {
 		t.Fatalf("reconnect event = %+v", events[0])
+	}
+	var expiredSessionID string
+	if err := f.database.QueryRowContext(context.Background(), "SELECT id FROM agent_sessions WHERE agent_id = ? AND token_id = ? AND ended_at IS NOT NULL ORDER BY started_at LIMIT 1", f.agentID, f.tokenID).Scan(&expiredSessionID); err != nil {
+		t.Fatal(err)
+	}
+	if events[1].Reason != heartbeat.ReasonSessionExpired || events[1].SessionID != expiredSessionID {
+		t.Fatalf("expiry event = %+v, want session %s and reason %s", events[1], expiredSessionID, heartbeat.ReasonSessionExpired)
+	}
+}
+
+func TestReconcileAttributesWorkTransitionToStillOpenSession(t *testing.T) {
+	f := newFixture(t)
+	f.heartbeat()
+	firstSessionID := f.sessionID(f.tokenID)
+
+	secondToken, _, err := f.tokens.Create(context.Background(), f.agentID, time.Hour, "local-administrator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.advance(time.Second)
+	if _, err := f.service.Heartbeat(context.Background(), heartbeat.Identity{AgentID: f.agentID, TokenID: secondToken.ID}); err != nil {
+		t.Fatalf("second credential heartbeat: %v", err)
+	}
+	secondSessionID := f.sessionID(secondToken.ID)
+	if secondSessionID == firstSessionID {
+		t.Fatalf("sessions share ID %q", secondSessionID)
+	}
+
+	// Expire only the first credential while the second remains fresh.
+	expiredAt := f.now.Add(-heartbeat.DefaultOfflineAfter).UTC().Format(time.RFC3339Nano)
+	if _, err := f.database.ExecContext(context.Background(), "UPDATE agent_sessions SET last_seen_at = ? WHERE id = ?", expiredAt, firstSessionID); err != nil {
+		t.Fatal(err)
+	}
+	f.addTask("task-working", "WORKING")
+	if err := f.service.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	events := f.events(f.agentID)
+	if len(events) < 2 {
+		t.Fatalf("events = %+v, want the initial and reconciled transitions", events)
+	}
+	got := events[0]
+	if got.From != agent.StatusOnline || got.To != agent.StatusBusy || got.Reason != heartbeat.ReasonWorkChanged || got.SessionID != secondSessionID {
+		t.Fatalf("reconciled event = %+v, want ONLINE -> BUSY, reason %s, session %s", got, heartbeat.ReasonWorkChanged, secondSessionID)
 	}
 }
 
