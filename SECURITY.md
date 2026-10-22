@@ -883,7 +883,7 @@ BOAIRD_MASTER_KEY=...
 BOAIRD_LOCAL_AUTH_TOKEN=...
 ```
 
-`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for all versioned REST routes except status. `POST /api/v1/session` exchanges the bearer token for an HttpOnly, SameSite=Strict cookie used by the browser; unsafe cookie-authenticated requests require a configured dashboard Origin. Project-scoped routes also require `project_members` membership, and each operation is checked against an explicit capability in Go. Authorization denials are written to immutable SQLite records. Brain replacement requires an audit reason recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`. MCP uses separately registered Agent bearer tokens and applies deny-by-default capability and resource-scope rules.
+`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for all versioned REST routes except status. `POST /api/v1/session` accepts this token only in the Authorization header, then issues a 30-minute HttpOnly, SameSite=Strict cookie containing a cryptographically random opaque session ID. The server keeps the session ID and expiry in memory; it never copies the root token into the cookie, and sessions expire on logout or service restart. Unsafe cookie-authenticated requests, including logout, require a trusted dashboard Origin. Direct Bearer authentication remains available for local API clients. Project-scoped routes also require `project_members` membership, and each operation is checked against an explicit capability in Go. Authorization denials are written to immutable SQLite records. Brain replacement requires an audit reason recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`. MCP uses separately registered Agent bearer tokens and applies deny-by-default capability and resource-scope rules.
 
 ---
 
@@ -1075,7 +1075,7 @@ by default.
 
 # Local Mode
 
-Loopback binding controls network exposure; it does not replace authentication. Every versioned REST route other than status requires the local administrator token or its browser session cookie. Capabilities are evaluated in the Go API and are independent of role labels and frontend controls. Project-scoped operations require membership. Denials fail closed and are recorded in the immutable authorization denial table. The current deployment has a single administrator identity; multi-user policy management remains future work.
+Loopback binding controls network exposure; it does not replace authentication. Every versioned REST route other than status requires the local administrator token or a valid browser session. Browser cookies contain opaque server-side session IDs with a 30-minute lifetime and are revoked by logout; process restart invalidates all sessions. Cookie-authenticated unsafe requests require a trusted dashboard Origin. Capabilities are evaluated in the Go API and are independent of role labels and frontend controls. Project-scoped operations require membership. Denials fail closed and are recorded in the immutable authorization denial table. The current deployment has a single administrator identity; multi-user policy management remains future work.
 
 Default:
 
@@ -1117,7 +1117,10 @@ in authenticated deployments.
 
 # CSRF
 
-If cookie-based authentication is implemented, use CSRF protection.
+Cookie-authenticated unsafe requests require SameSite=Strict and a trusted
+dashboard Origin, including logout. Keep these checks in the backend. If a
+future deployment needs cross-site cookies, add an explicit CSRF token mechanism
+before relaxing the Origin or SameSite policy.
 
 ---
 

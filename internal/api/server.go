@@ -111,7 +111,8 @@ func NewHandlerWithConversations(database DatabaseHealth, projects ProjectManage
 
 func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	registerSessionRoutes(mux, database, localAuthToken)
+	sessions := newLocalSessionStore()
+	registerSessionRoutes(mux, database, localAuthToken, sessions)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -141,7 +142,7 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 		registerAgentRoutes(mux, agents)
 	}
 	if brains != nil {
-		registerBrainRoutes(mux, brains, localAuthToken)
+		registerBrainRoutes(mux, brains, localAuthToken, sessions)
 	}
 	if runs != nil {
 		registerRunRoutes(mux, runs)
@@ -150,12 +151,12 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 		registerTaskRoutes(mux, tasks)
 	}
 	if conversations != nil {
-		registerConversationRoutes(mux, conversations, localAuthToken)
+		registerConversationRoutes(mux, conversations, localAuthToken, sessions)
 	}
 	if len(mcpHandlers) > 0 && mcpHandlers[0] != nil {
 		mux.Handle("/mcp", mcpHandlers[0])
 	}
-	return corsAPI(secureAPI(mux, database, projects, tasks, runs, localAuthToken))
+	return corsAPI(secureAPI(mux, database, projects, tasks, runs, localAuthToken, sessions))
 }
 
 // Serve listens on address and gracefully shuts down when ctx is cancelled.

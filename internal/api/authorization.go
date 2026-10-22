@@ -32,14 +32,14 @@ var administratorCapabilities = []capability.Capability{
 	"task.review", "task.complete", "conversation.read", "conversation.write",
 }
 
-func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, token []byte) http.Handler {
+func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, token []byte, sessions *localSessionStore) http.Handler {
 	authorizer := capability.Authorizer{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/status" || r.URL.Path == "/api/v1/session" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, ok := localConversationPrincipal(r, token); !ok {
+		if _, ok := localConversationPrincipal(r, token, sessions); !ok {
 			recordAuthorizationDenial(r.Context(), database, "", "", "", authorizationResource(r), "authentication_required")
 			writeConversationUnauthorized(w)
 			return

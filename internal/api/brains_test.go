@@ -35,7 +35,7 @@ func (s *brainRouteStub) Replace(_ context.Context, _ string, input brain.Create
 func TestBrainReplacementRequiresLocalAdministratorToken(t *testing.T) {
 	manager := &brainRouteStub{}
 	mux := http.NewServeMux()
-	registerBrainRoutes(mux, manager, testConversationToken(t))
+	registerBrainRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/projects/project-1/brain", strings.NewReader(`{"agent_id":"agent-2","autonomy":"MANUAL","reason":"replace agent"}`))
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
@@ -50,7 +50,7 @@ func TestBrainReplacementRequiresLocalAdministratorToken(t *testing.T) {
 func TestBrainReplacementUsesAuthenticatedPrincipalAndReason(t *testing.T) {
 	manager := &brainRouteStub{}
 	mux := http.NewServeMux()
-	registerBrainRoutes(mux, manager, testConversationToken(t))
+	registerBrainRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/projects/project-1/brain", strings.NewReader(`{"agent_id":"agent-2","autonomy":"MANUAL","reason":"replace agent"}`))
 	request.Header.Set("Authorization", "Bearer "+testConversationTokenHex)
 	response := httptest.NewRecorder()

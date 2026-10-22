@@ -35,7 +35,7 @@ func (s *conversationAPIStub) Append(_ context.Context, _ string, senderType con
 func TestCreateConversationMessageUsesServerOwnedIdentity(t *testing.T) {
 	manager := &conversationAPIStub{}
 	mux := http.NewServeMux()
-	registerConversationRoutes(mux, manager, testConversationToken(t))
+	registerConversationRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/messages", strings.NewReader(`{"content":"hello","content_type":"text/plain"}`))
 	request.Header.Set("Authorization", "Bearer "+testConversationTokenHex)
 	response := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestCreateConversationMessageUsesServerOwnedIdentity(t *testing.T) {
 func TestCreateConversationMessageRejectsCallerIdentity(t *testing.T) {
 	manager := &conversationAPIStub{}
 	mux := http.NewServeMux()
-	registerConversationRoutes(mux, manager, testConversationToken(t))
+	registerConversationRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/messages", strings.NewReader(`{"content":"hello","content_type":"text/plain","sender_id":"admin"}`))
 	request.Header.Set("Authorization", "Bearer "+testConversationTokenHex)
 	response := httptest.NewRecorder()
@@ -67,7 +67,7 @@ func TestCreateConversationMessageRejectsCallerIdentity(t *testing.T) {
 func TestConversationRoutesRequireBearerAuthentication(t *testing.T) {
 	manager := &conversationAPIStub{}
 	mux := http.NewServeMux()
-	registerConversationRoutes(mux, manager, testConversationToken(t))
+	registerConversationRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		request := httptest.NewRequest(method, "/api/v1/tasks/t1/messages", strings.NewReader(`{"content":"hello","content_type":"text/plain"}`))
 		response := httptest.NewRecorder()
@@ -81,7 +81,7 @@ func TestConversationRoutesRequireBearerAuthentication(t *testing.T) {
 func TestConversationRoutesRejectIncorrectBearerToken(t *testing.T) {
 	manager := &conversationAPIStub{}
 	mux := http.NewServeMux()
-	registerConversationRoutes(mux, manager, testConversationToken(t))
+	registerConversationRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/messages", strings.NewReader(`{"content":"hello","content_type":"text/plain"}`))
 	request.Header.Set("Authorization", "Bearer "+strings.Repeat("0", 64))
 	response := httptest.NewRecorder()
@@ -97,7 +97,7 @@ func TestConversationRoutesRejectIncorrectBearerToken(t *testing.T) {
 func TestGetConversationMessagesUsesCursorAndLimit(t *testing.T) {
 	manager := &conversationAPIStub{}
 	mux := http.NewServeMux()
-	registerConversationRoutes(mux, manager, testConversationToken(t))
+	registerConversationRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/t1/messages?limit=25&before=m-last", nil)
 	request.Header.Set("Authorization", "Bearer "+testConversationTokenHex)
 	response := httptest.NewRecorder()

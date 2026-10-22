@@ -43,9 +43,9 @@ type conversationResponse struct {
 	NextBefore string                        `json:"next_before,omitempty"`
 }
 
-func registerConversationRoutes(mux *http.ServeMux, manager conversationAPIManager, localAuthToken []byte) {
+func registerConversationRoutes(mux *http.ServeMux, manager conversationAPIManager, localAuthToken []byte, sessions *localSessionStore) {
 	mux.HandleFunc("GET /api/v1/tasks/{id}/messages", func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := localConversationPrincipal(r, localAuthToken)
+		userID, ok := localConversationPrincipal(r, localAuthToken, sessions)
 		if !ok {
 			writeConversationUnauthorized(w)
 			return
@@ -68,7 +68,7 @@ func registerConversationRoutes(mux *http.ServeMux, manager conversationAPIManag
 	})
 
 	mux.HandleFunc("POST /api/v1/tasks/{id}/messages", func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := localConversationPrincipal(r, localAuthToken)
+		userID, ok := localConversationPrincipal(r, localAuthToken, sessions)
 		if !ok {
 			writeConversationUnauthorized(w)
 			return

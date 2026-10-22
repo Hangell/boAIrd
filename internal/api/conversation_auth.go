@@ -9,7 +9,7 @@ import (
 	"boAIrd/internal/project"
 )
 
-func localConversationPrincipal(r *http.Request, expectedToken []byte) (string, bool) {
+func localConversationPrincipal(r *http.Request, expectedToken []byte, sessions *localSessionStore) (string, bool) {
 	if len(expectedToken) != 32 {
 		return "", false
 	}
@@ -19,7 +19,17 @@ func localConversationPrincipal(r *http.Request, expectedToken []byte) (string, 
 		if err != nil {
 			return "", false
 		}
-		authorization = "Bearer " + cookie.Value
+		if sessions == nil || !sessions.valid(cookie.Value) {
+			return "", false
+		}
+		return project.LocalAdministratorID, true
+	}
+	return localBearerPrincipal(authorization, expectedToken)
+}
+
+func localBearerPrincipal(authorization string, expectedToken []byte) (string, bool) {
+	if len(expectedToken) != 32 {
+		return "", false
 	}
 	scheme, token, ok := strings.Cut(authorization, " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") || len(token) != 64 {
