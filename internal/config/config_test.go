@@ -9,7 +9,8 @@ import (
 
 func TestLoadUsesLocalDefaults(t *testing.T) {
 	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES",
-		"BOAIRD_AGENT_STALE_AFTER", "BOAIRD_AGENT_OFFLINE_AFTER", "BOAIRD_AGENT_STATUS_INTERVAL")
+		"BOAIRD_AGENT_STALE_AFTER", "BOAIRD_AGENT_OFFLINE_AFTER", "BOAIRD_AGENT_STATUS_INTERVAL",
+		"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS", "BOAIRD_ORCHESTRATOR_TIMEOUT")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -22,6 +23,43 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.AgentStaleAfter != defaultAgentStaleAfter || cfg.AgentOfflineAfter != defaultAgentOfflineAfter || cfg.AgentStatusInterval != defaultAgentStatusInterval {
 		t.Fatalf("agent liveness defaults = %s/%s/%s", cfg.AgentStaleAfter, cfg.AgentOfflineAfter, cfg.AgentStatusInterval)
+	}
+	if cfg.OrchestratorMaxAttempts != defaultOrchestratorMaxAttempts || cfg.OrchestratorTimeout != defaultOrchestratorExecutionTimeout {
+		t.Fatalf("orchestrator defaults = %d/%s", cfg.OrchestratorMaxAttempts, cfg.OrchestratorTimeout)
+	}
+}
+
+func TestLoadParsesOrchestratorSettings(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS", "5")
+	t.Setenv("BOAIRD_ORCHESTRATOR_TIMEOUT", "90s")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.OrchestratorMaxAttempts != 5 || cfg.OrchestratorTimeout != 90*time.Second {
+		t.Fatalf("orchestrator settings = %d/%s", cfg.OrchestratorMaxAttempts, cfg.OrchestratorTimeout)
+	}
+}
+
+func TestLoadRejectsInvalidOrchestratorSettings(t *testing.T) {
+	for name, environment := range map[string]map[string]string{
+		"attempts above maximum": {"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS": "11"},
+		"negative attempts":      {"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS": "-1"},
+		"malformed attempts":     {"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS": "three"},
+		"negative timeout":       {"BOAIRD_ORCHESTRATOR_TIMEOUT": "-1s"},
+		"timeout above maximum":  {"BOAIRD_ORCHESTRATOR_TIMEOUT": "2h"},
+		"malformed timeout":      {"BOAIRD_ORCHESTRATOR_TIMEOUT": "soon"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setValidSecrets(t)
+			for key, value := range environment {
+				t.Setenv(key, value)
+			}
+			if _, err := Load(); err == nil {
+				t.Fatal("expected invalid orchestrator settings to be rejected")
+			}
+		})
 	}
 }
 

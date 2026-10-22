@@ -15,6 +15,7 @@ import (
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/mcptoken"
+	"boAIrd/internal/orchestrator"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/task"
@@ -89,6 +90,11 @@ type ConversationManager interface {
 	Append(context.Context, string, conversation.SenderType, string, conversation.MessageInput) (conversation.Message, error)
 }
 
+type OrchestrationManager interface {
+	Dispatch(context.Context, string) (orchestrator.DispatchReport, error)
+	Review(context.Context, string, orchestrator.ReviewDecision, string) (task.Task, error)
+}
+
 type MCPTokenManager interface {
 	Create(context.Context, string, time.Duration, string) (mcptoken.Metadata, string, error)
 	Rotate(context.Context, string, time.Duration, string) (mcptoken.Metadata, string, error)
@@ -126,11 +132,20 @@ func NewHandlerWithMCPTokenManagement(database DatabaseHealth, projects ProjectM
 	return newHandlerWithMCP(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, mcpHandlers...)
 }
 
+// NewHandlerWithOrchestration returns a handler that also exposes orchestration and review routes.
+func NewHandlerWithOrchestration(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, mcpHandlers...)
+}
+
 func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, mcpHandlers ...http.Handler) http.Handler {
 	return newHandlerWithMCP(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, nil, mcpHandlers...)
 }
 
 func newHandlerWithMCP(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, nil, mcpHandlers...)
+}
+
+func newHandlerWithOrchestration(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	sessions := newLocalSessionStore()
 	registerSessionRoutes(mux, database, localAuthToken, sessions)
@@ -176,6 +191,9 @@ func newHandlerWithMCP(database DatabaseHealth, projects ProjectManager, credent
 	}
 	if tokens != nil {
 		registerMCPTokenRoutes(mux, tokens)
+	}
+	if orchestration != nil {
+		registerOrchestrationRoutes(mux, orchestration)
 	}
 	if len(mcpHandlers) > 0 && mcpHandlers[0] != nil {
 		mux.Handle("/mcp", mcpHandlers[0])
