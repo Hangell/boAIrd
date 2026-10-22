@@ -48,8 +48,8 @@ Phase 13  Context Engine
 Phase 14  Memory
 Phase 15  Tools
 Phase 16  Git & GitHub
-Phase 17  Observability
-Phase 18  Autonomous Mode
+Phase 17  Autonomy Modes
+Phase 18  Human Review
 Phase 19  Remote Mode
 Phase 20  Advanced Runtime
 ```
@@ -1036,7 +1036,11 @@ proposed text and does not itself execute tools.
 
 ## Objective
 
-Implement optional human approval.
+Enforce optional human approval for task completion, with a hard backend gate
+and an immutable decision record containing reviewer identity, timestamp,
+decision, and rationale. A transition from `HUMAN_REVIEW` to `DONE` records
+approval; a transition back to `WORKING` records rejection and returns the task
+to execution. Brain and worker actors cannot resolve a pending review.
 
 When:
 

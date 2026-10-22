@@ -387,6 +387,12 @@ Administrator
 APPROVED
 ```
 
+The backend only allows the authenticated administrator to resolve
+`HUMAN_REVIEW`: transition to `DONE` approves, while return to `WORKING` rejects
+with a required rationale. Immutable events record the reviewer, timestamp,
+decision (`task.human_review.approved` or `task.human_review.rejected`), and
+rationale. Brain and worker actors cannot bypass a pending review.
+
 ---
 
 # Critical Actions

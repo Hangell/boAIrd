@@ -141,9 +141,10 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 7 {
-		t.Fatalf("audit event count = %d, want create + assignment + 5 transitions", len(events))
+	if len(events) != 8 {
+		t.Fatalf("audit event count = %d, want create + assignment + 5 transitions + review approval", len(events))
 	}
+	approved := false
 	for _, event := range events {
 		wantActor := local.ID
 		if event.ToStatus == string(task.StatusWorking) {
@@ -152,6 +153,67 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 		if event.ActorID != wantActor || event.Reason == "" {
 			t.Fatalf("audit event missing actor/reason: %+v", event)
 		}
+		if event.EventType == "task.human_review.approved" {
+			approved = event.ActorID == local.ID && event.ToStatus == string(task.StatusDone) && event.Reason == "advance workflow" && !event.CreatedAt.IsZero()
+		}
+	}
+	if !approved {
+		t.Fatal("human review approval was not fully recorded")
+	}
+	rejectedTask, err := service.Create(ctx, p.ID(), task.CreateInput{Title: "Rejected task", Reason: "test rejection"}, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedTask, err = service.Assign(ctx, rejectedTask.ID(), worker.ID(), "assign for review", local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []task.Status{task.StatusReady, task.StatusWorking, task.StatusReview, task.StatusHumanReview} {
+		rejectedTask, err = service.Transition(ctx, rejectedTask.ID(), status, "submit for approval", local)
+		if err != nil {
+			t.Fatalf("Transition(%s): %v", status, err)
+		}
+	}
+	if _, err := service.Transition(ctx, rejectedTask.ID(), task.StatusDone, "worker bypass", workerActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("worker completion while review is pending = %v, want forbidden", err)
+	}
+	if _, err := service.Transition(ctx, rejectedTask.ID(), task.StatusWorking, "worker rejection attempt", workerActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("worker human review rejection = %v, want forbidden", err)
+	}
+	if _, err := service.Transition(ctx, rejectedTask.ID(), task.StatusCancelled, "worker cancellation attempt", workerActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("worker human review cancellation = %v, want forbidden", err)
+	}
+	var denialReason string
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, rejectedTask.ID()).Scan(&denialReason); err != nil {
+		t.Fatal(err)
+	}
+	if denialReason != "human_review_action_requires_administrator" {
+		t.Fatalf("worker human review denial reason = %q", denialReason)
+	}
+	preDecisionEvents, err := service.ListAuditEvents(ctx, rejectedTask.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range preDecisionEvents {
+		if event.EventType == "task.human_review.rejected" {
+			t.Fatalf("AI action was recorded as a human rejection: %+v", event)
+		}
+	}
+	if _, err := service.Transition(ctx, rejectedTask.ID(), task.StatusWorking, "needs changes", local); err != nil {
+		t.Fatalf("reject human review: %v", err)
+	}
+	rejectedEvents, err := service.ListAuditEvents(ctx, rejectedTask.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected := false
+	for _, event := range rejectedEvents {
+		if event.EventType == "task.human_review.rejected" {
+			rejected = event.ActorID == local.ID && event.ToStatus == string(task.StatusWorking) && event.Reason == "needs changes" && !event.CreatedAt.IsZero()
+		}
+	}
+	if !rejected {
+		t.Fatal("human review rejection was not fully recorded")
 	}
 }
 
@@ -236,5 +298,60 @@ func TestBrainTaskActionsFollowAutonomyAndHumanReviewPolicy(t *testing.T) {
 	}
 	if _, err := tasks.Transition(ctx, value.ID(), task.StatusDone, "autonomous completion", brainActor); err != nil {
 		t.Fatalf("autonomous completion without human-review policy: %v", err)
+	}
+	reviewRequired := true
+	reviewProject, err := projects.Create(ctx, project.CreateInput{Name: "Human review", HumanReviewRequired: &reviewRequired})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := brainService.Create(ctx, reviewProject.ID(), brain.CreateInput{AgentID: configuredAgent.ID(), Autonomy: brain.AutonomyAutonomous}); err != nil {
+		t.Fatal(err)
+	}
+	reviewTask, err := tasks.Create(ctx, reviewProject.ID(), task.CreateInput{Title: "Protected task", Reason: "verify review gate"}, brainActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []task.Status{task.StatusReady, task.StatusWorking, task.StatusReview, task.StatusHumanReview} {
+		reviewTask, err = tasks.Transition(ctx, reviewTask.ID(), status, "advance to human review", brainActor)
+		if err != nil {
+			t.Fatalf("autonomous transition to %s: %v", status, err)
+		}
+	}
+	if _, err := tasks.Transition(ctx, reviewTask.ID(), task.StatusDone, "attempt review bypass", brainActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("Brain completion with pending human review = %v, want forbidden", err)
+	}
+	if _, err := tasks.Transition(ctx, reviewTask.ID(), task.StatusWorking, "attempt human rejection", brainActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("Brain human review rejection = %v, want forbidden", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, reviewTask.ID()).Scan(&denialReason); err != nil {
+		t.Fatal(err)
+	}
+	if denialReason != "human_review_action_requires_administrator" {
+		t.Fatalf("Brain human review denial reason = %q", denialReason)
+	}
+	if _, err := tasks.Transition(ctx, reviewTask.ID(), task.StatusCancelled, "attempt human review cancellation", brainActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("Brain human review cancellation = %v, want forbidden", err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, reviewTask.ID()).Scan(&denialReason); err != nil {
+		t.Fatal(err)
+	}
+	if denialReason != "human_review_action_requires_administrator" {
+		t.Fatalf("Brain human review cancellation denial reason = %q", denialReason)
+	}
+	reviewTask, err = taskRepository.Get(ctx, reviewTask.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewTask.Status() != task.StatusHumanReview {
+		t.Fatalf("Brain rejection attempt left task in %s, want HUMAN_REVIEW", reviewTask.Status())
+	}
+	reviewEvents, err := tasks.ListAuditEvents(ctx, reviewTask.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range reviewEvents {
+		if event.EventType == "task.human_review.rejected" {
+			t.Fatalf("Brain action was recorded as a human rejection: %+v", event)
+		}
 	}
 }

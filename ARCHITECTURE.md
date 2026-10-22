@@ -903,6 +903,12 @@ Administrator
 DONE
 ```
 
+An administrator may approve by moving the task to `DONE`, or reject by
+returning it to `WORKING` with a reason. Both decisions are recorded in the
+immutable task audit with the administrator identity and timestamp; dedicated
+events are `task.human_review.approved` and `task.human_review.rejected`.
+Brain and worker actors cannot resolve a pending review.
+
 ---
 
 # 30. Conversation
