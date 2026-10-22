@@ -204,6 +204,10 @@ func (s *Service) Transition(ctx context.Context, id string, to Status, reason s
 		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.review", "task:"+value.ID(), "human_review_policy_denied")
 		return Task{}, ErrForbidden
 	}
+	if value.Status() == StatusHumanReview && (to == StatusWorking || to == StatusDone || to == StatusCancelled) && actor.Type != ActorAdministrator {
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.review", "task:"+value.ID(), "human_review_action_requires_administrator")
+		return Task{}, ErrForbidden
+	}
 	if value.HumanReview() && to == StatusDone && actor.Type != ActorLocalAPI && actor.Type != ActorAdministrator {
 		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.complete", "task:"+value.ID(), "human_review_required")
 		return Task{}, ErrForbidden
