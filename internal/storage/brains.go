@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"boAIrd/internal/brain"
+	"boAIrd/internal/project"
 )
 
 var ErrBrainAlreadyConfigured = brain.ErrAlreadyExists
@@ -57,6 +58,10 @@ func (r *BrainRepository) Create(ctx context.Context, value brain.Brain) error {
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE projects SET brain_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND brain_id IS NULL AND status <> 'ARCHIVED'", value.ID(), value.ProjectID()); err != nil {
 		return fmt.Errorf("attach Brain to project: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, to_status, reason)
+		VALUES (?, 'administrator', ?, 'brain.attached', 'brain', ?, ?, 'project Brain configured')`, value.ProjectID(), project.LocalAdministratorID, value.ID(), value.AgentID()); err != nil {
+		return fmt.Errorf("audit Brain attachment: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit Brain creation: %w", err)

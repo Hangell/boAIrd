@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/credential"
 	"boAIrd/internal/logging"
 	"boAIrd/internal/project"
 	"boAIrd/internal/provider"
@@ -30,7 +31,7 @@ type RunRepository interface {
 	Update(context.Context, run.Run) error
 }
 type CredentialResolver interface {
-	Resolve(context.Context, string) (string, error)
+	Resolve(context.Context, string, credential.Scope) (string, error)
 }
 
 type Service struct {
@@ -182,7 +183,10 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 	if err := adapters.Register(registry); err != nil {
 		return Execution{}, errors.New("initialize provider registry")
 	}
-	if err := registry.Configure(a.ID(), a.Provider(), provider.Config{BaseURL: a.ProviderBaseURL(), CredentialID: a.CredentialID(), CredentialResolver: s.credentials}); err != nil {
+	if err := registry.Configure(a.ID(), a.Provider(), provider.Config{
+		BaseURL: a.ProviderBaseURL(), CredentialID: a.CredentialID(), CredentialResolver: s.credentials,
+		CredentialScope: credential.Scope{AgentID: a.ID(), ProjectID: p.ID()},
+	}); err != nil {
 		return Execution{}, errors.New("configure Brain provider")
 	}
 	client, err := registry.Resolve(a.ID())

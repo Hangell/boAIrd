@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"boAIrd/internal/credential"
 )
 
 type Role string
@@ -152,7 +154,7 @@ func (r *Registry) IDs() []string {
 
 // CredentialResolver retrieves a secret by reference without storing it in provider configuration.
 type CredentialResolver interface {
-	Resolve(context.Context, string) (string, error)
+	Resolve(context.Context, string, credential.Scope) (string, error)
 }
 
 // Config identifies the API endpoint and credential reference used by an adapter.
@@ -160,6 +162,7 @@ type Config struct {
 	BaseURL            string
 	CredentialID       string
 	CredentialResolver CredentialResolver
+	CredentialScope    credential.Scope
 	HTTPClient         *http.Client
 }
 

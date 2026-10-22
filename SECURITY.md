@@ -866,6 +866,13 @@ but not the:
 raw_secret
 ```
 
+Resolution also checks the requesting Agent and project. The credential must be
+bound to that Agent, the provider names must match, and the Agent must have
+persisted administrator-granted membership in that project or be its active
+Brain. Missing or revoked scope fails closed before decryption. Credential
+binding changes, Agent project scope changes, and Brain attachment/replacement
+are recorded in audit history.
+
 ---
 
 # Secret Storage

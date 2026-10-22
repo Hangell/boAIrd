@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"boAIrd/internal/credential"
 	"boAIrd/internal/provider"
 	"boAIrd/internal/provider/adapters"
 )
@@ -68,4 +69,6 @@ func TestValidateChatRequest(t *testing.T) {
 
 type staticCredential string
 
-func (s staticCredential) Resolve(context.Context, string) (string, error) { return string(s), nil }
+func (s staticCredential) Resolve(context.Context, string, credential.Scope) (string, error) {
+	return string(s), nil
+}

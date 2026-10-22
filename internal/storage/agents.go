@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/project"
 )
 
 type AgentRepository struct{ database *sql.DB }
@@ -99,6 +100,13 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 		return fmt.Errorf("begin update agent: %w", err)
 	}
 	defer tx.Rollback()
+	var previousCredentialID sql.NullString
+	if err := tx.QueryRowContext(ctx, "SELECT credential_id FROM agents WHERE id=?", snapshot.ID).Scan(&previousCredentialID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return agent.ErrNotFound
+		}
+		return fmt.Errorf("read existing agent credential scope: %w", err)
+	}
 	if err := validateAgentCredential(ctx, tx, snapshot); err != nil {
 		return err
 	}
@@ -125,8 +133,46 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 	if err := insertAgentLanguages(ctx, tx, snapshot); err != nil {
 		return err
 	}
+	if previousCredentialID.String != snapshot.CredentialID {
+		if err := auditAgentCredentialScopeChange(ctx, tx, snapshot.ID, previousCredentialID.String, snapshot.CredentialID); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit agent update: %w", err)
+	}
+	return nil
+}
+
+func auditAgentCredentialScopeChange(ctx context.Context, tx *sql.Tx, agentID, previousCredentialID, nextCredentialID string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT project_id FROM agent_projects WHERE agent_id=?
+		UNION SELECT p.id FROM brain_configuration bc JOIN brains b ON b.id=bc.brain_id AND b.active=1
+		JOIN projects p ON p.id=b.project_id AND p.brain_id=b.id WHERE bc.agent_id=? ORDER BY project_id`, agentID, agentID)
+	if err != nil {
+		return fmt.Errorf("query projects for credential scope audit: %w", err)
+	}
+	var projectIDs []string
+	for rows.Next() {
+		var projectID string
+		if err := rows.Scan(&projectID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan credential scope audit project: %w", err)
+		}
+		projectIDs = append(projectIDs, projectID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate credential scope audit projects: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close credential scope audit projects: %w", err)
+	}
+	for _, projectID := range projectIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, from_status, to_status, reason)
+			VALUES (?, 'administrator', ?, 'agent.credential.changed', 'agent', ?, ?, ?, 'provider credential scope changed')`,
+			projectID, project.LocalAdministratorID, agentID, previousCredentialID, nextCredentialID); err != nil {
+			return fmt.Errorf("audit credential scope change: %w", err)
+		}
 	}
 	return nil
 }

@@ -92,6 +92,14 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	if created.Autonomy() != brain.AutonomyAutonomous {
 		t.Fatalf("autonomy = %s", created.Autonomy())
 	}
+	var attachmentCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events WHERE project_id=? AND resource_type='brain' AND resource_id=? AND event_type='brain.attached' AND actor_id=? AND to_status=?`,
+		projects.ID(), created.ID(), project.LocalAdministratorID, configuredAgent.ID()).Scan(&attachmentCount); err != nil {
+		t.Fatal(err)
+	}
+	if attachmentCount != 1 {
+		t.Fatalf("Brain attachment audit count = %d, want 1", attachmentCount)
+	}
 	replacementAgent, err := agentManager.Create(ctx, agent.CreateInput{
 		Name: "Replacement Brain", Role: "coordinator", Runtime: agent.RuntimeAPI, Provider: "openai-compatible",
 		ProviderBaseURL: server.URL + "/v1", Model: "test-model", CredentialID: metadata.ID,

@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"boAIrd/internal/agent"
 	"boAIrd/internal/credential"
+	"boAIrd/internal/project"
 )
 
 func TestCredentialRepositoryPersistsCiphertextAndListsMetadata(t *testing.T) {
@@ -65,8 +67,73 @@ func TestCredentialManagerPersistsOnlyCiphertext(t *testing.T) {
 	if strings.Contains(persisted, secret) {
 		t.Fatal("database contains plaintext credential")
 	}
-	resolved, err := manager.Resolve(context.Background(), metadata.ID)
+	ctx := context.Background()
+	projectRepository, err := NewProjectRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := project.NewManager(projectRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := projects.Create(ctx, project.CreateInput{Name: "Credential scope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRepository, err := NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := agent.NewManager(agentRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := agents.Create(ctx, agent.CreateInput{Name: "Worker", Role: "worker", Runtime: agent.RuntimeAPI, Provider: "openai", Model: "test-model", CredentialID: metadata.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.AddProject(ctx, worker.ID(), p.ID(), project.LocalAdministratorID); err != nil {
+		t.Fatal(err)
+	}
+	scope := credential.Scope{AgentID: worker.ID(), ProjectID: p.ID()}
+	resolved, err := manager.Resolve(ctx, metadata.ID, scope)
 	if err != nil || resolved != secret {
 		t.Fatalf("Resolve() = %q, %v", resolved, err)
+	}
+	if _, err := manager.Resolve(ctx, metadata.ID, credential.Scope{AgentID: "other-agent", ProjectID: p.ID()}); err != credential.ErrCredentialUnavailable {
+		t.Fatalf("cross-agent Resolve() error = %v, want unavailable", err)
+	}
+	if _, err := manager.Resolve(ctx, metadata.ID, credential.Scope{AgentID: worker.ID(), ProjectID: "other-project"}); err != credential.ErrCredentialUnavailable {
+		t.Fatalf("cross-project Resolve() error = %v, want unavailable", err)
+	}
+	if _, err := database.ExecContext(ctx, "UPDATE credentials SET provider='anthropic' WHERE id=?", metadata.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Resolve(ctx, metadata.ID, scope); err != credential.ErrCredentialUnavailable {
+		t.Fatalf("provider mismatch Resolve() error = %v, want unavailable", err)
+	}
+	if _, err := database.ExecContext(ctx, "UPDATE credentials SET provider='openai' WHERE id=?", metadata.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO credentials(id, name, provider, secret_ciphertext) VALUES ('replacement', 'Replacement', 'openai', ?)`, make([]byte, 28)); err != nil {
+		t.Fatal(err)
+	}
+	replacementID := "replacement"
+	if _, err := agents.Update(ctx, worker.ID(), agent.UpdateInput{CredentialID: &replacementID}); err != nil {
+		t.Fatal(err)
+	}
+	var scopeAuditCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events WHERE project_id=? AND resource_type='agent' AND resource_id=? AND event_type='agent.credential.changed' AND actor_id=?`,
+		p.ID(), worker.ID(), project.LocalAdministratorID).Scan(&scopeAuditCount); err != nil {
+		t.Fatal(err)
+	}
+	if scopeAuditCount != 1 {
+		t.Fatalf("credential scope change audit count = %d, want 1", scopeAuditCount)
+	}
+	if err := agents.RemoveProject(ctx, worker.ID(), p.ID(), project.LocalAdministratorID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Resolve(ctx, replacementID, scope); err != credential.ErrCredentialUnavailable {
+		t.Fatalf("Resolve() after scope removal error = %v, want unavailable", err)
 	}
 }

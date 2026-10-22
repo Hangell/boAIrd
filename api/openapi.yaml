@@ -217,7 +217,7 @@ paths:
       operationId: configureProjectBrain
       x-required-capability: brain.attach
       summary: Attach the project's only Brain
-      description: Requires an API agent with the explicit brain.execute capability. The autonomy value controls Brain decision behavior but never adds capabilities. A project Brain cannot replace itself.
+      description: Requires an API agent with the explicit brain.execute capability. The autonomy value controls Brain decision behavior but never adds capabilities. Provider credential resolution is scoped to this Brain agent and project. A project Brain cannot replace itself.
       requestBody:
         required: true
         content:
@@ -281,7 +281,7 @@ paths:
       operationId: executeProjectBrain
       x-required-capability: brain.execute
       summary: Ask the Brain to propose a plan
-      description: Persists a run and returns text from the configured provider. This endpoint does not apply task or project mutations.
+      description: Persists a run and returns text from the configured provider. Credential resolution is limited to the active Brain Agent and this project. This endpoint does not apply task or project mutations.
       requestBody:
         required: true
         content:
@@ -896,7 +896,7 @@ components:
         provider: { type: string, maxLength: 100 }
         provider_base_url: { type: string, maxLength: 2048, format: uri, description: Optional custom provider endpoint; HTTP is restricted to loopback hosts. }
         model: { type: string, maxLength: 200 }
-        credential_id: { type: string, maxLength: 200 }
+        credential_id: { type: string, maxLength: 200, description: Assigning a credential is administrator-only; runtime use is further restricted to this Agent's persisted project scope. }
         instructions: { type: string, maxLength: 16000 }
         language_preferences:
           type: array
@@ -919,7 +919,7 @@ components:
         provider: { type: string }
         provider_base_url: { type: string }
         model: { type: string }
-        credential_id: { type: string, description: Reference only; never a raw credential. }
+        credential_id: { type: string, description: Reference only; never a raw credential. Resolution also requires this Agent's project membership or active-Brain relationship. }
         instructions: { type: string }
         language_preferences: { type: array, items: { type: string } }
         capabilities: { type: array, items: { type: string } }
@@ -948,6 +948,7 @@ components:
           writeOnly: true
     Credential:
       type: object
+      description: Metadata only. Provider execution resolves a secret only for the Agent and project scope supplied by the server.
       required: [id, name, provider]
       properties:
         id: { type: string }

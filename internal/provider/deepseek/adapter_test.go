@@ -7,12 +7,13 @@ import (
 	"reflect"
 	"testing"
 
+	"boAIrd/internal/credential"
 	"boAIrd/internal/provider"
 )
 
 type testCredentials struct{}
 
-func (testCredentials) Resolve(context.Context, string) (string, error) {
+func (testCredentials) Resolve(context.Context, string, credential.Scope) (string, error) {
 	return "deepseek-secret", nil
 }
 

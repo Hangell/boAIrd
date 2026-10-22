@@ -38,9 +38,16 @@ type Metadata struct {
 	Provider string `json:"provider"`
 }
 
+// Scope identifies the Agent and project authorized to use a credential.
+type Scope struct {
+	AgentID   string
+	ProjectID string
+}
+
 type Repository interface {
 	Create(context.Context, Record) error
 	Get(context.Context, string) (Record, error)
+	GetForUse(context.Context, string, string, string) (Record, error)
 	List(context.Context) ([]Record, error)
 	Delete(context.Context, string) error
 }
@@ -120,14 +127,14 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 }
 
 // Resolve decrypts one secret only when a provider adapter requests its credential ID.
-func (m *Manager) Resolve(ctx context.Context, id string) (string, error) {
-	if ctx == nil || strings.TrimSpace(id) == "" {
+func (m *Manager) Resolve(ctx context.Context, id string, scope Scope) (string, error) {
+	if ctx == nil || strings.TrimSpace(id) == "" || strings.TrimSpace(scope.AgentID) == "" || strings.TrimSpace(scope.ProjectID) == "" {
 		return "", ErrCredentialUnavailable
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	record, err := m.repository.Get(ctx, id)
+	record, err := m.repository.GetForUse(ctx, id, scope.AgentID, scope.ProjectID)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return "", err

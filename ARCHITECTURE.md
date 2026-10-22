@@ -687,6 +687,12 @@ An Agent references a credential identifier.
 
 It should not receive the raw secret.
 
+Provider resolution requires the credential ID plus server-derived Agent and
+project IDs. The credential must be attached to that Agent, provider names must
+match, and the Agent must have administrator-granted project membership or be
+the project's active Brain. Missing or revoked scope is denied before decrypting.
+Credential binding, project membership, and Brain attachment changes are audited.
+
 ---
 
 # 22. Credential Flow

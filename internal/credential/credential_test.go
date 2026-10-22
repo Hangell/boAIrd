@@ -5,11 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"boAIrd/internal/provider"
 )
-
-var _ provider.CredentialResolver = (*Manager)(nil)
 
 type memoryRepository struct{ records map[string]Record }
 
@@ -26,6 +22,12 @@ func (r *memoryRepository) Get(_ context.Context, id string) (Record, error) {
 		return Record{}, ErrNotFound
 	}
 	return record, nil
+}
+func (r *memoryRepository) GetForUse(_ context.Context, id, agentID, projectID string) (Record, error) {
+	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(projectID) == "" {
+		return Record{}, ErrCredentialUnavailable
+	}
+	return r.Get(context.Background(), id)
 }
 func (r *memoryRepository) List(context.Context) ([]Record, error) {
 	values := make([]Record, 0, len(r.records))
@@ -57,15 +59,19 @@ func TestManagerEncryptsResolvesAndReturnsMetadataOnly(t *testing.T) {
 	if strings.Contains(string(repository.records[metadata.ID].SecretCiphertext), secret) {
 		t.Fatal("ciphertext contains plaintext secret")
 	}
-	resolved, err := manager.Resolve(context.Background(), metadata.ID)
+	scope := Scope{AgentID: "agent-1", ProjectID: "project-1"}
+	resolved, err := manager.Resolve(context.Background(), metadata.ID, scope)
 	if err != nil || resolved != secret {
 		t.Fatalf("Resolve() = %q, %v", resolved, err)
+	}
+	if _, err := manager.Resolve(context.Background(), metadata.ID, Scope{}); !errors.Is(err, ErrCredentialUnavailable) {
+		t.Fatalf("Resolve() without scope error = %v, want unavailable", err)
 	}
 	listed, err := manager.List(context.Background())
 	if err != nil || len(listed) != 1 || listed[0] != metadata {
 		t.Fatalf("List() = %#v, %v", listed, err)
 	}
-	if _, err := manager.Resolve(context.Background(), "missing"); !errors.Is(err, ErrCredentialUnavailable) {
+	if _, err := manager.Resolve(context.Background(), "missing", scope); !errors.Is(err, ErrCredentialUnavailable) {
 		t.Fatalf("Resolve(missing) error = %v", err)
 	}
 }
@@ -86,7 +92,7 @@ func TestManagerRejectsInvalidKeyAndTamperedCiphertext(t *testing.T) {
 	record := repository.records[metadata.ID]
 	record.SecretCiphertext[len(record.SecretCiphertext)-1] ^= 0xff
 	repository.records[metadata.ID] = record
-	if resolved, err := manager.Resolve(context.Background(), metadata.ID); resolved != "" || !errors.Is(err, ErrCredentialUnavailable) {
+	if resolved, err := manager.Resolve(context.Background(), metadata.ID, Scope{AgentID: "agent-1", ProjectID: "project-1"}); resolved != "" || !errors.Is(err, ErrCredentialUnavailable) {
 		t.Fatalf("Resolve(tampered) = %q, %v", resolved, err)
 	}
 }

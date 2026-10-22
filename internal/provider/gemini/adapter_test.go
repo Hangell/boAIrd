@@ -7,12 +7,15 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"boAIrd/internal/credential"
 	"boAIrd/internal/provider"
 )
 
 type testCredentials struct{}
 
-func (testCredentials) Resolve(context.Context, string) (string, error) { return "gemini-secret", nil }
+func (testCredentials) Resolve(context.Context, string, credential.Scope) (string, error) {
+	return "gemini-secret", nil
+}
 func TestModelsFiltersAndPaginates(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
