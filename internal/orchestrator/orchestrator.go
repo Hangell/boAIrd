@@ -335,7 +335,6 @@ func (s *Service) Review(ctx context.Context, taskID string, decision ReviewDeci
 			if err != nil {
 				return task.Task{}, err
 			}
-			s.recordTaskMemory(ctx, p, b, work)
 			return approved, nil
 		}
 		approved, err := s.tasks.Transition(ctx, work.ID(), task.StatusDone, summary, brainActor)
@@ -381,6 +380,26 @@ func (s *Service) Review(ctx context.Context, taskID string, decision ReviewDeci
 	default:
 		return task.Task{}, fmt.Errorf("%w: review decision must be APPROVE or REWORK", ErrInvalidRequest)
 	}
+}
+
+// RecordHumanReviewCompletion stores project memory only after a human-approved task reaches DONE.
+func (s *Service) RecordHumanReviewCompletion(ctx context.Context, completed task.Task) error {
+	if !completed.HumanReview() || completed.Status() != task.StatusDone || completed.LastActorType() != task.ActorAdministrator {
+		return fmt.Errorf("task %s is not a human-approved completion", completed.ID())
+	}
+	p, err := s.projects.Get(ctx, completed.ProjectID())
+	if err != nil {
+		return err
+	}
+	b, err := s.brains.GetActiveByProject(ctx, completed.ProjectID())
+	if err != nil {
+		return err
+	}
+	if _, err := s.authorizeBrain(ctx, b, p); err != nil {
+		return err
+	}
+	s.recordTaskMemory(ctx, p, b, completed)
+	return nil
 }
 
 func (s *Service) execute(ctx context.Context, p project.Project, b brain.Brain, work task.Task, a agent.Agent, attempt int, instructions string) (ExecutionOutcome, error) {

@@ -1523,7 +1523,11 @@ scoped to a project and records category, version, source IDs, creator type/ID,
 and creation time. Source IDs are references, not copies of source content.
 
 The Brain summary flow sends sanitized task descriptions, successful Run output,
-and authorized task conversation to the configured Brain provider. The configured
+and authorized task conversation to the configured Brain provider. If Human
+Review is required, no summary is persisted or selected while the task is in
+`HUMAN_REVIEW`; the Memory Service is invoked only after an administrator
+transitions that task to `DONE`. Rejection or cancellation creates no task memory.
+The configured
 provider's data handling therefore applies. Pattern-based sanitization is defense
 in depth and cannot guarantee detection of every secret or sensitive value. The
 Brain is instructed to treat source excerpts as untrusted data; summaries are

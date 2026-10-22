@@ -1413,8 +1413,9 @@ However, it does not need to be sent to models on every run.
   (`Record`, `List`, `Decisions`, `Select`, `Prune`).
 - `internal/storage/memory.go` + migration `0019_project_memory.sql` — versioned
   summaries keyed by `(project_id, category, version)`, with source provenance.
-- App wiring connects the Memory Service to task context selection; Brain-approved
-  work is summarized from task, successful Run, and authorized conversation data.
+- App wiring connects the Memory Service to task context selection. Work without
+  Human Review is summarized after Brain approval; with Human Review, summaries
+  are recorded only after the task transitions from `HUMAN_REVIEW` to `DONE`.
 - Version numbers are allocated atomically by SQLite; archived projects reject
   both recording and pruning.
 - Secrets are redacted before persistence; redaction is fail-closed.

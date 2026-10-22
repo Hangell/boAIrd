@@ -1590,10 +1590,13 @@ Brain summary
 The original history may remain stored separately.
 
 The implemented engine (`internal/memory`) is wired into app startup, task context
-selection, and Brain review. After Brain approval, the orchestrator summarizes
-the task, successful Run output, and authorized task conversation through the
-configured project Brain, then records source IDs and Brain provenance. Input is
-sanitized before provider submission and output before persistence. Summaries are
+selection, and Brain review. When Human Review is disabled, the orchestrator
+summarizes approved work after Brain approval. When it is enabled, task memory is
+created only after the human transitions `HUMAN_REVIEW` to `DONE`; rejection or
+cancellation leaves no durable summary. The configured project Brain summarizes
+the task, successful Run output, and authorized task conversation, then records
+source IDs and Brain provenance. Input is sanitized before provider submission
+and output before persistence. Summaries are
 versioned in `project_memory`; version allocation is a single SQLite statement.
 Architecture and project decisions are canonical and survive retention pruning;
 ephemeral categories keep only the newest `MaxSummariesPerCategory` summaries.

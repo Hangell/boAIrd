@@ -456,6 +456,13 @@ func TestHumanReviewIsPreserved(t *testing.T) {
 	if _, err := f.service.Review(ctx, ready.ID(), orchestrator.DecisionApprove, "again"); !errors.Is(err, orchestrator.ErrTaskNotInReview) {
 		t.Fatalf("second review error = %v, want ErrTaskNotInReview", err)
 	}
+	memoryValues, err := f.memory.List(ctx, f.project.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memoryValues) != 0 {
+		t.Fatalf("Brain persisted memory before human approval: %+v", memoryValues)
+	}
 
 	completed, err := f.tasks.Transition(ctx, ready.ID(), task.StatusDone, "administrator approved", f.adminActor())
 	if err != nil {
@@ -463,6 +470,46 @@ func TestHumanReviewIsPreserved(t *testing.T) {
 	}
 	if completed.Status() != task.StatusDone {
 		t.Fatalf("task status = %s, want DONE", completed.Status())
+	}
+	if err := f.service.RecordHumanReviewCompletion(ctx, completed); err != nil {
+		t.Fatalf("record memory after human approval: %v", err)
+	}
+	memoryValues, err = f.memory.List(ctx, f.project.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memoryValues) != 1 || memoryValues[0].Category() != memory.CategoryTaskHistory {
+		t.Fatalf("memory after human approval = %+v, want one task history summary", memoryValues)
+	}
+}
+
+func TestHumanReviewRejectionDoesNotPersistMemory(t *testing.T) {
+	f := newFixture(t, fixtureOptions{humanReview: true, maxAttempts: 3})
+	ctx := context.Background()
+	ready := f.readyTask(t, ctx)
+	if _, err := f.service.Dispatch(ctx, f.project.ID()); err != nil {
+		t.Fatal(err)
+	}
+	awaitingHuman, err := f.service.Review(ctx, ready.ID(), orchestrator.DecisionApprove, "awaiting human approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeDone, err := awaitingHuman.Transition(task.StatusDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.RecordHumanReviewCompletion(ctx, fakeDone); err == nil {
+		t.Fatal("Brain transition was accepted as human approval")
+	}
+	if _, err := f.tasks.Transition(ctx, ready.ID(), task.StatusWorking, "human rejected; rework required", f.adminActor()); err != nil {
+		t.Fatal(err)
+	}
+	memoryValues, err := f.memory.List(ctx, f.project.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memoryValues) != 0 {
+		t.Fatalf("rejected human review left durable project memory: %+v", memoryValues)
 	}
 }
 

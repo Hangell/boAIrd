@@ -11,8 +11,9 @@ import (
 )
 
 type taskAPIStub struct {
-	actor task.Actor
-	value task.Task
+	actor           task.Actor
+	value           task.Task
+	transitionValue task.Task
 }
 
 func (s *taskAPIStub) Create(_ context.Context, projectID string, input task.CreateInput, actor task.Actor) (task.Task, error) {
@@ -28,8 +29,22 @@ func (s *taskAPIStub) List(context.Context, string, task.Status, string, int, in
 func (s *taskAPIStub) Assign(context.Context, string, string, string, task.Actor) (task.Task, error) {
 	return s.value, nil
 }
-func (s *taskAPIStub) Transition(context.Context, string, task.Status, string, task.Actor) (task.Task, error) {
+func (s *taskAPIStub) Transition(_ context.Context, _ string, _ task.Status, _ string, actor task.Actor) (task.Task, error) {
+	s.actor = actor
+	if s.transitionValue.ID() != "" {
+		s.value = s.transitionValue
+	}
 	return s.value, nil
+}
+
+type taskMemoryRecorderStub struct {
+	values []task.Task
+	err    error
+}
+
+func (s *taskMemoryRecorderStub) RecordHumanReviewCompletion(_ context.Context, value task.Task) error {
+	s.values = append(s.values, value)
+	return s.err
 }
 func (s *taskAPIStub) ListAuditEvents(context.Context, string) ([]task.AuditEvent, error) {
 	return nil, nil
@@ -84,4 +99,67 @@ func TestTaskResponseIncludesVersion(t *testing.T) {
 	if response := toTaskResponse(value, nil); response.Version != 1 {
 		t.Fatalf("task response version = %d, want 1", response.Version)
 	}
+}
+
+func TestHumanReviewCompletionRecordsMemoryOnlyAfterDone(t *testing.T) {
+	newHumanReviewTask := func(t *testing.T) task.Task {
+		t.Helper()
+		value, err := task.NewWithActor("task-1", "project-1", "Task", "", task.Actor{Type: task.ActorAdministrator, ID: "admin"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err = value.RequireHumanReview()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, status := range []task.Status{task.StatusReady, task.StatusWorking, task.StatusReview, task.StatusHumanReview} {
+			value, err = value.Transition(status)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		return value
+	}
+
+	t.Run("approval", func(t *testing.T) {
+		pending := newHumanReviewTask(t)
+		completed, err := pending.Transition(task.StatusDone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager := &taskAPIStub{value: pending, transitionValue: completed}
+		recorder := &taskMemoryRecorderStub{}
+		mux := http.NewServeMux()
+		registerTaskRoutes(mux, manager, recorder)
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-1/transitions", strings.NewReader(`{"status":"DONE","reason":"human approved"}`))
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+		}
+		if len(recorder.values) != 1 || recorder.values[0].Status() != task.StatusDone || !recorder.values[0].HumanReview() {
+			t.Fatalf("completion callbacks = %+v, want the human-approved DONE task", recorder.values)
+		}
+	})
+
+	t.Run("rejection", func(t *testing.T) {
+		pending := newHumanReviewTask(t)
+		reworked, err := pending.Transition(task.StatusWorking)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager := &taskAPIStub{value: pending, transitionValue: reworked}
+		recorder := &taskMemoryRecorderStub{}
+		mux := http.NewServeMux()
+		registerTaskRoutes(mux, manager, recorder)
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-1/transitions", strings.NewReader(`{"status":"WORKING","reason":"human rejected"}`))
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+		}
+		if len(recorder.values) != 0 {
+			t.Fatalf("rejection triggered memory callbacks: %+v", recorder.values)
+		}
+	})
 }

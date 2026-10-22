@@ -184,7 +184,11 @@ func newHandlerWithOrchestration(database DatabaseHealth, projects ProjectManage
 		registerRunRoutes(mux, runs)
 	}
 	if tasks != nil {
-		registerTaskRoutes(mux, tasks)
+		if recorder, ok := orchestration.(humanReviewCompletionRecorder); ok {
+			registerTaskRoutes(mux, tasks, recorder)
+		} else {
+			registerTaskRoutes(mux, tasks)
+		}
 	}
 	if conversations != nil {
 		registerConversationRoutes(mux, conversations, localAuthToken, sessions)

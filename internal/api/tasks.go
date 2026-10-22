@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -19,6 +20,10 @@ type taskAPIManager interface {
 	Assign(context.Context, string, string, string, task.Actor) (task.Task, error)
 	Transition(context.Context, string, task.Status, string, task.Actor) (task.Task, error)
 	ListAuditEvents(context.Context, string) ([]task.AuditEvent, error)
+}
+
+type humanReviewCompletionRecorder interface {
+	RecordHumanReviewCompletion(context.Context, task.Task) error
 }
 
 type createTaskRequest struct {
@@ -63,7 +68,7 @@ type taskPageResponse struct {
 	Offset int            `json:"offset"`
 }
 
-func registerTaskRoutes(mux *http.ServeMux, manager taskAPIManager) {
+func registerTaskRoutes(mux *http.ServeMux, manager taskAPIManager, completionRecorders ...humanReviewCompletionRecorder) {
 	mux.HandleFunc("POST /api/v1/projects/{id}/tasks", func(w http.ResponseWriter, r *http.Request) {
 		var request createTaskRequest
 		if err := decodeJSON(w, r, &request); err != nil {
@@ -138,10 +143,24 @@ func registerTaskRoutes(mux *http.ServeMux, manager taskAPIManager) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
+		var previous task.Task
+		var err error
+		if task.Status(request.Status) == task.StatusDone {
+			previous, err = manager.Get(r.Context(), r.PathValue("id"))
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+		}
 		value, err := manager.Transition(r.Context(), r.PathValue("id"), task.Status(request.Status), request.Reason, taskActorFromRequest(r))
 		if err != nil {
 			writeTaskError(w, err)
 			return
+		}
+		if previous.Status() == task.StatusHumanReview && value.Status() == task.StatusDone && value.HumanReview() && len(completionRecorders) > 0 {
+			if err := completionRecorders[0].RecordHumanReviewCompletion(r.Context(), value); err != nil {
+				slog.WarnContext(r.Context(), "record memory after human task approval", "task_id", value.ID(), "error", err)
+			}
 		}
 		writeJSON(w, http.StatusOK, toTaskResponse(value, nil))
 	})
