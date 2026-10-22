@@ -2011,6 +2011,10 @@ Tasks can be created and listed with `POST` and `GET /api/v1/projects/{id}/tasks
 
 Each task has a persisted conversation. `GET` and `POST /api/v1/tasks/{id}/messages` require `Authorization: Bearer <BOAIRD_LOCAL_AUTH_TOKEN>` and verify project membership. The server derives human sender identity as `local-administrator`; caller-supplied sender identity is rejected. New and existing projects receive membership for this single local principal. Message history is paginated with `limit` (default 50, maximum 100) and the `before` cursor returned as `next_before`. Agent messages are accepted only from the agent assigned to that task, and Brain messages only from the project's active Brain. Common secret patterns and sensitive metadata fields are redacted before storage and return. This initial identity model has one local administrator; multi-user accounts and membership management are future work.
 
+## Dashboard foundation
+
+The standalone Angular dashboard lives in [`web/`](web/README.md). It uses Angular Material, SCSS, strict TypeScript, feature routes, a server-owned state model, and a local API base URL of `http://127.0.0.1:3110/api/v1` during development. Run `npm install`, `npm start`, and `npm run build` from `web/`.
+
 ---
 
 # Tasks

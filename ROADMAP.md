@@ -754,6 +754,13 @@ SSE service
 i18n foundation
 ```
 
+## Current implementation
+
+- The `web/` standalone Angular workspace builds with strict TypeScript and SCSS, Angular Material, feature routes, and a responsive shell.
+- `API_BASE_URL` defaults to the loopback API in development; production builds use `/api/v1`. The browser projects a view of backend state and does not own task status.
+- Shared infrastructure includes a typed HTTP client, an SSE client with caller-provided event decoding, and a global error handler that avoids logging error payloads.
+- The shell includes semantic landmarks, keyboard skip navigation, visible focus, reduced-motion styling, and Angular i18n markers with English as the source locale.
+
 ---
 
 # Phase 12 — Project Dashboard

@@ -1,0 +1,23 @@
+:host { display: block; min-height: 100dvh; }
+
+.app-frame { min-height: 100dvh; background: var(--boaird-canvas); }
+.app-navigation { width: 16rem; padding: 1rem; background: var(--boaird-sidebar); border-right: 1px solid var(--boaird-border); }
+.brand { align-items: center; color: var(--boaird-ink); display: flex; font-size: 1.25rem; font-weight: 750; gap: .75rem; height: 3.5rem; margin: .25rem .5rem 2rem; text-decoration: none; }
+.brand-mark { align-items: center; background: var(--boaird-accent); border-radius: .8rem; color: white; display: inline-flex; font-size: 1.15rem; height: 2.25rem; justify-content: center; width: 2.25rem; }
+nav { margin-inline: -.5rem; }
+.navigation-footer { border-top: 1px solid var(--boaird-border); bottom: 1rem; display: grid; gap: .75rem; left: 1rem; padding-top: 1rem; position: absolute; right: 1rem; }
+.connection-state, .api-indicator { align-items: center; color: var(--boaird-muted); display: inline-flex; font-size: .8rem; gap: .5rem; }
+.connection-state { padding-inline: .75rem; }
+.connection-dot { background: #45a778; border-radius: 50%; display: inline-block; height: .5rem; width: .5rem; }
+.app-content { background: var(--boaird-canvas); }
+.top-bar { background: color-mix(in srgb, var(--boaird-surface) 92%, transparent); border-bottom: 1px solid var(--boaird-border); color: var(--boaird-ink); min-height: 4.25rem; position: sticky; top: 0; z-index: 2; }
+.top-bar-title { font-size: .95rem; font-weight: 600; }
+.toolbar-spacer { flex: 1; }
+.api-indicator { background: var(--boaird-surface-muted); border: 1px solid var(--boaird-border); border-radius: 999px; padding: .45rem .75rem; }
+.page-content { padding: clamp(1.25rem, 4vw, 3.5rem); }
+
+@media (max-width: 720px) {
+  .app-navigation { width: 13rem; }
+  .page-content { padding: 1.25rem; }
+  .api-indicator { display: none; }
+}
