@@ -2365,6 +2365,19 @@ project policy references
 workspace association
 ```
 
+The provider-independent domain model is implemented in entity packages under
+`internal/`. These packages validate required IDs and values at construction;
+storage is responsible for confirming that referenced records exist and that
+each executable Project has exactly one active Brain.
+
+Initial lifecycle transitions are explicit. Projects follow
+`CREATED → CONFIGURING → READY → RUNNING`, may be paused or archived, and must
+reference a Brain before becoming ready or running. Tasks follow the Kanban
+states in section 24; terminal `DONE` and `CANCELLED` states cannot be reopened.
+When human review is required, a Task cannot move directly from `REVIEW` to
+`DONE`. Runs move from `PENDING` to `RUNNING` and then to a terminal result, or
+from `PENDING` directly to `CANCELLED`.
+
 ---
 
 ## `brain`
@@ -2377,6 +2390,10 @@ Brain orchestration behavior
 supervision rules
 Brain-specific workflows
 ```
+
+The Brain model references its Project and Agent by ID and stores one of the
+`MANUAL`, `SEMI_AUTO`, or `AUTONOMOUS` modes. Autonomy does not grant
+capabilities.
 
 ---
 
@@ -2391,6 +2408,10 @@ role
 configuration
 agent lifecycle
 ```
+
+Agent state uses the statuses `ONLINE`, `IDLE`, `BUSY`, `WAITING`, `OFFLINE`,
+`STALE`, and `ERROR`. Runtime, provider, and model are plain configuration values
+in the domain model; provider SDKs belong in `provider` adapters.
 
 ---
 
@@ -2446,6 +2467,9 @@ capability identifiers
 authorization evaluation
 policy checks
 ```
+
+Capability identifiers are validated lowercase names such as
+`filesystem.read` and `github.pr.merge`.
 
 ---
 
