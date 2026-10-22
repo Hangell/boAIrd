@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"boAIrd/internal/credential"
 )
 
 const (
@@ -32,13 +34,14 @@ func (e *HTTPError) Error() string {
 }
 
 type JSONClient struct {
-	name         string
-	baseURL      string
-	credentialID string
-	credentials  CredentialResolver
-	authHeader   string
-	authPrefix   string
-	httpClient   *http.Client
+	name            string
+	baseURL         string
+	credentialID    string
+	credentials     CredentialResolver
+	credentialScope credential.Scope
+	authHeader      string
+	authPrefix      string
+	httpClient      *http.Client
 }
 
 func NewJSONClient(name string, config Config, defaultBaseURL, authHeader, authPrefix string) (*JSONClient, error) {
@@ -74,13 +77,14 @@ func NewJSONClient(name string, config Config, defaultBaseURL, authHeader, authP
 		return http.ErrUseLastResponse
 	}
 	return &JSONClient{
-		name:         name,
-		baseURL:      strings.TrimRight(parsedURL.String(), "/"),
-		credentialID: config.CredentialID,
-		credentials:  config.CredentialResolver,
-		authHeader:   authHeader,
-		authPrefix:   authPrefix,
-		httpClient:   client,
+		name:            name,
+		baseURL:         strings.TrimRight(parsedURL.String(), "/"),
+		credentialID:    config.CredentialID,
+		credentials:     config.CredentialResolver,
+		credentialScope: config.CredentialScope,
+		authHeader:      authHeader,
+		authPrefix:      authPrefix,
+		httpClient:      client,
 	}, nil
 }
 
@@ -115,7 +119,7 @@ func (c *JSONClient) Do(ctx context.Context, method, resourcePath string, query 
 			request.Header.Add(key, value)
 		}
 	}
-	credential, err := c.credentials.Resolve(ctx, c.credentialID)
+	credential, err := c.credentials.Resolve(ctx, c.credentialID, c.credentialScope)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("%s resolve credential: %w", c.name, err)

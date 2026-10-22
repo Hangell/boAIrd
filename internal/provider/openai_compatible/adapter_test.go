@@ -9,12 +9,15 @@ import (
 	"strings"
 	"testing"
 
+	"boAIrd/internal/credential"
 	"boAIrd/internal/provider"
 )
 
 type credentials struct{}
 
-func (credentials) Resolve(context.Context, string) (string, error) { return "secret-value", nil }
+func (credentials) Resolve(context.Context, string, credential.Scope) (string, error) {
+	return "secret-value", nil
+}
 
 func TestChatMapsRequestAndResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

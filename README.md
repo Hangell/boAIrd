@@ -1267,7 +1267,7 @@ internal/provider/
 
 # Credential Architecture
 
-Credentials must not belong directly to agents.
+Credentials are stored independently from agents; an Agent references a credential ID and never receives its plaintext secret.
 
 Relationship:
 
@@ -1290,6 +1290,12 @@ OpenAI
 ├── Company
 └── Backup
 ```
+
+At execution time, provider resolution checks the credential ID against the
+server-derived Agent and project. The Agent must be linked to the credential,
+the provider must match, and the Agent must have administrator-granted project
+membership or be that project's active Brain. Revoked or missing scope is
+denied before decryption; scope changes are recorded in audit history.
 
 ---
 

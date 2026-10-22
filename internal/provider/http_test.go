@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"boAIrd/internal/credential"
 )
 
 type testCredentialResolver struct {
@@ -15,7 +17,7 @@ type testCredentialResolver struct {
 	err   error
 }
 
-func (r testCredentialResolver) Resolve(context.Context, string) (string, error) {
+func (r testCredentialResolver) Resolve(context.Context, string, credential.Scope) (string, error) {
 	return r.value, r.err
 }
 
