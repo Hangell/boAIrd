@@ -264,10 +264,7 @@ func validProviderHost(host string) bool {
 		return false
 	}
 	if address, err := netip.ParseAddr(host); err == nil {
-		if address.Zone() != "" {
-			return false
-		}
-		return true
+		return address.Zone() == ""
 	}
 	if len(host) > 253 {
 		return false

@@ -95,17 +95,19 @@ func (r *RunRepository) List(ctx context.Context, projectID, taskID, agentID str
 	if err != nil {
 		return nil, fmt.Errorf("query runs: %w", err)
 	}
-	defer rows.Close()
 	values := make([]run.Run, 0)
 	for rows.Next() {
 		value, err := scanRun(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan run: %w", err)
+			return nil, closeRowsAfter(rows, "runs", fmt.Errorf("scan run: %w", err))
 		}
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate runs: %w", err)
+		return nil, closeRowsAfter(rows, "runs", fmt.Errorf("iterate runs: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close run rows: %w", err)
 	}
 	return values, nil
 }
@@ -128,23 +130,25 @@ func (r *RunRepository) ListAuditEvents(ctx context.Context, runID string) ([]ru
 	if err != nil {
 		return nil, fmt.Errorf("query run audit events: %w", err)
 	}
-	defer rows.Close()
 	events := make([]run.AuditEvent, 0)
 	for rows.Next() {
 		var event run.AuditEvent
 		var created string
 		if err := rows.Scan(&event.ID, &event.ProjectID, &event.TaskID, &event.ActorType, &event.ActorID, &event.EventType,
 			&event.ResourceType, &event.ResourceID, &event.FromStatus, &event.ToStatus, &created); err != nil {
-			return nil, fmt.Errorf("scan run audit event: %w", err)
+			return nil, closeRowsAfter(rows, "run audit events", fmt.Errorf("scan run audit event: %w", err))
 		}
 		event.CreatedAt, err = parseDatabaseTime(created)
 		if err != nil {
-			return nil, fmt.Errorf("parse run audit event time: %w", err)
+			return nil, closeRowsAfter(rows, "run audit events", fmt.Errorf("parse run audit event time: %w", err))
 		}
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate run audit events: %w", err)
+		return nil, closeRowsAfter(rows, "run audit events", fmt.Errorf("iterate run audit events: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close run audit event rows: %w", err)
 	}
 	return events, nil
 }
@@ -166,22 +170,24 @@ func (r *RunRepository) ListAuditEventsForRuns(ctx context.Context, runIDs []str
 	if err != nil {
 		return nil, fmt.Errorf("query run audit events: %w", err)
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var event run.AuditEvent
 		var created string
 		if err := rows.Scan(&event.ID, &event.ProjectID, &event.TaskID, &event.ActorType, &event.ActorID, &event.EventType,
 			&event.ResourceType, &event.ResourceID, &event.FromStatus, &event.ToStatus, &created); err != nil {
-			return nil, fmt.Errorf("scan run audit event: %w", err)
+			return nil, closeRowsAfter(rows, "run audit events", fmt.Errorf("scan run audit event: %w", err))
 		}
 		event.CreatedAt, err = parseDatabaseTime(created)
 		if err != nil {
-			return nil, fmt.Errorf("parse run audit event time: %w", err)
+			return nil, closeRowsAfter(rows, "run audit events", fmt.Errorf("parse run audit event time: %w", err))
 		}
 		eventsByRun[event.ResourceID] = append(eventsByRun[event.ResourceID], event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate run audit events: %w", err)
+		return nil, closeRowsAfter(rows, "run audit events", fmt.Errorf("iterate run audit events: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close run audit event rows: %w", err)
 	}
 	return eventsByRun, nil
 }

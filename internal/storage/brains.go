@@ -26,7 +26,7 @@ func (r *BrainRepository) Create(ctx context.Context, value brain.Brain) error {
 	if err != nil {
 		return fmt.Errorf("begin Brain creation: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var status string
 	var current sql.NullString
 	if err := tx.QueryRowContext(ctx, "SELECT status, brain_id FROM projects WHERE id = ?", value.ProjectID()).Scan(&status, &current); err != nil {
@@ -74,7 +74,7 @@ func (r *BrainRepository) Replace(ctx context.Context, current, replacement brai
 	if err != nil {
 		return fmt.Errorf("begin Brain replacement: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var projectStatus string
 	var currentAgentID string
 	var currentAutonomy string

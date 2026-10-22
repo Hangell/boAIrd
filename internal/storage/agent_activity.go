@@ -39,7 +39,7 @@ func (r *AgentActivityRepository) RecordActivity(ctx context.Context, identity h
 	if err != nil {
 		return heartbeat.Session{}, false, fmt.Errorf("begin agent activity: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var session heartbeat.Session
 	var started, lastSeen string
@@ -121,8 +121,7 @@ func (r *AgentActivityRepository) Activity(ctx context.Context, agentIDs []strin
 		var sessions int
 		var sessionID, lastSeen sql.NullString
 		if err := rows.Scan(&agentID, &sessions, &sessionID, &lastSeen); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scan agent session: %w", err)
+			return nil, closeRowsAfter(rows, "agent sessions", fmt.Errorf("scan agent session: %w", err))
 		}
 		activity := result[agentID]
 		activity.Sessions = sessions
@@ -132,16 +131,14 @@ func (r *AgentActivityRepository) Activity(ctx context.Context, agentIDs []strin
 		if lastSeen.Valid {
 			parsed, err := parseDatabaseTime(lastSeen.String)
 			if err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("parse agent last seen: %w", err)
+				return nil, closeRowsAfter(rows, "agent sessions", fmt.Errorf("parse agent last seen: %w", err))
 			}
 			activity.LastSeenAt = &parsed
 		}
 		result[agentID] = activity
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("iterate agent sessions: %w", err)
+		return nil, closeRowsAfter(rows, "agent sessions", fmt.Errorf("iterate agent sessions: %w", err))
 	}
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close agent session rows: %w", err)
@@ -160,8 +157,7 @@ func (r *AgentActivityRepository) Activity(ctx context.Context, agentIDs []strin
 		var working, review int
 		var failedAt sql.NullString
 		if err := rows.Scan(&agentID, &working, &review, &failedAt); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scan agent work: %w", err)
+			return nil, closeRowsAfter(rows, "agent work", fmt.Errorf("scan agent work: %w", err))
 		}
 		activity := result[agentID]
 		activity.Working = working
@@ -169,16 +165,14 @@ func (r *AgentActivityRepository) Activity(ctx context.Context, agentIDs []strin
 		if failedAt.Valid {
 			parsed, err := parseDatabaseTime(failedAt.String)
 			if err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("parse agent failure time: %w", err)
+				return nil, closeRowsAfter(rows, "agent work", fmt.Errorf("parse agent failure time: %w", err))
 			}
 			activity.FailedAt = &parsed
 		}
 		result[agentID] = activity
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("iterate agent work: %w", err)
+		return nil, closeRowsAfter(rows, "agent work", fmt.Errorf("iterate agent work: %w", err))
 	}
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close agent work rows: %w", err)
@@ -188,18 +182,20 @@ func (r *AgentActivityRepository) Activity(ctx context.Context, agentIDs []strin
 	if err != nil {
 		return nil, fmt.Errorf("query agent status: %w", err)
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var agentID, stored string
 		if err := rows.Scan(&agentID, &stored); err != nil {
-			return nil, fmt.Errorf("scan agent status: %w", err)
+			return nil, closeRowsAfter(rows, "agent status", fmt.Errorf("scan agent status: %w", err))
 		}
 		activity := result[agentID]
 		activity.StoredStatus = agent.Status(stored)
 		result[agentID] = activity
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate agent status: %w", err)
+		return nil, closeRowsAfter(rows, "agent status", fmt.Errorf("iterate agent status: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close agent status rows: %w", err)
 	}
 	return result, nil
 }
@@ -211,17 +207,19 @@ func (r *AgentActivityRepository) AgentsWithSessions(ctx context.Context) ([]str
 	if err != nil {
 		return nil, fmt.Errorf("query agents with sessions: %w", err)
 	}
-	defer rows.Close()
 	ids := make([]string, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan agent with session: %w", err)
+			return nil, closeRowsAfter(rows, "agents with sessions", fmt.Errorf("scan agent with session: %w", err))
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate agents with sessions: %w", err)
+		return nil, closeRowsAfter(rows, "agents with sessions", fmt.Errorf("iterate agents with sessions: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close agents with sessions rows: %w", err)
 	}
 	return ids, nil
 }
@@ -233,7 +231,7 @@ func (r *AgentActivityRepository) CloseSessionsBefore(ctx context.Context, cutof
 	if err != nil {
 		return nil, fmt.Errorf("begin session expiry: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	rows, err := tx.QueryContext(ctx, `SELECT id, agent_id, token_id, started_at, last_seen_at FROM agent_sessions
 		WHERE ended_at IS NULL AND last_seen_at <= ? ORDER BY last_seen_at, id`, formatDatabaseTime(cutoff))
 	if err != nil {
@@ -244,25 +242,21 @@ func (r *AgentActivityRepository) CloseSessionsBefore(ctx context.Context, cutof
 		var session heartbeat.Session
 		var started, lastSeen string
 		if err := rows.Scan(&session.ID, &session.AgentID, &session.TokenID, &started, &lastSeen); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scan expired session: %w", err)
+			return nil, closeRowsAfter(rows, "expired sessions", fmt.Errorf("scan expired session: %w", err))
 		}
 		startedAt, err := parseDatabaseTime(started)
 		if err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("parse expired session start: %w", err)
+			return nil, closeRowsAfter(rows, "expired sessions", fmt.Errorf("parse expired session start: %w", err))
 		}
 		lastSeenAt, err := parseDatabaseTime(lastSeen)
 		if err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("parse expired session activity: %w", err)
+			return nil, closeRowsAfter(rows, "expired sessions", fmt.Errorf("parse expired session activity: %w", err))
 		}
 		session.StartedAt, session.LastSeenAt = startedAt, lastSeenAt
 		closed = append(closed, session)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("iterate expired sessions: %w", err)
+		return nil, closeRowsAfter(rows, "expired sessions", fmt.Errorf("iterate expired sessions: %w", err))
 	}
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close expired session rows: %w", err)
@@ -287,7 +281,7 @@ func (r *AgentActivityRepository) ApplyStatus(ctx context.Context, change heartb
 	if err != nil {
 		return heartbeat.StatusEvent{}, false, fmt.Errorf("begin agent status change: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var stored string
 	if err := tx.QueryRowContext(ctx, "SELECT status FROM agents WHERE id = ?", change.AgentID).Scan(&stored); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -326,24 +320,26 @@ func (r *AgentActivityRepository) StatusEvents(ctx context.Context, agentID stri
 	if err != nil {
 		return nil, fmt.Errorf("query agent status events: %w", err)
 	}
-	defer rows.Close()
 	events := make([]heartbeat.StatusEvent, 0)
 	for rows.Next() {
 		var event heartbeat.StatusEvent
 		var from, to, created string
 		if err := rows.Scan(&event.Sequence, &event.AgentID, &event.SessionID, &from, &to, &event.Reason, &created); err != nil {
-			return nil, fmt.Errorf("scan agent status event: %w", err)
+			return nil, closeRowsAfter(rows, "agent status events", fmt.Errorf("scan agent status event: %w", err))
 		}
 		event.From, event.To = agent.Status(from), agent.Status(to)
 		parsed, err := parseDatabaseTime(created)
 		if err != nil {
-			return nil, fmt.Errorf("parse agent status event time: %w", err)
+			return nil, closeRowsAfter(rows, "agent status events", fmt.Errorf("parse agent status event time: %w", err))
 		}
 		event.CreatedAt = parsed
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate agent status events: %w", err)
+		return nil, closeRowsAfter(rows, "agent status events", fmt.Errorf("iterate agent status events: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close agent status event rows: %w", err)
 	}
 	return events, nil
 }

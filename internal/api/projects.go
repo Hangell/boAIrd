@@ -122,8 +122,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	return decodeJSONWithLimit(w, r, target, maximumProjectRequestSize)
 }
 
-func decodeJSONWithLimit(w http.ResponseWriter, r *http.Request, target any, maximumSize int64) error {
-	defer r.Body.Close()
+func decodeJSONWithLimit(w http.ResponseWriter, r *http.Request, target any, maximumSize int64) (resultErr error) {
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close request body: %w", err))
+		}
+	}()
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maximumSize))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

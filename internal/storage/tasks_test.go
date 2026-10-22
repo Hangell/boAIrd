@@ -17,7 +17,11 @@ func TestTaskUpdateRejectsStaleVersionWithoutAuditMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	projectRepository, err := NewProjectRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +119,11 @@ func TestTaskUpdateDistinguishesMissingTaskFromConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	repository, err := NewTaskRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +147,11 @@ func TestStaleTransitionCannotOverwriteConcurrentAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	projectRepository, err := NewProjectRepository(database)
 	if err != nil {
 		t.Fatal(err)

@@ -22,7 +22,11 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	projectRepository, err := storage.NewProjectRepository(database)
 	if err != nil {
@@ -258,7 +262,11 @@ func TestConcurrentExternalClaimsAreAtomicWithSQLiteRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	projectRepository, err := storage.NewProjectRepository(database)
 	if err != nil {
@@ -387,7 +395,11 @@ func TestConcurrentHumanReviewDecisionsRejectStaleMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	projectRepository, err := storage.NewProjectRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -493,7 +505,11 @@ func TestBrainTaskActionsFollowAutonomyAndHumanReviewPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	projectRepository, _ := storage.NewProjectRepository(database)
 	projects, _ := project.NewManager(projectRepository)

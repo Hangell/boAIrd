@@ -24,7 +24,7 @@ func (r *MCPTokenRepository) Create(ctx context.Context, value mcptoken.Record, 
 	if err != nil {
 		return fmt.Errorf("begin MCP token creation: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := insertMCPToken(ctx, tx, value); err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func (r *MCPTokenRepository) Rotate(ctx context.Context, previousID string, valu
 	if err != nil {
 		return fmt.Errorf("begin MCP token rotation: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `UPDATE mcp_agent_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ?`, formatTimestamp(now), previousID, formatTimestamp(now))
 	if err != nil {
 		return fmt.Errorf("revoke previous MCP token: %w", err)
@@ -71,7 +71,7 @@ func (r *MCPTokenRepository) Revoke(ctx context.Context, id, actorID string, now
 	if err != nil {
 		return fmt.Errorf("begin MCP token revocation: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var value mcptoken.Record
 	if err := scanMCPToken(tx.QueryRowContext(ctx, `SELECT id, agent_id, token_hash, issued_at, expires_at, revoked_at FROM mcp_agent_tokens WHERE id = ?`, id), &value); err != nil {
 		return err
@@ -105,17 +105,19 @@ func (r *MCPTokenRepository) List(ctx context.Context) ([]mcptoken.Record, error
 	if err != nil {
 		return nil, fmt.Errorf("list MCP tokens: %w", err)
 	}
-	defer rows.Close()
 	values := make([]mcptoken.Record, 0)
 	for rows.Next() {
 		var value mcptoken.Record
 		if err := scanMCPToken(rows, &value); err != nil {
-			return nil, err
+			return nil, closeRowsAfter(rows, "MCP tokens", err)
 		}
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate MCP tokens: %w", err)
+		return nil, closeRowsAfter(rows, "MCP tokens", fmt.Errorf("iterate MCP tokens: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close MCP token rows: %w", err)
 	}
 	return values, nil
 }
@@ -129,7 +131,7 @@ func (r *MCPTokenRepository) Bootstrap(ctx context.Context, values []mcptoken.Re
 	if err != nil {
 		return false, fmt.Errorf("begin MCP token bootstrap: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var completed string
 	err = tx.QueryRowContext(ctx, `SELECT value FROM app_metadata WHERE key = 'mcp_agent_tokens_bootstrapped'`).Scan(&completed)
 	if err == nil {

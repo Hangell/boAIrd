@@ -69,17 +69,19 @@ func (r *TaskRepository) List(ctx context.Context, projectID string, status task
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)
 	}
-	defer rows.Close()
 	values := make([]task.Task, 0)
 	for rows.Next() {
 		value, err := scanTask(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan task: %w", err)
+			return nil, closeRowsAfter(rows, "tasks", fmt.Errorf("scan task: %w", err))
 		}
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tasks: %w", err)
+		return nil, closeRowsAfter(rows, "tasks", fmt.Errorf("iterate tasks: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task rows: %w", err)
 	}
 	return values, nil
 }
@@ -115,23 +117,25 @@ func (r *TaskRepository) ListAuditEvents(ctx context.Context, id string) ([]task
 	if err != nil {
 		return nil, fmt.Errorf("query task audit events: %w", err)
 	}
-	defer rows.Close()
 	values := make([]task.AuditEvent, 0)
 	for rows.Next() {
 		var value task.AuditEvent
 		var created string
 		if err := rows.Scan(&value.ID, &value.ProjectID, &value.TaskID, &value.ActorType, &value.ActorID, &value.EventType,
 			&value.FromStatus, &value.ToStatus, &value.Reason, &created); err != nil {
-			return nil, fmt.Errorf("scan task audit event: %w", err)
+			return nil, closeRowsAfter(rows, "task audit events", fmt.Errorf("scan task audit event: %w", err))
 		}
 		value.CreatedAt, err = parseDatabaseTime(created)
 		if err != nil {
-			return nil, fmt.Errorf("parse task audit time: %w", err)
+			return nil, closeRowsAfter(rows, "task audit events", fmt.Errorf("parse task audit time: %w", err))
 		}
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate task audit events: %w", err)
+		return nil, closeRowsAfter(rows, "task audit events", fmt.Errorf("iterate task audit events: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task audit event rows: %w", err)
 	}
 	return values, nil
 }

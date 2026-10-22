@@ -145,6 +145,10 @@ func TestEndpointPolicyFailureDoesNotLeakCredential(t *testing.T) {
 func TestNewJSONClientReplacesProxyAndTLSDialOverrides(t *testing.T) {
 	proxyTransport := http.DefaultTransport.(*http.Transport).Clone()
 	proxyTransport.Proxy = http.ProxyFromEnvironment
+	//nolint:staticcheck // Verify that a legacy TLS dialer cannot bypass endpoint validation.
+	proxyTransport.DialTLS = func(string, string) (net.Conn, error) {
+		return nil, errors.New("unexpected legacy custom TLS dial")
+	}
 	proxyTransport.DialTLSContext = func(context.Context, string, string) (net.Conn, error) {
 		return nil, errors.New("unexpected custom TLS dial")
 	}
@@ -157,7 +161,11 @@ func TestNewJSONClientReplacesProxyAndTLSDialOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := client.httpClient.Transport.(*http.Transport)
-	if transport.Proxy != nil || transport.DialTLS != nil || transport.DialTLSContext != nil {
+	if transport.Proxy != nil || transport.DialTLSContext != nil {
+		t.Fatal("custom proxy or TLS dial override bypassed endpoint validation")
+	}
+	//nolint:staticcheck // Assert the inherited legacy override was cleared.
+	if transport.DialTLS != nil {
 		t.Fatal("custom proxy or TLS dial override bypassed endpoint validation")
 	}
 }

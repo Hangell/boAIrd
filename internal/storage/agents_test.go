@@ -14,7 +14,11 @@ func TestAgentRepositoryPersistsConfigurationAndRelations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	if _, err := database.Exec(`INSERT INTO credentials(id, name, provider, secret_ciphertext) VALUES ('cred-1', 'OpenAI', 'openai', ?)`, make([]byte, 28)); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +71,11 @@ func TestAgentRepositoryEnforcesCredentialReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	repository, err := NewAgentRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +103,11 @@ func TestAgentProjectScopePersistsAndAuditsOnlyRealChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	if _, err := database.ExecContext(ctx, `INSERT INTO projects(id, name, status, human_review_required) VALUES ('project-1', 'Project One', 'CREATED', 0)`); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +180,11 @@ func TestActiveBrainAgentCapabilitiesAreUpdatedDifferentially(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	if _, err := database.Exec(`INSERT INTO credentials(id, name, provider, secret_ciphertext) VALUES ('cred-1', 'OpenAI', 'openai', ?)`, make([]byte, 28)); err != nil {
 		t.Fatal(err)
 	}

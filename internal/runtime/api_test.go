@@ -34,7 +34,11 @@ func TestAPIExecutorRunsConfiguredAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	credentialRepository, err := storage.NewCredentialRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +101,11 @@ func TestAPIExecutorRejectsNonAPIRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	agentRepository, err := storage.NewAgentRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +139,11 @@ func TestAPIExecutorRedactsProviderFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	credentialRepository, err := storage.NewCredentialRepository(database)
 	if err != nil {
 		t.Fatal(err)

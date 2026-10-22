@@ -165,7 +165,11 @@ func TestEndpointPolicyRequiresAnApprovedResolvedIPAtDialTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	})
 
 	lookup := func(context.Context, string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
@@ -199,10 +203,14 @@ func TestEndpointPolicyRequiresAnApprovedResolvedIPAtDialTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialContext() with approved IP range error = %v", err)
 	}
-	connection.Close()
+	if err := connection.Close(); err != nil {
+		t.Errorf("close validated connection: %v", err)
+	}
 	select {
 	case acceptedConnection := <-accepted:
-		acceptedConnection.Close()
+		if err := acceptedConnection.Close(); err != nil {
+			t.Errorf("close accepted connection: %v", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("validated DNS target was not used for the connection")
 	}

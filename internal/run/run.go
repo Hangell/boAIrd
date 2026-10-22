@@ -229,8 +229,9 @@ func (r Run) Transition(to Status) (Run, error) {
 	if !validStatus(to) {
 		return Run{}, fmt.Errorf("unknown run status %q", to)
 	}
-	if !((r.status == StatusPending && (to == StatusRunning || to == StatusCancelled)) ||
-		(r.status == StatusRunning && (to == StatusSuccess || to == StatusFailed || to == StatusCancelled))) {
+	validTransition := r.status == StatusPending && (to == StatusRunning || to == StatusCancelled)
+	validTransition = validTransition || r.status == StatusRunning && (to == StatusSuccess || to == StatusFailed || to == StatusCancelled)
+	if !validTransition {
 		return Run{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, r.status, to)
 	}
 	now := time.Now().UTC()

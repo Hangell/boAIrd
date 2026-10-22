@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -86,7 +87,7 @@ type runner struct {
 	client *http.Client
 }
 
-func (r *runner) do(method, path string, body, out any) error {
+func (r *runner) do(method, path string, body, out any) (resultErr error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -105,7 +106,11 @@ func (r *runner) do(method, path string, body, out any) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close response body: %w", err))
+		}
+	}()
 	payload, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
