@@ -1219,8 +1219,12 @@ membership API. Membership changes are recorded in immutable audit history.
 An Agent's role is descriptive. A Brain's project scope comes from its active
 Brain-to-project relation. MCP authorization denials, including cross-project
 scope failures, are recorded in the immutable authorization denial log.
-`boaird.task.claim` starts a task already assigned to the caller and cannot
-assign work to itself. Agent list/get tools expose only the authenticated Agent.
+`boaird.task.claim` may self-assign only an unassigned READY task when the
+authenticated Agent has persisted membership in the project and the explicit
+`task.assign` capability. The assignment and transition use task service
+version checks, so competing claims cannot both succeed. Claims of tasks
+assigned to another Agent or outside READY are denied. Agent list/get tools
+expose only the authenticated Agent.
 Conversation access requires the exact assigned Agent and the corresponding
 read/write capability. `boaird.brain.request` also requires the Agent to be the
 configured active Brain for that project, after which Brain autonomy policy is

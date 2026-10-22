@@ -62,6 +62,21 @@ func (s taskStub) List(_ context.Context, projectID string, status task.Status, 
 	}
 	return values, nil
 }
+func (s taskStub) Assign(_ context.Context, id, agentID, _ string, _ task.Actor) (task.Task, error) {
+	value, ok := s.values[id]
+	if !ok {
+		return task.Task{}, task.ErrNotFound
+	}
+	if value.AssignedTo() != "" {
+		return task.Task{}, task.ErrConflict
+	}
+	updated, err := value.Assign(agentID)
+	if err != nil {
+		return task.Task{}, err
+	}
+	s.values[id] = updated
+	return updated, nil
+}
 func (s taskStub) Transition(_ context.Context, id string, to task.Status, _ string, _ task.Actor) (task.Task, error) {
 	value, ok := s.values[id]
 	if !ok {
@@ -131,7 +146,14 @@ func (r bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
-	first := testAgent(t, "agent-one")
+	first, err := testAgentWithCapabilities(t, "agent-one", []string{"agent.read", "project.read", "task.read", "task.transition", "task.assign", "task.complete", "conversation.read", "conversation.write", "brain.execute", "run.read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err = first.AddProject("project-a")
+	if err != nil {
+		t.Fatal(err)
+	}
 	second := testAgent(t, "agent-two")
 	firstToken := "0101010101010101010101010101010101010101010101010101010101010101"
 	secondToken := "0202020202020202020202020202020202020202020202020202020202020202"
@@ -143,7 +165,7 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := task.New("task-b", "project-a", "Other task", "details", second.ID())
+	other, err := task.New("task-b", "project-b", "Other task", "details", second.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +173,27 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Services{Agents: agentStub{map[string]agent.Agent{first.ID(): first, second.ID(): second}}, Projects: projectStub{}, Tasks: taskStub{map[string]task.Task{"task-a": assigned, "task-b": other}}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, staticVerifier{firstToken: first.ID(), secondToken: second.ID()})
+	other, err = other.Transition(task.StatusReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimable, err := task.New("task-c", "project-a", "Claimable task", "details", second.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimable, err = claimable.Transition(task.StatusReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outOfScope, err := task.New("task-d", "project-b", "Out of scope task", "details", second.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outOfScope, err = outOfScope.Transition(task.StatusReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Services{Agents: agentStub{map[string]agent.Agent{first.ID(): first, second.ID(): second}}, Projects: projectStub{}, Tasks: taskStub{map[string]task.Task{"task-a": assigned, "task-b": other, "task-c": claimable, "task-d": outOfScope}}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, staticVerifier{firstToken: first.ID(), secondToken: second.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +227,23 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	visible, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.get", Arguments: map[string]any{"task_id": "task-a"}})
 	if err != nil || visible.IsError {
 		t.Fatalf("assigned task.get result = %+v, error %v", visible, err)
+	}
+	claimed, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.claim", Arguments: map[string]any{"task_id": "task-c", "reason": "claim authorized project work"}})
+	if err != nil || claimed.IsError {
+		t.Fatalf("authorized self-claim result = %+v, error %v", claimed, err)
+	}
+	claimedJSON, err := json.Marshal(claimed.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(claimedJSON), `"status":"WORKING"`) || !strings.Contains(string(claimedJSON), `"assigned_to":"agent-one"`) {
+		t.Fatalf("self-claim result = %s, want task assigned to agent-one and WORKING", claimedJSON)
+	}
+	for _, taskID := range []string{"task-b", "task-d"} {
+		deniedClaim, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.claim", Arguments: map[string]any{"task_id": taskID, "reason": "attempt unauthorized claim"}})
+		if err != nil || deniedClaim == nil || !deniedClaim.IsError {
+			t.Fatalf("claim of unauthorized task %q result = %+v, error %v; want tool error", taskID, deniedClaim, err)
+		}
 	}
 	denied, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.get", Arguments: map[string]any{"task_id": "task-b"}})
 	if err != nil || denied == nil || !denied.IsError {

@@ -1164,7 +1164,7 @@ Tool inputs and required capabilities:
 | `boaird.agent.list`, `.get`, `.status` | optional `agent_id` for get/status | `agent.read`; returns only the authenticated Agent |
 | `boaird.task.list` | optional `project_id`, `status`, `limit` (1–100), `offset` (0–10,000) | `task.read`; returns all tasks for projects in persisted membership or the authenticated Agent's active Brain scope, and otherwise only tasks assigned to that Agent |
 | `boaird.task.get` | `task_id` | `task.read`; exact assignment or persisted/active-Brain project scope |
-| `boaird.task.claim` | `task_id`, `reason` | `task.transition`; starts an already assigned READY task |
+| `boaird.task.claim` | `task_id`, `reason` | starts an assigned READY task, or self-assigns an unassigned READY task with `task.assign` and persisted project membership |
 | `boaird.task.update` | `task_id`, `status` (`WORKING`, `REVIEW`, `BLOCKED`), `reason` | `task.transition`; exact assignment |
 | `boaird.task.complete` | `task_id`, `reason` | `task.complete`; exact assignment, domain workflow and Human Review policy |
 | `boaird.task.fail` | `task_id`, `reason` | `task.transition`; exact assignment |
@@ -1179,6 +1179,12 @@ limited to that one project; it does not create duplicate Agent project
 membership. Every project-scoped operation still requires its named
 capability. Assignment grants access only to that exact task and does not grant
 project metadata or project-wide task visibility.
+
+An MCP Agent may self-assign an unassigned READY task only when it has persisted
+membership in that project and the explicit `task.assign` capability. The claim
+is recorded through the task service before the task transitions to WORKING;
+concurrent claims fail through task version checks. Agents cannot claim tasks
+assigned to another Agent or tasks in any other status.
 
 Missing or invalid bearer tokens receive HTTP 401. A service-level denied or
 invalid operation returns an MCP tool error with a generic message; malformed
@@ -1204,9 +1210,10 @@ curl --request POST http://127.0.0.1:3110/api/v1/mcp/tokens \
 
 Token lifecycle operations are recorded in immutable audit events without
 token material. MCP sessions expire after 30 minutes of inactivity.
-`boaird.task.claim` starts work only on
-a task already assigned to that Agent; assignment remains an administrator or
-authorized Brain operation.
+`boaird.task.claim` may self-assign an unassigned READY task only when the
+authenticated Agent has persisted project membership and the explicit
+`task.assign` capability. Competing claims are guarded by task version checks;
+tasks assigned to another Agent or outside READY are denied.
 
 ---
 
