@@ -333,6 +333,28 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{id}/orchestration/dispatch:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: dispatchProjectTasks
+      x-required-capability: task.assign
+      summary: Schedule eligible READY tasks and execute assigned API Agents
+      description: Claims READY tasks through the Brain actor using existing task policy, creates one Run per attempt, submits successful work to REVIEW, and returns failures to the Brain for a bounded retry. Externally hosted Agents are skipped because they claim work through MCP. Escalations are recorded as immutable audit events.
+      responses:
+        '200':
+          description: One outcome per scheduled task; retryable failures return the task to READY.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DispatchReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: The Brain lacks the capability or autonomy required by project policy, or the caller is not authorized. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The project is archived or the task changed concurrently. }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/runs/{id}:
     parameters:
       - name: id
@@ -472,6 +494,34 @@ paths:
         '403': { description: Actor lacks the required task capability, human review is required, or a HUMAN_REVIEW action was attempted by a non-administrator. }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Task changed after it was read; reload the task and retry. }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/tasks/{id}/review:
+    post:
+      operationId: reviewTask
+      x-required-capability: task.review
+      summary: Apply the Brain verdict to submitted work
+      description: APPROVE completes the task when policy allows; otherwise it moves the task to HUMAN_REVIEW without bypassing the configured gate. REWORK returns the task to the worker with instructions and creates a new Run within the configured attempt limit.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewTask' }
+      responses:
+        '200':
+          description: Task status after the review decision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: The Brain lacks the capability or autonomy required by project policy. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The task is not in REVIEW, changed concurrently, or project policy requires human approval.
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/tasks/{id}/messages:
     parameters:
@@ -925,6 +975,28 @@ components:
         updated_at: { type: string, format: date-time }
         version: { type: integer, minimum: 1, description: Monotonically increasing task version for detecting stale concurrent mutations. }
         audit_events: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+    ReviewTask:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [APPROVE, REWORK] }
+        reason: { type: string, maxLength: 2000, description: Required for REWORK; stored in the task audit event. }
+    ExecutionOutcome:
+      type: object
+      required: [task_id, status]
+      properties:
+        task_id: { type: string }
+        run_id: { type: string }
+        status: { type: string, enum: [SUCCEEDED, RETRY_SCHEDULED, ESCALATED, SKIPPED] }
+        reason: { type: string }
+    DispatchReport:
+      type: object
+      required: [outcomes]
+      properties:
+        outcomes:
+          type: array
+          items: { $ref: '#/components/schemas/ExecutionOutcome' }
     TaskPage:
       type: object
       required: [items, limit, offset]

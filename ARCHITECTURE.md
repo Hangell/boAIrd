@@ -2674,6 +2674,17 @@ recovery
 execution coordination
 ```
 
+The implementation schedules READY tasks assigned to API Agents through the
+existing task service, so Brain identity, capabilities, autonomy, and Human
+Review remain the single policy boundary. Each attempt is a Run linked to the
+task and Agent; successful work moves to REVIEW and failed work is routed back
+to the Brain for instructions. Attempts are bounded, and exhaustion leaves the
+task BLOCKED with an immutable escalation audit event for the administrator.
+Externally hosted Agents remain pull-based through MCP and are not dispatched
+by this component. `internal/runtime` exposes the provider-independent executor
+contract plus the API runtime adapter; MCP, local, and remote adapters remain
+Phase 23 work.
+
 ---
 
 ## `context`

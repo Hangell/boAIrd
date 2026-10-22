@@ -192,6 +192,9 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		if len(parts) == 6 && parts[4] == "brain" && parts[5] == "runs" && method == http.MethodPost {
 			return "brain.execute", projectID, true
 		}
+		if len(parts) == 6 && parts[4] == "orchestration" && parts[5] == "dispatch" && method == http.MethodPost {
+			return "task.assign", projectID, true
+		}
 		if len(parts) == 6 && parts[4] == "agents" && (method == http.MethodPut || method == http.MethodDelete) {
 			return "agent.scope.manage", projectID, true
 		}
@@ -246,6 +249,8 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 			return "task.assign", value.ProjectID(), true
 		case parts[4] == "transitions" && method == http.MethodPost:
 			return "task.transition", value.ProjectID(), true
+		case parts[4] == "review" && method == http.MethodPost:
+			return "task.review", value.ProjectID(), true
 		}
 	case len(parts) == 4 && parts[2] == "runs" && method == http.MethodGet:
 		if runs == nil {

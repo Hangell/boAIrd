@@ -20,6 +20,11 @@ const (
 	defaultAgentStaleAfter     = 90 * time.Second
 	defaultAgentOfflineAfter   = 5 * time.Minute
 	defaultAgentStatusInterval = 30 * time.Second
+
+	defaultOrchestratorMaxAttempts      = 3
+	maximumOrchestratorMaxAttempts      = 10
+	defaultOrchestratorExecutionTimeout = 5 * time.Minute
+	maximumOrchestratorExecutionTimeout = time.Hour
 )
 
 // Config contains the settings required to start the local service.
@@ -35,6 +40,8 @@ type Config struct {
 	AgentStaleAfter         time.Duration
 	AgentOfflineAfter       time.Duration
 	AgentStatusInterval     time.Duration
+	OrchestratorMaxAttempts int
+	OrchestratorTimeout     time.Duration
 }
 
 // MCPAgentToken registers one MCP bearer token for an existing Agent identity.
@@ -132,6 +139,22 @@ func Load() (Config, error) {
 	if cfg.AgentStatusInterval, durationErr = envDuration("BOAIRD_AGENT_STATUS_INTERVAL", defaultAgentStatusInterval); durationErr != nil {
 		return Config{}, durationErr
 	}
+	cfg.OrchestratorMaxAttempts = defaultOrchestratorMaxAttempts
+	cfg.OrchestratorTimeout = defaultOrchestratorExecutionTimeout
+	if rawAttempts, ok := os.LookupEnv("BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS"); ok {
+		attempts, err := strconv.Atoi(rawAttempts)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS: %w", err)
+		}
+		cfg.OrchestratorMaxAttempts = attempts
+	}
+	if rawTimeout, ok := os.LookupEnv("BOAIRD_ORCHESTRATOR_TIMEOUT"); ok {
+		timeout, err := time.ParseDuration(rawTimeout)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_ORCHESTRATOR_TIMEOUT: %w", err)
+		}
+		cfg.OrchestratorTimeout = timeout
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -181,6 +204,12 @@ func (c Config) Validate() error {
 	}
 	if c.AgentStatusInterval < time.Second || c.AgentStatusInterval > time.Hour {
 		return fmt.Errorf("BOAIRD_AGENT_STATUS_INTERVAL must be between 1s and 1h")
+	}
+	if c.OrchestratorMaxAttempts < 0 || c.OrchestratorMaxAttempts > maximumOrchestratorMaxAttempts {
+		return fmt.Errorf("BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS must be between 1 and %d", maximumOrchestratorMaxAttempts)
+	}
+	if c.OrchestratorTimeout < 0 || c.OrchestratorTimeout > maximumOrchestratorExecutionTimeout {
+		return fmt.Errorf("BOAIRD_ORCHESTRATOR_TIMEOUT must be positive and at most %s", maximumOrchestratorExecutionTimeout)
 	}
 	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
 	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))

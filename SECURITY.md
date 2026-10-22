@@ -1950,6 +1950,46 @@ Administrator Notification
 
 ---
 
+# Orchestrator Execution
+
+The orchestrator dispatches READY tasks to API Agents and applies the Brain review
+verdict. It adds a new attack surface — provider calls, retries, and supervised task
+mutations — and must therefore observe the same boundaries as any other executor:
+
+```text
+Brain authorization
+       ↓
+Task policy (capability + autonomy + Human Review)
+       ↓
+Worker execution (bounded, cancellable)
+       ↓
+Review
+       ↓
+Audit
+```
+
+Enforced invariants:
+
+- **`brain.execute` is required to orchestrate.** Before dispatching work or applying
+  a review decision, the orchestrator verifies the active Brain through
+  `Brain.AuthorizeAction`; a Brain missing `brain.execute` cannot trigger a provider
+  call, even if it holds every task capability.
+- **Every transition is policy-owned.** The orchestrator reuses `task.Service`, so
+  capabilities, autonomy, Human Review, and optimistic concurrency remain the single
+  authority. Dispatch claims use the task version, preventing duplicate execution.
+- **Attempt accounting excludes Brain analysis.** Worker attempts are persisted as
+  worker-kind Runs; Brain planning and failure-analysis Runs linked to the same task do
+  not consume `BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS`. Reassignment cannot reset the budget.
+- **Cancellation and recovery are durable.** Once an attempt starts, run, task, and
+  escalation persistence use a short bounded cleanup context that survives request
+  cancellation, so a disconnected client cannot leave a task stranded in `WORKING`.
+- **Provider quota is bounded.** One worker execution per claim, a maximum task count
+  per dispatch, and a per-execution timeout limit provider calls and their cost.
+- **Escalation is immutable and redacted.** Exhausted retries leave the task `BLOCKED`
+  and write an `orchestrator.escalated` audit event with secrets redacted.
+
+---
+
 # Autonomous Mode Security
 
 Autonomous mode is the highest-risk scenario.
