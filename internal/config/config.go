@@ -2,10 +2,12 @@ package config
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -21,7 +23,17 @@ type Config struct {
 	DatabasePath   string
 	MasterKey      MasterKey
 	LocalAuthToken LocalAuthToken
+	MCPAgentTokens []MCPAgentToken
 }
+
+// MCPAgentToken registers one MCP bearer token for an existing Agent identity.
+type MCPAgentToken struct {
+	AgentID string   `json:"agent_id"`
+	Token   [32]byte `json:"-"`
+}
+
+func (MCPAgentToken) String() string   { return "[REDACTED]" }
+func (MCPAgentToken) GoString() string { return "[REDACTED]" }
 
 // MasterKey is the deployment-supplied key used to encrypt provider credentials.
 type MasterKey [32]byte
@@ -70,6 +82,30 @@ func Load() (Config, error) {
 	}
 	copy(cfg.LocalAuthToken[:], token)
 	clear(token)
+	if rawTokens, ok := os.LookupEnv("BOAIRD_MCP_AGENT_TOKENS"); ok && rawTokens != "" {
+		var entries []struct {
+			AgentID string `json:"agent_id"`
+			Token   string `json:"token"`
+		}
+		if err := json.Unmarshal([]byte(rawTokens), &entries); err != nil {
+			return Config{}, fmt.Errorf("BOAIRD_MCP_AGENT_TOKENS must be a JSON array of agent_id/token objects")
+		}
+		cfg.MCPAgentTokens = make([]MCPAgentToken, 0, len(entries))
+		for _, entry := range entries {
+			if len(entry.Token) != 64 {
+				return Config{}, fmt.Errorf("each BOAIRD_MCP_AGENT_TOKENS token must be 64 hexadecimal characters")
+			}
+			decoded, err := hex.DecodeString(entry.Token)
+			if err != nil {
+				return Config{}, fmt.Errorf("each BOAIRD_MCP_AGENT_TOKENS token must be 64 hexadecimal characters")
+			}
+			var configured MCPAgentToken
+			configured.AgentID = entry.AgentID
+			copy(configured.Token[:], decoded)
+			clear(decoded)
+			cfg.MCPAgentTokens = append(cfg.MCPAgentTokens, configured)
+		}
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -100,6 +136,24 @@ func (c Config) Validate() error {
 	}
 	if c.DatabasePath == "" {
 		return fmt.Errorf("BOAIRD_DATABASE_PATH must not be empty")
+	}
+	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
+	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))
+	for _, entry := range c.MCPAgentTokens {
+		if strings.TrimSpace(entry.AgentID) == "" || strings.TrimSpace(entry.AgentID) != entry.AgentID || entry.Token == ([32]byte{}) {
+			return fmt.Errorf("BOAIRD_MCP_AGENT_TOKENS entries require an agent_id and non-zero token")
+		}
+		if _, exists := seenAgents[entry.AgentID]; exists {
+			return fmt.Errorf("BOAIRD_MCP_AGENT_TOKENS agent_id values must be unique")
+		}
+		if _, exists := seenTokens[entry.Token]; exists {
+			return fmt.Errorf("BOAIRD_MCP_AGENT_TOKENS values must be unique")
+		}
+		if MasterKey(entry.Token) == c.MasterKey || LocalAuthToken(entry.Token) == c.LocalAuthToken {
+			return fmt.Errorf("MCP agent tokens must be different from administrator and master-key secrets")
+		}
+		seenAgents[entry.AgentID] = struct{}{}
+		seenTokens[entry.Token] = struct{}{}
 	}
 	return nil
 }

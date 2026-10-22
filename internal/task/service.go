@@ -352,11 +352,18 @@ func (s *Service) authorizeTransition(ctx context.Context, value Task, to Status
 		if actor.ID != value.AssignedTo() {
 			return ErrForbidden
 		}
-		if err := s.agentHasAssignedTaskCapability(ctx, value, actor.ID, "task.transition"); err != nil {
+		required := "task.transition"
+		if to == StatusDone {
+			if value.HumanReview() {
+				return ErrForbidden
+			}
+			required = "task.complete"
+		}
+		if err := s.agentHasAssignedTaskCapability(ctx, value, actor.ID, required); err != nil {
 			return ErrForbidden
 		}
 		switch to {
-		case StatusWorking, StatusReview, StatusBlocked, StatusFailed, StatusCancelled:
+		case StatusWorking, StatusReview, StatusBlocked, StatusFailed, StatusCancelled, StatusDone:
 			return s.agentExists(ctx, actor.ID)
 		default:
 			return ErrForbidden

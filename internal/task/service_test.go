@@ -48,7 +48,7 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := agents.Create(ctx, agent.CreateInput{Name: "Worker", Role: "worker", Runtime: agent.RuntimeLocal, Capabilities: []string{"task.transition"}})
+	worker, err := agents.Create(ctx, agent.CreateInput{Name: "Worker", Role: "worker", Runtime: agent.RuntimeLocal, Capabilities: []string{"task.transition", "task.complete"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +143,39 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	}
 	if len(events) != 8 {
 		t.Fatalf("audit event count = %d, want create + assignment + 5 transitions + review approval", len(events))
+	}
+	noReview := false
+	noReviewProject, err := projects.Create(ctx, project.CreateInput{Name: "No review", HumanReviewRequired: &noReview})
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.ProjectIDs = append(local.ProjectIDs, noReviewProject.ID())
+	completeTask, err := service.Create(ctx, noReviewProject.ID(), task.CreateInput{Title: "Complete without review", Reason: "completion capability test"}, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeTask, err = service.Assign(ctx, completeTask.ID(), worker.ID(), "assign completion task", local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeTask, err = service.Transition(ctx, completeTask.ID(), task.StatusReady, "make available", local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeTask, err = service.Transition(ctx, completeTask.ID(), task.StatusWorking, "begin work", workerActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeTask, err = service.Transition(ctx, completeTask.ID(), task.StatusReview, "submit for completion", workerActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeTask, err = service.Transition(ctx, completeTask.ID(), task.StatusDone, "work complete", workerActor)
+	if err != nil {
+		t.Fatalf("assigned worker task.complete without Human Review: %v", err)
+	}
+	if completeTask.Status() != task.StatusDone {
+		t.Fatalf("task status = %s, want DONE", completeTask.Status())
 	}
 	approved := false
 	for _, event := range events {

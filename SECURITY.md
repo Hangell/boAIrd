@@ -883,7 +883,7 @@ BOAIRD_MASTER_KEY=...
 BOAIRD_LOCAL_AUTH_TOKEN=...
 ```
 
-`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for all versioned REST routes except status. `POST /api/v1/session` exchanges the bearer token for an HttpOnly, SameSite=Strict cookie used by the browser; unsafe cookie-authenticated requests require a configured dashboard Origin. Project-scoped routes also require `project_members` membership, and each operation is checked against an explicit capability in Go. Authorization denials are written to immutable SQLite records. Brain replacement requires an audit reason recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`. MCP and tool adapters are not wired yet and must use the same authorizer before they are exposed.
+`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for all versioned REST routes except status. `POST /api/v1/session` exchanges the bearer token for an HttpOnly, SameSite=Strict cookie used by the browser; unsafe cookie-authenticated requests require a configured dashboard Origin. Project-scoped routes also require `project_members` membership, and each operation is checked against an explicit capability in Go. Authorization denials are written to immutable SQLite records. Brain replacement requires an audit reason recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`. MCP uses separately registered Agent bearer tokens and applies deny-by-default capability and resource-scope rules.
 
 ---
 
@@ -1133,6 +1133,17 @@ MCP clients must not be trusted by default.
 
 Remote MCP must require authentication.
 
+The current `/mcp` endpoint is loopback-only, like the rest of the server. When
+enabled, `BOAIRD_MCP_AGENT_TOKENS` maps unique 32-byte random bearer tokens to
+existing Agent IDs. The token, not a tool argument, determines the caller. The
+token verifier rejects missing or invalid tokens and unknown Agent IDs. The MCP
+SDK binds each stateful session to the verified Agent ID, so a different Agent
+cannot reuse that session. Tokens are static configuration with no individual
+expiry; replacing configuration and restarting the service rotates them. Idle
+sessions expire after 30 minutes. Do not write token values to logs, source
+control, client prompts, or MCP responses. The endpoint is disabled when no
+Agent tokens are configured.
+
 Possible future mechanisms:
 
 ```text
@@ -1177,6 +1188,18 @@ Capabilities
     ↓
 Tools
 ```
+
+Tools check the authenticated Agent's capability and resource scope before
+accessing domain services. Task assignment grants access only to that exact
+task; project-wide reads require explicit project scope. Task transitions and
+Human Review decisions remain subject to the existing domain service rules.
+`boaird.task.claim` starts a task already assigned to the caller and cannot
+assign work to itself. Agent list/get tools expose only the authenticated Agent.
+Conversation access requires the exact assigned Agent and the corresponding
+read/write capability. `boaird.brain.request` also requires the Agent to be the
+configured active Brain for that project, after which Brain autonomy policy is
+applied. Run reads are limited to the run owner or an explicitly scoped Agent
+with `run.read`.
 
 ---
 

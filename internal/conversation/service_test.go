@@ -126,6 +126,12 @@ func TestConversationPersistsStructuredMessagesWithScopedActorsAndRedaction(t *t
 	if _, _, _, err := service.GetPage(ctx, work.ID(), "unverified-human", "", 10); !errors.Is(err, conversation.ErrForbidden) {
 		t.Fatalf("unverified user read error = %v, want forbidden", err)
 	}
+	if _, agentMessages, _, err := service.GetPageForAgent(ctx, work.ID(), worker.ID(), "", 10); err != nil || len(agentMessages) != 2 {
+		t.Fatalf("assigned agent page = %d messages, error %v; want two messages", len(agentMessages), err)
+	}
+	if _, _, _, err := service.GetPageForAgent(ctx, work.ID(), "another-agent", "", 10); !errors.Is(err, conversation.ErrForbidden) {
+		t.Fatalf("unassigned agent read error = %v, want forbidden", err)
+	}
 	if _, _, _, err := service.GetPage(ctx, work.ID(), project.LocalAdministratorID, "missing-cursor", 10); !errors.Is(err, conversation.ErrInvalidCursor) {
 		t.Fatalf("invalid cursor error = %v, want invalid cursor", err)
 	}

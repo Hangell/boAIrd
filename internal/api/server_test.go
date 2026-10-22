@@ -32,6 +32,20 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestHandlerRegistersOptionalMCPEndpointOutsideRESTAuthentication(t *testing.T) {
+	mcpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp" {
+			t.Errorf("MCP path = %q, want /mcp", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	handler := NewHandlerWithConversations(nil, nil, nil, nil, nil, nil, nil, nil, []byte(testLocalAuthToken), mcpHandler)
+	recorder := request(t, handler, http.MethodPost, "/mcp")
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("MCP endpoint status = %d, want 204", recorder.Code)
+	}
+}
+
 func TestStatusEndpointReportsSQLiteState(t *testing.T) {
 	tests := []struct {
 		name       string

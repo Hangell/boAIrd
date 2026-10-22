@@ -1103,7 +1103,12 @@ boAIrd
 
 # MCP
 
-MCP will be one of boAIrd’s main external interfaces.
+MCP is an optional authenticated integration endpoint at `/mcp`. It is enabled
+only when `BOAIRD_MCP_AGENT_TOKENS` registers bearer tokens for existing Agents.
+Each token maps to one Agent and the MCP session remains bound to that identity.
+The server exposes project, Agent, task, conversation, context, Brain-request,
+and run tools listed below; every operation applies the Agent's explicit
+capabilities and project or assignment scope.
 
 Architecture:
 
@@ -1146,6 +1151,48 @@ boaird.brain.request
 
 boaird.run.get
 ```
+
+Tool inputs and required capabilities:
+
+| Tool | Inputs | Capability and scope |
+| --- | --- | --- |
+| `boaird.project.get` | `project_id` | `project.read`; explicit project scope or an assigned task in that project |
+| `boaird.agent.list`, `.get`, `.status` | optional `agent_id` for get/status | `agent.read`; returns only the authenticated Agent |
+| `boaird.task.list` | optional `project_id`, `status`, `limit` (1–100), `offset` (0–10,000) | `task.read`; returns only tasks assigned to the authenticated Agent |
+| `boaird.task.get` | `task_id` | `task.read`; exact assignment or explicit project scope |
+| `boaird.task.claim` | `task_id`, `reason` | `task.transition`; starts an already assigned READY task |
+| `boaird.task.update` | `task_id`, `status` (`WORKING`, `REVIEW`, `BLOCKED`), `reason` | `task.transition`; exact assignment |
+| `boaird.task.complete` | `task_id`, `reason` | `task.complete`; exact assignment, domain workflow and Human Review policy |
+| `boaird.task.fail` | `task_id`, `reason` | `task.transition`; exact assignment |
+| `boaird.conversation.read` | `task_id`, optional `before`, `limit` (1–100; default 50) | `task.read` and `conversation.read`; exact assignment |
+| `boaird.conversation.send` | `task_id`, `content`, optional `content_type` | `conversation.write`; exact assignment |
+| `boaird.context.get` | `task_id` | `task.read`, `project.read`, and `conversation.read`; assigned task context, at most 20 messages |
+| `boaird.brain.request` | `project_id`, `objective`, optional `max_tokens` (1–4096; default 2048) | `brain.execute`; authenticated Agent must be the project's active Brain |
+| `boaird.run.get` | `run_id` | `run.read`; run owner or explicit project scope |
+
+Missing or invalid bearer tokens receive HTTP 401. A service-level denied or
+invalid operation returns an MCP tool error with a generic message; malformed
+protocol requests use the SDK protocol errors. Internal service errors are not
+returned to the client. The MCP client initializes a stateful
+session, then lists and calls tools on that session. The SDK binds that session
+to the Agent authenticated at initialization; switching Agent tokens is
+rejected. Sessions expire after 30 minutes idle.
+
+Configure one or more clients with a JSON array in the environment. Each token
+must be a unique random 32-byte value encoded as 64 hexadecimal characters and
+must belong to an existing Agent. Generate a token and place the JSON value in
+the service's secret environment configuration:
+
+```sh
+MCP_AGENT_TOKEN="$(openssl rand -hex 32)"
+export BOAIRD_MCP_AGENT_TOKENS="[{\"agent_id\":\"agent-id\",\"token\":\"${MCP_AGENT_TOKEN}\"}]"
+```
+
+The endpoint is disabled when this setting is empty. Registered tokens remain
+valid until configuration changes and the server restarts. An MCP session is
+closed after 30 minutes of inactivity. `boaird.task.claim` starts work only on
+a task already assigned to that Agent; assignment remains an administrator or
+authorized Brain operation.
 
 ---
 

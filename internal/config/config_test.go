@@ -2,11 +2,12 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
 func TestLoadUsesLocalDefaults(t *testing.T) {
-	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH")
+	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -19,12 +20,52 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadRegistersMCPAgentTokenWithoutExposingIt(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_MCP_AGENT_TOKENS", `[{"agent_id":"agent-1","token":"0303030303030303030303030303030303030303030303030303030303030303"}]`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MCPAgentTokens) != 1 || cfg.MCPAgentTokens[0].AgentID != "agent-1" || cfg.MCPAgentTokens[0].Token[0] != 3 {
+		t.Fatalf("MCP agent token was not decoded: %+v", cfg.MCPAgentTokens)
+	}
+	if strings.Contains(cfg.MCPAgentTokens[0].String(), "030303") || strings.Contains(cfg.MCPAgentTokens[0].GoString(), "030303") {
+		t.Fatal("MCP agent token formatting exposed the secret")
+	}
+}
+
+func TestLoadRejectsInvalidMCPAgentTokens(t *testing.T) {
+	setValidSecrets(t)
+	for name, value := range map[string]string{
+		"malformed JSON":  `not-json`,
+		"invalid hex":     `[{"agent_id":"agent-1","token":"not-hex"}]`,
+		"duplicate agent": `[{"agent_id":"agent-1","token":"0303030303030303030303030303030303030303030303030303030303030303"},{"agent_id":"agent-1","token":"0404040404040404040404040404040404040404040404040404040404040404"}]`,
+		"duplicate token": `[{"agent_id":"agent-1","token":"0303030303030303030303030303030303030303030303030303030303030303"},{"agent_id":"agent-2","token":"0303030303030303030303030303030303030303030303030303030303030303"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("BOAIRD_MCP_AGENT_TOKENS", value)
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() accepted invalid MCP token configuration")
+			}
+		})
+	}
+}
+
+func setValidSecrets(t *testing.T) {
+	t.Helper()
+	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
+	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
+	t.Setenv("BOAIRD_MCP_AGENT_TOKENS", "")
+}
+
 func TestLoadUsesConfiguredValues(t *testing.T) {
 	t.Setenv("BOAIRD_HOST", defaultHost)
 	t.Setenv("BOAIRD_PORT", "3110")
 	t.Setenv("BOAIRD_DATABASE_PATH", defaultDatabasePath)
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
+	t.Setenv("BOAIRD_MCP_AGENT_TOKENS", "")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
