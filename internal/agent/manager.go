@@ -36,6 +36,7 @@ type CreateInput struct {
 	Role                string   `json:"role"`
 	Runtime             Runtime  `json:"runtime"`
 	Provider            string   `json:"provider,omitempty"`
+	ProviderBaseURL     string   `json:"provider_base_url,omitempty"`
 	Model               string   `json:"model,omitempty"`
 	CredentialID        string   `json:"credential_id,omitempty"`
 	Instructions        string   `json:"instructions"`
@@ -50,6 +51,7 @@ type UpdateInput struct {
 	Role                *string   `json:"role"`
 	Runtime             *Runtime  `json:"runtime"`
 	Provider            *string   `json:"provider"`
+	ProviderBaseURL     *string   `json:"provider_base_url"`
 	Model               *string   `json:"model"`
 	CredentialID        *string   `json:"credential_id"`
 	Instructions        *string   `json:"instructions"`
@@ -67,7 +69,7 @@ func NewManager(repository Repository) (*Manager, error) {
 func (m *Manager) Create(ctx context.Context, input CreateInput) (Agent, error) {
 	configuration := Configuration{
 		Name: input.Name, Avatar: input.Avatar, Description: input.Description, Role: input.Role,
-		Runtime: input.Runtime, Provider: input.Provider, Model: input.Model, CredentialID: input.CredentialID,
+		Runtime: input.Runtime, Provider: input.Provider, ProviderBaseURL: input.ProviderBaseURL, Model: input.Model, CredentialID: input.CredentialID,
 		Instructions: input.Instructions, LanguagePreferences: input.LanguagePreferences, Capabilities: input.Capabilities,
 	}
 	id, err := newID()
@@ -106,7 +108,7 @@ func (m *Manager) List(ctx context.Context, limit, offset int) ([]Agent, error) 
 
 func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Agent, error) {
 	if input.Name == nil && input.Avatar == nil && input.Description == nil && input.Role == nil && input.Runtime == nil &&
-		input.Provider == nil && input.Model == nil && input.CredentialID == nil && input.Instructions == nil &&
+		input.Provider == nil && input.ProviderBaseURL == nil && input.Model == nil && input.CredentialID == nil && input.Instructions == nil &&
 		input.LanguagePreferences == nil && input.Capabilities == nil {
 		return Agent{}, invalidInput(errors.New("at least one agent field must be provided"))
 	}
@@ -133,6 +135,9 @@ func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Age
 	if input.Provider != nil {
 		snapshot.Provider = *input.Provider
 	}
+	if input.ProviderBaseURL != nil {
+		snapshot.ProviderBaseURL = *input.ProviderBaseURL
+	}
 	if input.Model != nil {
 		snapshot.Model = *input.Model
 	}
@@ -149,7 +154,7 @@ func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Age
 		snapshot.Capabilities = *input.Capabilities
 	}
 	if snapshot.Runtime != RuntimeAPI {
-		snapshot.Provider, snapshot.Model, snapshot.CredentialID = "", "", ""
+		snapshot.Provider, snapshot.ProviderBaseURL, snapshot.Model, snapshot.CredentialID = "", "", "", ""
 	}
 	value, err := Restore(snapshot)
 	if err != nil {

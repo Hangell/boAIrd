@@ -15,6 +15,7 @@ type agentResponse struct {
 	Role                string        `json:"role"`
 	Runtime             agent.Runtime `json:"runtime"`
 	Provider            string        `json:"provider,omitempty"`
+	ProviderBaseURL     string        `json:"provider_base_url,omitempty"`
 	Model               string        `json:"model,omitempty"`
 	CredentialID        string        `json:"credential_id,omitempty"`
 	Instructions        string        `json:"instructions"`
@@ -100,7 +101,7 @@ func toAgentResponse(value agent.Agent) agentResponse {
 	snapshot := value.Snapshot()
 	return agentResponse{
 		ID: snapshot.ID, Name: snapshot.Name, Avatar: snapshot.Avatar, Description: snapshot.Description,
-		Role: snapshot.Role, Runtime: snapshot.Runtime, Provider: snapshot.Provider, Model: snapshot.Model,
+		Role: snapshot.Role, Runtime: snapshot.Runtime, Provider: snapshot.Provider, ProviderBaseURL: snapshot.ProviderBaseURL, Model: snapshot.Model,
 		CredentialID: snapshot.CredentialID, Instructions: snapshot.Instructions,
 		LanguagePreferences: snapshot.LanguagePreferences, Capabilities: snapshot.Capabilities, Status: snapshot.Status,
 	}

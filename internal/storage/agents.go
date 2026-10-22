@@ -103,9 +103,9 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE agents SET name = ?, avatar = ?, description = ?, role = ?, runtime = ?,
-		provider = ?, model = ?, credential_id = NULLIF(?, ''), instructions = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+		provider = ?, provider_base_url = ?, model = ?, credential_id = NULLIF(?, ''), instructions = ?, status = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`, snapshot.Name, snapshot.Avatar, snapshot.Description, snapshot.Role, snapshot.Runtime,
-		snapshot.Provider, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status, snapshot.ID)
+		snapshot.Provider, snapshot.ProviderBaseURL, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status, snapshot.ID)
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
 	}
@@ -150,9 +150,9 @@ func validateAgentCredential(ctx context.Context, tx *sql.Tx, snapshot agent.Sna
 }
 
 func insertAgent(ctx context.Context, executor sqlExecutor, snapshot agent.Snapshot) error {
-	_, err := executor.ExecContext(ctx, `INSERT INTO agents (id, name, avatar, description, role, runtime, provider, model, credential_id, instructions, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`, snapshot.ID, snapshot.Name, snapshot.Avatar, snapshot.Description,
-		snapshot.Role, snapshot.Runtime, snapshot.Provider, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status)
+	_, err := executor.ExecContext(ctx, `INSERT INTO agents (id, name, avatar, description, role, runtime, provider, provider_base_url, model, credential_id, instructions, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`, snapshot.ID, snapshot.Name, snapshot.Avatar, snapshot.Description,
+		snapshot.Role, snapshot.Runtime, snapshot.Provider, snapshot.ProviderBaseURL, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status)
 	return err
 }
 
@@ -214,11 +214,11 @@ func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.S
 
 type agentRowScanner interface{ Scan(...any) error }
 
-const agentSelect = `SELECT id, name, avatar, description, role, runtime, provider, model, COALESCE(credential_id, ''), instructions, status FROM agents`
+const agentSelect = `SELECT id, name, avatar, description, role, runtime, provider, provider_base_url, model, COALESCE(credential_id, ''), instructions, status FROM agents`
 
 func scanAgent(row agentRowScanner) (agent.Snapshot, error) {
 	var value agent.Snapshot
 	err := row.Scan(&value.ID, &value.Name, &value.Avatar, &value.Description, &value.Role, &value.Runtime,
-		&value.Provider, &value.Model, &value.CredentialID, &value.Instructions, &value.Status)
+		&value.Provider, &value.ProviderBaseURL, &value.Model, &value.CredentialID, &value.Instructions, &value.Status)
 	return value, err
 }

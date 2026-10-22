@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/brain"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
 )
@@ -48,6 +49,12 @@ type AgentManager interface {
 	Update(context.Context, string, agent.UpdateInput) (agent.Agent, error)
 }
 
+type BrainManager interface {
+	Create(context.Context, string, brain.CreateInput) (brain.Brain, error)
+	Get(context.Context, string) (brain.Brain, error)
+	Execute(context.Context, string, string, int) (brain.Execution, error)
+}
+
 // NewHandler returns the HTTP handler for the configured service endpoints.
 func NewHandler(database DatabaseHealth, projects ProjectManager, credentials ...CredentialManager) http.Handler {
 	var credentialManager CredentialManager
@@ -59,10 +66,14 @@ func NewHandler(database DatabaseHealth, projects ProjectManager, credentials ..
 
 // NewHandlerWithAgents returns a handler with project, credential, and agent routes.
 func NewHandlerWithAgents(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager) http.Handler {
-	return newHandler(database, projects, credentials, agents)
+	return newHandler(database, projects, credentials, agents, nil)
 }
 
-func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager) http.Handler {
+func NewHandlerWithBrain(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager) http.Handler {
+	return newHandler(database, projects, credentials, agents, brains)
+}
+
+func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains ...BrainManager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -91,6 +102,9 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 	}
 	if agents != nil {
 		registerAgentRoutes(mux, agents)
+	}
+	if len(brains) > 0 && brains[0] != nil {
+		registerBrainRoutes(mux, brains[0])
 	}
 	return mux
 }

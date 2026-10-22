@@ -164,6 +164,69 @@ paths:
                     items: { $ref: '#/components/schemas/Credential' }
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/projects/{id}/brain:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: configureProjectBrain
+      summary: Attach the project's only Brain
+      description: Requires an API agent with the explicit brain.execute capability. A project Brain cannot replace itself.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateBrain' }
+      responses:
+        '201':
+          description: Brain attached to the project.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Brain' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The project already has a Brain.
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      operationId: getProjectBrain
+      summary: Get the project's active Brain
+      responses:
+        '200':
+          description: Active Brain configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Brain' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{id}/brain/runs:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: executeProjectBrain
+      summary: Ask the Brain to propose a plan
+      description: Persists a run and returns text from the configured provider. This endpoint does not apply task or project mutations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExecuteBrain' }
+      responses:
+        '201':
+          description: Completed Brain run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrainRun' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Brain action is not allowed by project policy or explicit capabilities.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/credentials/{id}:
     parameters:
       - name: id
@@ -266,6 +329,38 @@ paths:
           $ref: '#/components/responses/InternalError'
 components:
   schemas:
+    CreateBrain:
+      type: object
+      additionalProperties: false
+      required: [agent_id, autonomy]
+      properties:
+        agent_id: { type: string }
+        autonomy: { type: string, enum: [MANUAL, SEMI_AUTO, AUTONOMOUS] }
+    Brain:
+      type: object
+      required: [id, project_id, agent_id, autonomy, active]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        agent_id: { type: string }
+        autonomy: { type: string, enum: [MANUAL, SEMI_AUTO, AUTONOMOUS] }
+        active: { type: boolean, readOnly: true }
+    ExecuteBrain:
+      type: object
+      additionalProperties: false
+      required: [objective]
+      properties:
+        objective: { type: string, minLength: 1, maxLength: 16384 }
+        max_tokens: { type: integer, minimum: 1, maximum: 4096, default: 2048 }
+    BrainRun:
+      type: object
+      required: [id, status, provider, model]
+      properties:
+        id: { type: string }
+        status: { type: string, const: SUCCESS }
+        provider: { type: string }
+        model: { type: string }
+        content: { type: string }
     CreateAgent:
       type: object
       additionalProperties: false
@@ -277,6 +372,7 @@ components:
         role: { type: string, minLength: 1, maxLength: 100, description: Descriptive label only; it grants no permissions. }
         runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
         provider: { type: string, maxLength: 100 }
+        provider_base_url: { type: string, maxLength: 2048, format: uri, description: Optional custom provider endpoint; HTTP is restricted to loopback hosts. }
         model: { type: string, maxLength: 200 }
         credential_id: { type: string, maxLength: 200, description: Reference to a stored credential; raw secrets are never accepted here. }
         instructions: { type: string, maxLength: 16000 }
@@ -305,6 +401,7 @@ components:
         role: { type: string, minLength: 1, maxLength: 100, description: Descriptive label only; it grants no permissions. }
         runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
         provider: { type: string, maxLength: 100 }
+        provider_base_url: { type: string, maxLength: 2048, format: uri, description: Optional custom provider endpoint; HTTP is restricted to loopback hosts. }
         model: { type: string, maxLength: 200 }
         credential_id: { type: string, maxLength: 200 }
         instructions: { type: string, maxLength: 16000 }
@@ -327,6 +424,7 @@ components:
         role: { type: string, description: Descriptive label only; it grants no permissions. }
         runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
         provider: { type: string }
+        provider_base_url: { type: string }
         model: { type: string }
         credential_id: { type: string, description: Reference only; never a raw credential. }
         instructions: { type: string }
