@@ -445,6 +445,7 @@ paths:
       operationId: transitionTask
       x-required-capability: task.transition
       summary: Move a task through a validated workflow transition
+      description: An Agent may use task.transition only for a task currently assigned to that Agent; that assignment grants scope only to the task's project.
       parameters:
         - name: id
           in: path

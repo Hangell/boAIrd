@@ -312,7 +312,7 @@ func (s *Service) authorizeTransition(ctx context.Context, value Task, to Status
 		if actor.ID != value.AssignedTo() {
 			return ErrForbidden
 		}
-		if err := s.agentHasCapability(ctx, value.ProjectID(), actor.ID, "task.transition", false); err != nil {
+		if err := s.agentHasAssignedTaskCapability(ctx, value, actor.ID, "task.transition"); err != nil {
 			return ErrForbidden
 		}
 		switch to {
@@ -348,13 +348,29 @@ func (s *Service) agentHasCapability(ctx context.Context, projectID, id, require
 	if err != nil {
 		return ErrForbidden
 	}
-	grant, err := capability.New(required)
-	if err != nil {
-		return ErrForbidden
-	}
 	scope := a.ProjectIDs()
 	if activeBrain {
 		scope = []string{projectID}
+	}
+	return authorizeAgentCapability(a, projectID, required, scope)
+}
+
+func (s *Service) agentHasAssignedTaskCapability(ctx context.Context, value Task, id, required string) error {
+	if value.AssignedTo() != id {
+		return ErrForbidden
+	}
+	a, err := s.agents.Get(ctx, id)
+	if err != nil {
+		return ErrForbidden
+	}
+	scope := append(a.ProjectIDs(), value.ProjectID())
+	return authorizeAgentCapability(a, value.ProjectID(), required, scope)
+}
+
+func authorizeAgentCapability(a agent.Agent, projectID, required string, scope []string) error {
+	grant, err := capability.New(required)
+	if err != nil {
+		return ErrForbidden
 	}
 	grants := make([]capability.Capability, 0, len(a.Capabilities()))
 	for _, value := range a.Capabilities() {
