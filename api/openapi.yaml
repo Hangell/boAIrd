@@ -560,7 +560,7 @@ paths:
               $ref: '#/components/schemas/CreateAgent'
       responses:
         '201':
-          description: Agent created with IDLE status.
+          description: Agent created with IDLE status. Runtime status becomes server-derived once the Agent authenticates.
           headers:
             Location:
               schema: { type: string }
@@ -683,7 +683,7 @@ paths:
       summary: Get an agent
       responses:
         '200':
-          description: Agent configuration. Status is managed by the runtime.
+          description: Agent configuration plus server-derived runtime status and session liveness.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Agent' }
@@ -707,6 +707,32 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Agent' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/agents/{id}/status-events:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    get:
+      operationId: listAgentStatusEvents
+      x-required-capability: agent.read
+      summary: List observed Agent status transitions
+      description: Immutable transitions derived from authenticated sessions and work signals, newest first.
+      responses:
+        '200':
+          description: Agent status events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentStatusEventPage' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -1038,7 +1064,29 @@ components:
         language_preferences: { type: array, items: { type: string } }
         capabilities: { type: array, items: { type: string } }
         project_ids: { type: array, description: Persisted explicit project scope; managed through the project membership endpoints., items: { type: string, format: uuid }, readOnly: true }
-        status: { type: string, readOnly: true, enum: [ONLINE, IDLE, BUSY, WAITING, OFFLINE, STALE, ERROR] }
+        status: { type: string, readOnly: true, description: Server-derived from authenticated sessions and observed work; clients never submit a status., enum: [ONLINE, IDLE, BUSY, WAITING, OFFLINE, STALE, ERROR] }
+        last_seen_at: { type: string, format: date-time, readOnly: true, description: Most recent authenticated activity of an open session. }
+        session_open: { type: boolean, readOnly: true, description: Whether an unexpired session is bound to this Agent. }
+    AgentStatusEvent:
+      type: object
+      required: [sequence, agent_id, from_status, to_status, reason, created_at]
+      properties:
+        sequence: { type: integer, format: int64 }
+        agent_id: { type: string, format: uuid }
+        session_id: { type: string, description: Session that observed the transition; empty when no session was open. }
+        from_status: { type: string, enum: [ONLINE, IDLE, BUSY, WAITING, OFFLINE, STALE, ERROR] }
+        to_status: { type: string, enum: [ONLINE, IDLE, BUSY, WAITING, OFFLINE, STALE, ERROR] }
+        reason: { type: string, enum: [session.opened, session.resumed, session.expired, work.changed, status.reconciled] }
+        created_at: { type: string, format: date-time }
+    AgentStatusEventPage:
+      type: object
+      required: [items, limit]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AgentStatusEvent' }
+        limit: { type: integer }
+        offset: { type: integer }
     AgentPage:
       type: object
       required: [items, limit, offset]

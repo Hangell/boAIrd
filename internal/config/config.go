@@ -9,12 +9,17 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	defaultHost         = "127.0.0.1"
 	defaultPort         = 3110
 	defaultDatabasePath = "./data/boaird.db"
+
+	defaultAgentStaleAfter     = 90 * time.Second
+	defaultAgentOfflineAfter   = 5 * time.Minute
+	defaultAgentStatusInterval = 30 * time.Second
 )
 
 // Config contains the settings required to start the local service.
@@ -27,6 +32,9 @@ type Config struct {
 	MCPAgentTokens          []MCPAgentToken
 	ProviderAllowedHosts    []string
 	ProviderAllowedIPRanges []string
+	AgentStaleAfter         time.Duration
+	AgentOfflineAfter       time.Duration
+	AgentStatusInterval     time.Duration
 }
 
 // MCPAgentToken registers one MCP bearer token for an existing Agent identity.
@@ -53,9 +61,12 @@ func (LocalAuthToken) GoString() string { return "[REDACTED]" }
 // Load reads service settings from the environment and applies local defaults.
 func Load() (Config, error) {
 	cfg := Config{
-		Host:         envOrDefault("BOAIRD_HOST", defaultHost),
-		Port:         defaultPort,
-		DatabasePath: envOrDefault("BOAIRD_DATABASE_PATH", defaultDatabasePath),
+		Host:                envOrDefault("BOAIRD_HOST", defaultHost),
+		Port:                defaultPort,
+		DatabasePath:        envOrDefault("BOAIRD_DATABASE_PATH", defaultDatabasePath),
+		AgentStaleAfter:     defaultAgentStaleAfter,
+		AgentOfflineAfter:   defaultAgentOfflineAfter,
+		AgentStatusInterval: defaultAgentStatusInterval,
 	}
 
 	if rawPort, ok := os.LookupEnv("BOAIRD_PORT"); ok {
@@ -111,6 +122,16 @@ func Load() (Config, error) {
 	}
 	cfg.ProviderAllowedHosts = splitList(os.Getenv("BOAIRD_PROVIDER_ALLOWED_HOSTS"))
 	cfg.ProviderAllowedIPRanges = splitList(os.Getenv("BOAIRD_PROVIDER_ALLOWED_IP_RANGES"))
+	var durationErr error
+	if cfg.AgentStaleAfter, durationErr = envDuration("BOAIRD_AGENT_STALE_AFTER", defaultAgentStaleAfter); durationErr != nil {
+		return Config{}, durationErr
+	}
+	if cfg.AgentOfflineAfter, durationErr = envDuration("BOAIRD_AGENT_OFFLINE_AFTER", defaultAgentOfflineAfter); durationErr != nil {
+		return Config{}, durationErr
+	}
+	if cfg.AgentStatusInterval, durationErr = envDuration("BOAIRD_AGENT_STATUS_INTERVAL", defaultAgentStatusInterval); durationErr != nil {
+		return Config{}, durationErr
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -152,6 +173,15 @@ func (c Config) Validate() error {
 			return fmt.Errorf("BOAIRD_PROVIDER_ALLOWED_IP_RANGES must contain valid CIDR ranges")
 		}
 	}
+	if c.AgentStaleAfter < time.Second || c.AgentStaleAfter >= c.AgentOfflineAfter {
+		return fmt.Errorf("BOAIRD_AGENT_STALE_AFTER must be at least 1s and shorter than BOAIRD_AGENT_OFFLINE_AFTER")
+	}
+	if c.AgentOfflineAfter > 24*time.Hour {
+		return fmt.Errorf("BOAIRD_AGENT_OFFLINE_AFTER must not exceed 24h")
+	}
+	if c.AgentStatusInterval < time.Second || c.AgentStatusInterval > time.Hour {
+		return fmt.Errorf("BOAIRD_AGENT_STATUS_INTERVAL must be between 1s and 1h")
+	}
 	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
 	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))
 	for _, entry := range c.MCPAgentTokens {
@@ -171,6 +201,18 @@ func (c Config) Validate() error {
 		seenTokens[entry.Token] = struct{}{}
 	}
 	return nil
+}
+
+func envDuration(name string, fallback time.Duration) (time.Duration, error) {
+	raw, ok := os.LookupEnv(name)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", name, err)
+	}
+	return value, nil
 }
 
 func splitList(value string) []string {

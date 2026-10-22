@@ -1823,7 +1823,7 @@ Push execution requires stronger connection and delivery guarantees.
 
 # 74. Agent Status
 
-Initial statuses:
+Status is server-owned and derived, never accepted from a client:
 
 ```text
 ONLINE
@@ -1835,23 +1835,38 @@ STALE
 ERROR
 ```
 
+Derivation precedence:
+
+```text
+no session ever                 IDLE
+silent >= offline threshold     OFFLINE
+silent >= stale threshold       STALE
+assigned task in WORKING        BUSY
+assigned task in REVIEW         WAITING
+recent FAILED task              ERROR
+fresh session without work      ONLINE
+```
+
+The Agent configuration API remains read-only for status, and the persisted
+`agents.status` column records the last observed transition rather than a
+client preference. Reads derive the value again, so a stale row can never make
+the board lie about liveness.
+
 ---
 
 # 75. Heartbeat
 
-External agents may maintain a heartbeat.
+External agents maintain liveness through authenticated activity.
 
 ```text
 Agent
  │
- ├── heartbeat
- ├── heartbeat
- ├── heartbeat
+ ├── authenticated MCP request
+ ├── authenticated MCP request
+ ├── authenticated MCP request
  │
  X
 ```
-
-After timeout:
 
 ```text
 ONLINE
@@ -1860,6 +1875,20 @@ STALE
   ↓
 OFFLINE
 ```
+
+Rules:
+
+- A session is keyed by `(agent_id, token_id)`: the identity comes from the
+  verified credential, never from a payload field or an Agent name.
+- Only one session per Agent and credential may be open at a time; a reconnect
+  after expiry opens a new session for the same identity.
+- The reconciler expires silent sessions deterministically and records the
+  transition; repeated reconciliation of an unchanged status records nothing.
+- Transitions are immutable `agent_status_events` rows, exposed through the
+  Agent status-events endpoint for the dashboard and audit review.
+- Thresholds come from configuration (`BOAIRD_AGENT_STALE_AFTER`,
+  `BOAIRD_AGENT_OFFLINE_AFTER`, `BOAIRD_AGENT_STATUS_INTERVAL`); the clock is
+  injectable, so timeout boundaries are tested exactly.
 
 ---
 

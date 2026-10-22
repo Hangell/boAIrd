@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"boAIrd/internal/capability"
@@ -81,6 +82,26 @@ type Snapshot struct {
 	ProjectIDs          []string
 	Tools               []string
 	Status              Status
+}
+
+// Observed is server-derived Agent runtime state. It is never configuration:
+// it is computed from authenticated sessions and work signals, so it is not
+// persisted through Snapshot.
+type Observed struct {
+	Status      Status
+	LastSeenAt  *time.Time
+	SessionOpen bool
+}
+
+// StatusEvent records one observed status transition of an Agent.
+type StatusEvent struct {
+	Sequence  int64
+	AgentID   string
+	SessionID string
+	From      Status
+	To        Status
+	Reason    string
+	CreatedAt time.Time
 }
 
 func New(id, name, role string) (Agent, error) {

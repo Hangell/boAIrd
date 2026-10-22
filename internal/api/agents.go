@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/heartbeat"
 	"boAIrd/internal/project"
 )
 
@@ -24,6 +27,34 @@ type agentResponse struct {
 	Capabilities        []string      `json:"capabilities"`
 	ProjectIDs          []string      `json:"project_ids"`
 	Status              agent.Status  `json:"status"`
+	LastSeenAt          *time.Time    `json:"last_seen_at,omitempty"`
+	SessionOpen         bool          `json:"session_open"`
+}
+
+// AgentObserver derives server-owned runtime state for Agents.
+type AgentObserver interface {
+	Observe(ctx context.Context, agentIDs []string) (map[string]agent.Observed, error)
+}
+
+// AgentStatusEvents lists recorded status transitions for one Agent.
+type AgentStatusEvents interface {
+	Events(ctx context.Context, agentID string, limit int) ([]agent.StatusEvent, error)
+}
+
+type agentStatusEventResponse struct {
+	Sequence  int64        `json:"sequence"`
+	AgentID   string       `json:"agent_id"`
+	SessionID string       `json:"session_id,omitempty"`
+	From      agent.Status `json:"from_status"`
+	To        agent.Status `json:"to_status"`
+	Reason    string       `json:"reason"`
+	CreatedAt time.Time    `json:"created_at"`
+}
+
+type agentStatusEventPage struct {
+	Items  []agentStatusEventResponse `json:"items"`
+	Limit  int                        `json:"limit"`
+	Offset int                        `json:"offset"`
 }
 
 type agentListResponse struct {
@@ -44,7 +75,7 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 			writeAgentError(w, err)
 			return
 		}
-		response := toAgentResponse(value)
+		response := toAgentResponse(value, nil)
 		w.Header().Set("Location", "/api/v1/agents/"+response.ID)
 		writeJSON(w, http.StatusCreated, response)
 	})
@@ -68,9 +99,10 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 		if limit == 0 {
 			limit = 50
 		}
+		observed := observeAgents(r, manager, values)
 		items := make([]agentResponse, 0, len(values))
 		for _, value := range values {
-			items = append(items, toAgentResponse(value))
+			items = append(items, toAgentResponse(value, observed))
 		}
 		writeJSON(w, http.StatusOK, agentListResponse{Items: items, Limit: limit, Offset: offset})
 	})
@@ -81,8 +113,42 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 			writeAgentError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, toAgentResponse(value))
+		writeJSON(w, http.StatusOK, toAgentResponse(value, observeAgents(r, manager, []agent.Agent{value})))
 	})
+
+	if events, ok := manager.(AgentStatusEvents); ok {
+		mux.HandleFunc("GET /api/v1/agents/{id}/status-events", func(w http.ResponseWriter, r *http.Request) {
+			limit, err := queryInteger(r, "limit", 0)
+			if err != nil || (r.URL.Query().Has("limit") && limit == 0) {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer between 1 and 100")
+				return
+			}
+			if _, err := manager.Get(r.Context(), r.PathValue("id")); err != nil {
+				writeAgentError(w, err)
+				return
+			}
+			values, err := events.Events(r.Context(), r.PathValue("id"), limit)
+			if err != nil {
+				if errors.Is(err, heartbeat.ErrInvalidInput) {
+					writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer between 1 and 100")
+					return
+				}
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+				return
+			}
+			if limit == 0 {
+				limit = 50
+			}
+			items := make([]agentStatusEventResponse, 0, len(values))
+			for _, value := range values {
+				items = append(items, agentStatusEventResponse{
+					Sequence: value.Sequence, AgentID: value.AgentID, SessionID: value.SessionID,
+					From: value.From, To: value.To, Reason: value.Reason, CreatedAt: value.CreatedAt,
+				})
+			}
+			writeJSON(w, http.StatusOK, agentStatusEventPage{Items: items, Limit: limit})
+		})
+	}
 
 	mux.HandleFunc("PATCH /api/v1/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var input agent.UpdateInput
@@ -95,7 +161,7 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 			writeAgentError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, toAgentResponse(value))
+		writeJSON(w, http.StatusOK, toAgentResponse(value, observeAgents(r, manager, []agent.Agent{value})))
 	})
 
 	scopeManager, supportsProjectScope := manager.(AgentProjectScopeManager)
@@ -135,14 +201,38 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 	}
 }
 
-func toAgentResponse(value agent.Agent) agentResponse {
+// observeAgents derives runtime state when the manager provides an observation
+// source; configuration-only managers keep returning their stored status.
+func observeAgents(r *http.Request, manager AgentManager, values []agent.Agent) map[string]agent.Observed {
+	observer, ok := manager.(AgentObserver)
+	if !ok {
+		return nil
+	}
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, value.ID())
+	}
+	observed, err := observer.Observe(r.Context(), ids)
+	if err != nil {
+		return nil
+	}
+	return observed
+}
+
+func toAgentResponse(value agent.Agent, observed map[string]agent.Observed) agentResponse {
 	snapshot := value.Snapshot()
-	return agentResponse{
+	response := agentResponse{
 		ID: snapshot.ID, Name: snapshot.Name, Avatar: snapshot.Avatar, Description: snapshot.Description,
 		Role: snapshot.Role, Runtime: snapshot.Runtime, Provider: snapshot.Provider, ProviderBaseURL: snapshot.ProviderBaseURL, Model: snapshot.Model,
 		CredentialID: snapshot.CredentialID, Instructions: snapshot.Instructions,
 		LanguagePreferences: snapshot.LanguagePreferences, Capabilities: snapshot.Capabilities, ProjectIDs: snapshot.ProjectIDs, Status: snapshot.Status,
 	}
+	if value, ok := observed[snapshot.ID]; ok {
+		response.Status = value.Status
+		response.LastSeenAt = value.LastSeenAt
+		response.SessionOpen = value.SessionOpen
+	}
+	return response
 }
 
 func writeAgentError(w http.ResponseWriter, err error) {

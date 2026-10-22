@@ -209,6 +209,8 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		if method == http.MethodPatch {
 			return "agent.update", "", true
 		}
+	case len(parts) == 5 && parts[2] == "agents" && parts[4] == "status-events" && method == http.MethodGet:
+		return "agent.read", "", true
 	case len(parts) == 3 && parts[2] == "credentials":
 		switch method {
 		case http.MethodGet:
