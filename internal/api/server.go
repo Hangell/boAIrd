@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
 )
 
@@ -34,7 +35,13 @@ type ProjectManager interface {
 }
 
 // NewHandler returns the HTTP handler for the initial service endpoints.
-func NewHandler(database DatabaseHealth, projects ProjectManager) http.Handler {
+type CredentialManager interface {
+	Create(context.Context, string, string, string) (credential.Metadata, error)
+	List(context.Context) ([]credential.Metadata, error)
+	Delete(context.Context, string) error
+}
+
+func NewHandler(database DatabaseHealth, projects ProjectManager, credentials ...CredentialManager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -57,6 +64,9 @@ func NewHandler(database DatabaseHealth, projects ProjectManager) http.Handler {
 	})
 	if projects != nil {
 		registerProjectRoutes(mux, projects)
+	}
+	if len(credentials) > 0 && credentials[0] != nil {
+		registerCredentialRoutes(mux, credentials[0])
 	}
 	return mux
 }

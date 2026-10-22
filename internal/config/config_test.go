@@ -7,6 +7,7 @@ import (
 
 func TestLoadUsesLocalDefaults(t *testing.T) {
 	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH")
+	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 
 	cfg, err := Load()
 	if err != nil {
@@ -21,6 +22,7 @@ func TestLoadUsesConfiguredValues(t *testing.T) {
 	t.Setenv("BOAIRD_HOST", defaultHost)
 	t.Setenv("BOAIRD_PORT", "3110")
 	t.Setenv("BOAIRD_DATABASE_PATH", defaultDatabasePath)
+	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -49,6 +51,7 @@ func unsetEnvironment(t *testing.T, keys ...string) {
 }
 
 func TestLoadRejectsInvalidPort(t *testing.T) {
+	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_PORT", "not-a-port")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted an invalid port")
@@ -56,7 +59,7 @@ func TestLoadRejectsInvalidPort(t *testing.T) {
 }
 
 func TestValidateRejectsOutOfRangePort(t *testing.T) {
-	cfg := Config{Host: "127.0.0.1", Port: 65536, DatabasePath: "./data/boaird.db"}
+	cfg := Config{Host: "127.0.0.1", Port: 65536, DatabasePath: "./data/boaird.db", MasterKey: MasterKey{1}}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() accepted an out-of-range port")
 	}
@@ -65,7 +68,7 @@ func TestValidateRejectsOutOfRangePort(t *testing.T) {
 func TestValidateRejectsNonLoopbackHosts(t *testing.T) {
 	for _, host := range []string{"0.0.0.0", "192.0.2.1", "localhost"} {
 		t.Run(host, func(t *testing.T) {
-			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath}
+			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, MasterKey: MasterKey{1}}
 			if err := cfg.Validate(); err == nil {
 				t.Fatalf("Validate() accepted non-loopback host %q", host)
 			}
@@ -76,10 +79,36 @@ func TestValidateRejectsNonLoopbackHosts(t *testing.T) {
 func TestValidateAcceptsLoopbackHosts(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "::1"} {
 		t.Run(host, func(t *testing.T) {
-			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath}
+			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, MasterKey: MasterKey{1}}
 			if err := cfg.Validate(); err != nil {
 				t.Fatalf("Validate() rejected loopback host %q: %v", host, err)
 			}
 		})
 	}
+}
+
+func TestLoadRejectsMissingOrMalformedMasterKey(t *testing.T) {
+	for _, value := range []string{"", "not-hex", "abcd"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("BOAIRD_MASTER_KEY", value)
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() accepted a missing or malformed master key")
+			}
+		})
+	}
+}
+
+func TestLoadDecodesMasterKey(t *testing.T) {
+	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MasterKey[0] != 1 || cfg.MasterKey[31] != 1 {
+		t.Fatal("Load() did not decode the master key")
+	}
+}
+
+func testMasterKey() string {
+	return "0101010101010101010101010101010101010101010101010101010101010101"
 }
