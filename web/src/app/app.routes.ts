@@ -1,12 +1,14 @@
 import type {} from '@angular/localize';
 import { Routes } from '@angular/router';
+import { ProjectDashboardComponent } from './features/projects/project-dashboard.component';
+import { ProjectListComponent } from './features/projects/project-list.component';
 import { FeaturePageComponent } from './shared/feature-page.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'overview' },
   {
     path: 'overview',
-    component: FeaturePageComponent,
+    component: ProjectListComponent,
     title: $localize`:@@page.overview.title:Overview`,
     data: {
       title: $localize`:@@page.overview.heading:Project overview`,
@@ -15,7 +17,7 @@ export const routes: Routes = [
   },
   {
     path: 'projects',
-    component: FeaturePageComponent,
+    component: ProjectListComponent,
     title: $localize`:@@page.projects.title:Projects`,
     data: {
       title: $localize`:@@page.projects.heading:Projects`,
@@ -24,7 +26,7 @@ export const routes: Routes = [
   },
   {
     path: 'projects/:projectId',
-    component: FeaturePageComponent,
+    component: ProjectDashboardComponent,
     title: $localize`:@@page.project.title:Project details`,
     data: {
       title: $localize`:@@page.project.heading:Project workspace`,
