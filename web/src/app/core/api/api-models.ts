@@ -27,6 +27,46 @@ export interface AgentSummary {
   status: string;
 }
 
+export type AgentRuntime = 'API' | 'MCP' | 'LOCAL' | 'REMOTE';
+
+export interface Agent {
+  id: string;
+  name: string;
+  avatar: string;
+  description: string;
+  role: string;
+  runtime: AgentRuntime;
+  provider?: string;
+  provider_base_url?: string;
+  model?: string;
+  credential_id?: string;
+  instructions: string;
+  language_preferences: string[];
+  capabilities: string[];
+  status: string;
+}
+
+export interface AgentConfiguration {
+  name: string;
+  avatar: string;
+  description: string;
+  role: string;
+  runtime: AgentRuntime;
+  provider?: string;
+  provider_base_url?: string;
+  model?: string;
+  credential_id?: string;
+  instructions: string;
+  language_preferences: string[];
+  capabilities: string[];
+}
+
+export interface CredentialMetadata {
+  id: string;
+  name: string;
+  provider: string;
+}
+
 export interface BrainSummary {
   id: string;
   project_id: string;
