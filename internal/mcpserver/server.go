@@ -65,6 +65,7 @@ type TaskService interface {
 }
 type ConversationService interface {
 	GetPageForAgent(context.Context, string, string, string, int) (conversation.Conversation, []conversation.Message, string, error)
+	GetPageForBrain(context.Context, string, string, string, int) (conversation.Conversation, []conversation.Message, string, error)
 	Append(context.Context, string, conversation.SenderType, string, conversation.MessageInput) (conversation.Message, error)
 }
 type BrainService interface {
@@ -129,9 +130,9 @@ func (s *Server) registerTools(server *mcp.Server) {
 	mcp.AddTool[taskUpdateInput, taskOutput](server, add("boaird.task.update", "Move an assigned task as its Worker, or a project task as the active Brain under Brain policy."), s.taskUpdate)
 	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.complete", "Complete an assigned task or a project task as the active Brain when capability, autonomy, workflow, and Human Review policy allow it."), s.taskComplete)
 	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.fail", "Mark an assigned task failed as its Worker, or a project task as the active Brain under Brain policy."), s.taskFail)
-	mcp.AddTool[conversationReadInput, conversationOutput](server, add("boaird.conversation.read", "Read a bounded page of messages for a task assigned to this Agent."), s.conversationRead)
-	mcp.AddTool[conversationSendInput, messageOutput](server, add("boaird.conversation.send", "Send a message as the authenticated Agent on an assigned task."), s.conversationSend)
-	mcp.AddTool[taskInput, contextOutput](server, add("boaird.context.get", "Get assigned task context with a bounded recent conversation page; project metadata is included only for explicitly scoped projects."), s.contextGet)
+	mcp.AddTool[conversationReadInput, conversationOutput](server, add("boaird.conversation.read", "Read a bounded page of messages for an assigned task or a task in the authenticated active Brain's project."), s.conversationRead)
+	mcp.AddTool[conversationSendInput, messageOutput](server, add("boaird.conversation.send", "Send a message as the authenticated Agent on an assigned task, or as the active Brain within its project."), s.conversationSend)
+	mcp.AddTool[taskInput, contextOutput](server, add("boaird.context.get", "Get task context with a bounded recent conversation page when assigned to this Agent or scoped to the authenticated active Brain's project."), s.contextGet)
 	mcp.AddTool[brainRequestInput, brainOutput](server, add("boaird.brain.request", "Submit a planning request to an API-backed active Brain. An MCP Brain performs work through its authenticated tools."), s.brainRequest)
 	mcp.AddTool[runInput, runOutput](server, add("boaird.run.get", "Get a run in a project explicitly assigned to this Agent."), s.runGet)
 }
@@ -667,14 +668,27 @@ func (s *Server) conversationRead(ctx context.Context, _ *mcp.CallToolRequest, i
 	if e != nil {
 		return nil, conversationOutput{}, toolError(e)
 	}
-	t, e := s.assignedTask(ctx, a, in.TaskID, "conversation.read")
+	t, e := s.services.Tasks.Get(ctx, in.TaskID)
 	if e != nil {
 		return nil, conversationOutput{}, toolError(e)
 	}
-	if s.authorize(ctx, a, "task.read", "") != nil {
-		return nil, conversationOutput{}, toolError(task.ErrForbidden)
+	var value conversation.Conversation
+	var msgs []conversation.Message
+	var next string
+	if s.isActiveBrain(ctx, a, t.ProjectID()) {
+		if s.authorizeProject(ctx, a, "task.read", t.ProjectID()) != nil || s.authorizeProject(ctx, a, "conversation.read", t.ProjectID()) != nil {
+			return nil, conversationOutput{}, toolError(task.ErrForbidden)
+		}
+		value, msgs, next, e = s.services.Conversations.GetPageForBrain(ctx, t.ID(), a.ID(), in.Before, in.Limit)
+	} else {
+		if _, e = s.assignedTask(ctx, a, in.TaskID, "conversation.read"); e != nil {
+			return nil, conversationOutput{}, toolError(e)
+		}
+		if s.authorizeAssignedTask(ctx, a, "task.read", t) != nil {
+			return nil, conversationOutput{}, toolError(task.ErrForbidden)
+		}
+		value, msgs, next, e = s.services.Conversations.GetPageForAgent(ctx, t.ID(), a.ID(), in.Before, in.Limit)
 	}
-	value, msgs, next, e := s.services.Conversations.GetPageForAgent(ctx, t.ID(), a.ID(), in.Before, in.Limit)
 	if e != nil {
 		return nil, conversationOutput{}, toolError(e)
 	}
@@ -689,14 +703,24 @@ func (s *Server) conversationSend(ctx context.Context, _ *mcp.CallToolRequest, i
 	if e != nil {
 		return nil, messageOutput{}, toolError(e)
 	}
-	if _, e = s.assignedTask(ctx, a, in.TaskID, "conversation.write"); e != nil {
+	t, e := s.services.Tasks.Get(ctx, in.TaskID)
+	if e != nil {
+		return nil, messageOutput{}, toolError(e)
+	}
+	senderType := conversation.SenderAgent
+	if s.isActiveBrain(ctx, a, t.ProjectID()) {
+		if s.authorizeProject(ctx, a, "task.read", t.ProjectID()) != nil || s.authorizeProject(ctx, a, "conversation.write", t.ProjectID()) != nil {
+			return nil, messageOutput{}, toolError(task.ErrForbidden)
+		}
+		senderType = conversation.SenderBrain
+	} else if _, e = s.assignedTask(ctx, a, in.TaskID, "conversation.write"); e != nil {
 		return nil, messageOutput{}, toolError(e)
 	}
 	contentType := strings.TrimSpace(in.ContentType)
 	if contentType == "" {
 		contentType = "text/plain"
 	}
-	m, e := s.services.Conversations.Append(ctx, in.TaskID, conversation.SenderAgent, a.ID(), conversation.MessageInput{Content: in.Content, ContentType: contentType})
+	m, e := s.services.Conversations.Append(ctx, in.TaskID, senderType, a.ID(), conversation.MessageInput{Content: in.Content, ContentType: contentType})
 	if e != nil {
 		return nil, messageOutput{}, toolError(e)
 	}
@@ -708,8 +732,17 @@ func (s *Server) contextGet(ctx context.Context, r *mcp.CallToolRequest, in task
 		return nil, contextOutput{}, toolError(e)
 	}
 	t, e := s.services.Tasks.Get(ctx, in.TaskID)
-	if e != nil || s.taskVisible(ctx, a, t, "task.read") != nil || s.authorize(ctx, a, "conversation.read", "") != nil {
+	if e != nil {
 		return nil, contextOutput{}, toolError(task.ErrForbidden)
+	}
+	if s.isActiveBrain(ctx, a, t.ProjectID()) {
+		if s.authorizeProject(ctx, a, "task.read", t.ProjectID()) != nil || s.authorizeProject(ctx, a, "conversation.read", t.ProjectID()) != nil {
+			return nil, contextOutput{}, toolError(task.ErrForbidden)
+		}
+	} else {
+		if _, e = s.assignedTask(ctx, a, in.TaskID, "task.read"); e != nil || s.authorizeAssignedTask(ctx, a, "conversation.read", t) != nil {
+			return nil, contextOutput{}, toolError(task.ErrForbidden)
+		}
 	}
 	var projectContext *projectOutput
 	if s.hasProjectScope(ctx, a, t.ProjectID()) && s.authorizeProject(ctx, a, "project.read", t.ProjectID()) == nil {
@@ -719,7 +752,14 @@ func (s *Server) contextGet(ctx context.Context, r *mcp.CallToolRequest, in task
 		}
 		projectContext = &projectOutput{ID: p.ID(), Name: p.Name(), Description: p.Description(), Status: string(p.Status())}
 	}
-	value, msgs, next, e := s.services.Conversations.GetPageForAgent(ctx, t.ID(), a.ID(), "", 20)
+	var value conversation.Conversation
+	var msgs []conversation.Message
+	var next string
+	if s.isActiveBrain(ctx, a, t.ProjectID()) {
+		value, msgs, next, e = s.services.Conversations.GetPageForBrain(ctx, t.ID(), a.ID(), "", 20)
+	} else {
+		value, msgs, next, e = s.services.Conversations.GetPageForAgent(ctx, t.ID(), a.ID(), "", 20)
+	}
 	if e != nil {
 		return nil, contextOutput{}, toolError(e)
 	}

@@ -88,6 +88,20 @@ func (s *Service) GetPageForAgent(ctx context.Context, taskID, agentID, before s
 	})
 }
 
+// GetPageForBrain grants access only when the caller is the active Brain for the task's project.
+func (s *Service) GetPageForBrain(ctx context.Context, taskID, brainAgentID, before string, limit int) (Conversation, []Message, string, error) {
+	return s.getPage(ctx, taskID, before, limit, func(work task.Task) error {
+		if strings.TrimSpace(brainAgentID) == "" {
+			return ErrForbidden
+		}
+		configured, err := s.brains.GetActiveByProject(ctx, work.ProjectID())
+		if err != nil || configured.AgentID() != strings.TrimSpace(brainAgentID) || configured.ProjectID() != work.ProjectID() {
+			return ErrForbidden
+		}
+		return nil
+	})
+}
+
 func (s *Service) getPage(ctx context.Context, taskID, before string, limit int, authorize func(task.Task) error) (Conversation, []Message, string, error) {
 	if limit == 0 {
 		limit = defaultMessagePageSize

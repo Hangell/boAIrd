@@ -1737,6 +1737,12 @@ assignment check and never adds general project scope. A Brain receives scope
 only for the project whose active Brain relation names that Agent. MCP scope
 denials are written to the immutable authorization denial log.
 
+Conversation reads preserve that boundary: Workers use the exact-assignment
+reader, while the active Brain uses a separate reader that verifies the
+Brain-to-project relation against the task's project. Brain conversation writes
+require `task.read` and `conversation.write` in that project and are persisted
+with `SenderBrain`; Workers remain assignment-bound and persist as `SenderAgent`.
+
 ---
 
 # 69. MCP Architecture

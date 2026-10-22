@@ -1196,9 +1196,9 @@ Tool inputs and required capabilities:
 | `boaird.task.update` | `task_id`, `status` (`WORKING`, `REVIEW`, `HUMAN_REVIEW`, `BLOCKED`), `reason` | Worker: `task.transition` and exact assignment; active Brain: matching Brain capability, project scope, autonomy policy, and task workflow; `HUMAN_REVIEW` is allowed only when project policy requires it |
 | `boaird.task.complete` | `task_id`, `reason` | Worker: `task.complete` and exact assignment; active Brain: `task.complete`, project scope, autonomy policy, domain workflow, and Human Review policy |
 | `boaird.task.fail` | `task_id`, `reason` | Worker: `task.transition` and exact assignment; active Brain: `task.review`, project scope, autonomy policy, and task workflow |
-| `boaird.conversation.read` | `task_id`, optional `before`, `limit` (1–100; default 50) | `task.read` and `conversation.read`; exact assignment |
-| `boaird.conversation.send` | `task_id`, `content`, optional `content_type` | `conversation.write`; exact assignment |
-| `boaird.context.get` | `task_id` | `task.read` and `conversation.read`; exact assignment or persisted/active-Brain project scope, at most 20 messages; project metadata is included only with effective project scope and `project.read` |
+| `boaird.conversation.read` | `task_id`, optional `before`, `limit` (1–100; default 50) | Workers require `task.read` and `conversation.read` with exact assignment; the active Brain requires both capabilities and scope to its own project |
+| `boaird.conversation.send` | `task_id`, `content`, optional `content_type` | Workers require `conversation.write` and exact assignment; the active Brain requires `task.read`, `conversation.write`, and scope to its own project; persisted sender identity is `BRAIN` |
+| `boaird.context.get` | `task_id` | Workers require `task.read` and `conversation.read` with exact assignment; the active Brain requires both capabilities and scope to its own project; at most 20 messages; project metadata is included only with effective project scope and `project.read` |
 | `boaird.brain.request` | `project_id`, `objective`, optional `max_tokens` (1–4096; default 2048) | `brain.execute`; API-backed active Brain only. An MCP Brain uses its authenticated MCP tools directly |
 | `boaird.run.get` | `run_id` | `run.read`; persisted project membership or the authenticated Agent's active Brain relationship for the run's project; run ownership alone does not grant access |
 

@@ -58,7 +58,11 @@ func TestProjectExecutionAcceptsMCPBrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
 	statements := []string{
 		`INSERT INTO projects(id, name, status, human_review_required) VALUES ('p1', 'Project', 'CREATED', 1)`,
 		`INSERT INTO agents(id, name, role, runtime) VALUES ('a1', 'External Brain', 'coordinator', 'MCP')`,
