@@ -30,4 +30,6 @@ The project list opens a project scoped overview using the existing project, tas
 
 The Agents route lists agents and provides create/detail configuration forms using the versioned agent and credential metadata endpoints. Agent status is read-only. API agents reference an existing credential by ID; the dashboard never requests or displays raw secrets. Role is a descriptive label, while capabilities remain an explicit configuration list. API failures use generic messages so internal server responses are not shown in the UI.
 
+The Brain route selects a project and shows the active Brain agent status, autonomy mode, recent Brain Run proposals, and tasks blocked or waiting for human review. Replacing an active Brain requires the local administrator bearer token and a reason. The dashboard sends the token only with that request and does not persist it.
+
 Template strings use Angular `i18n` markers and TypeScript strings use `$localize` IDs. English is the source locale. The shell provides semantic landmarks, a keyboard skip link, visible focus indicators, and reduced-motion styling.

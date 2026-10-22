@@ -66,13 +66,24 @@ export interface CredentialMetadata {
   name: string;
   provider: string;
 }
-
+export interface BrainAgent extends AgentSummary {
+  role: string;
+  runtime: 'API' | 'MCP' | 'LOCAL' | 'REMOTE';
+  provider?: string;
+  model?: string;
+  capabilities: string[];
+}
 export interface BrainSummary {
   id: string;
   project_id: string;
   agent_id: string;
-  autonomy: string;
+  autonomy: 'MANUAL' | 'SEMI_AUTO' | 'AUTONOMOUS';
   active: boolean;
+}
+
+export interface BrainConfiguration {
+  agent_id: string;
+  autonomy: 'MANUAL' | 'SEMI_AUTO' | 'AUTONOMOUS';
 }
 
 export interface RunSummary {
@@ -82,4 +93,5 @@ export interface RunSummary {
   agent_id: string;
   model: string;
   status: string;
+  output?: string;
 }

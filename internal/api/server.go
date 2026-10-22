@@ -58,6 +58,10 @@ type BrainManager interface {
 	Execute(context.Context, string, string, int) (brain.Execution, error)
 }
 
+type BrainReplacementManager interface {
+	Replace(context.Context, string, brain.CreateInput, string, string) (brain.Brain, error)
+}
+
 type RunManager interface {
 	Get(context.Context, string) (run.Run, error)
 	List(context.Context, string, string, string, int, int) ([]run.Run, error)
@@ -107,6 +111,10 @@ func NewHandlerWithConversations(database DatabaseHealth, projects ProjectManage
 
 func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthTokens ...[]byte) http.Handler {
 	mux := http.NewServeMux()
+	var localAuthToken []byte
+	if len(localAuthTokens) > 0 {
+		localAuthToken = localAuthTokens[0]
+	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -136,7 +144,7 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 		registerAgentRoutes(mux, agents)
 	}
 	if brains != nil {
-		registerBrainRoutes(mux, brains)
+		registerBrainRoutes(mux, brains, localAuthToken)
 	}
 	if runs != nil {
 		registerRunRoutes(mux, runs)
@@ -145,10 +153,6 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 		registerTaskRoutes(mux, tasks)
 	}
 	if conversations != nil {
-		var localAuthToken []byte
-		if len(localAuthTokens) > 0 {
-			localAuthToken = localAuthTokens[0]
-		}
 		registerConversationRoutes(mux, conversations, localAuthToken)
 	}
 	return mux

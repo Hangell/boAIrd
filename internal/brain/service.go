@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/logging"
 	"boAIrd/internal/project"
 	"boAIrd/internal/provider"
 	"boAIrd/internal/provider/adapters"
@@ -15,6 +16,7 @@ import (
 
 type Repository interface {
 	Create(context.Context, Brain) error
+	Replace(context.Context, Brain, Brain, string, string) error
 	GetActiveByProject(context.Context, string) (Brain, error)
 }
 type ProjectReader interface {
@@ -96,6 +98,54 @@ func (s *Service) Create(ctx context.Context, projectID string, input CreateInpu
 
 func (s *Service) Get(ctx context.Context, projectID string) (Brain, error) {
 	return s.brains.GetActiveByProject(ctx, projectID)
+}
+
+// Replace changes the project Brain configuration after validating the replacement agent.
+func (s *Service) Replace(ctx context.Context, projectID string, input CreateInput, actorID, reason string) (Brain, error) {
+	actorID = strings.TrimSpace(actorID)
+	reason = logging.RedactSensitiveText(strings.TrimSpace(reason))
+	if actorID == "" || len(reason) == 0 || len(reason) > 1000 {
+		return Brain{}, fmt.Errorf("%w: administrator and replacement reason are required", ErrInvalidInput)
+	}
+	projectValue, err := s.projects.Get(ctx, projectID)
+	if err != nil {
+		return Brain{}, err
+	}
+	if projectValue.Status() == project.StatusArchived {
+		return Brain{}, ErrProjectUnavailable
+	}
+	current, err := s.brains.GetActiveByProject(ctx, projectID)
+	if err != nil {
+		return Brain{}, err
+	}
+	agentValue, err := s.agents.Get(ctx, input.AgentID)
+	if err != nil {
+		return Brain{}, err
+	}
+	if agentValue.Runtime() != agent.RuntimeAPI {
+		return Brain{}, ErrInvalidAgent
+	}
+	allowed := false
+	for _, capability := range agentValue.Capabilities() {
+		if string(capability) == "brain.execute" {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return Brain{}, ErrInvalidAgent
+	}
+	replacement, err := New(current.ID(), projectID, agentValue.ID(), input.Autonomy)
+	if err != nil {
+		return Brain{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if current.AgentID() == replacement.AgentID() && current.Autonomy() == replacement.Autonomy() {
+		return Brain{}, fmt.Errorf("%w: replacement must change Brain configuration", ErrInvalidInput)
+	}
+	if err := s.brains.Replace(ctx, current, replacement, actorID, reason); err != nil {
+		return Brain{}, err
+	}
+	return replacement, nil
 }
 
 func (s *Service) Execute(ctx context.Context, projectID, objective string, maxTokens int) (Execution, error) {

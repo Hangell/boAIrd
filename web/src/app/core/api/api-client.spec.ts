@@ -59,4 +59,20 @@ describe('ApiClient', () => {
     request.flush({ id: 'a1' });
     expect(response).toEqual({ id: 'a1' });
   });
+
+  it('sends bearer authorization only with the requested PUT', () => {
+    client.putWithBearer<{ reason: string }, { id: string }>('api/v1/projects/p1/brain', { reason: 'replace' }, 'admin-token').subscribe();
+
+    const request = http.expectOne('http://127.0.0.1:3110/api/v1/projects/p1/brain');
+    expect(request.request.method).toBe('PUT');
+    expect(request.request.headers.get('Authorization')).toBe('Bearer admin-token');
+    request.flush({ id: 'brain-1' });
+  });
+
+  it('appends pagination parameters after existing filters', () => {
+    client.getAllPages<{ id: string }>('projects/p1/tasks?status=HUMAN_REVIEW').subscribe();
+
+    const request = http.expectOne('http://127.0.0.1:3110/projects/p1/tasks?status=HUMAN_REVIEW&limit=100&offset=0');
+    request.flush({ items: [], limit: 100, offset: 0 });
+  });
 });

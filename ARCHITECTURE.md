@@ -2507,7 +2507,10 @@ and requires an actor and reason for each mutation. SQLite writes immutable
 audit rows for task creation, assignment, and status changes. The local HTTP API
 uses a fixed local API actor for task management because those routes do not
 authenticate callers; it does not accept actor identity from request data.
-Conversation routes separately authenticate the configured local administrator.
+Conversation routes and active Brain replacement separately authenticate the
+configured local administrator. Brain replacement records an immutable audit
+event with a required reason; the dashboard sends the bearer token only for that
+request and does not persist it in browser storage.
 
 ---
 

@@ -64,6 +64,61 @@ func (r *BrainRepository) Create(ctx context.Context, value brain.Brain) error {
 	return nil
 }
 
+func (r *BrainRepository) Replace(ctx context.Context, current, replacement brain.Brain, actorID, reason string) error {
+	tx, err := r.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin Brain replacement: %w", err)
+	}
+	defer tx.Rollback()
+	var projectStatus string
+	var currentAgentID string
+	var currentAutonomy string
+	if err := tx.QueryRowContext(ctx, `SELECT p.status, bc.agent_id, bc.autonomy FROM projects p
+		JOIN brains b ON b.project_id=p.id AND b.id=p.brain_id AND b.active=1
+		JOIN brain_configuration bc ON bc.brain_id=b.id WHERE p.id=? AND b.id=?`, current.ProjectID(), current.ID()).
+		Scan(&projectStatus, &currentAgentID, &currentAutonomy); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return brain.ErrNotFound
+		}
+		return fmt.Errorf("read current Brain configuration: %w", err)
+	}
+	if projectStatus == "ARCHIVED" {
+		return brain.ErrProjectUnavailable
+	}
+	if currentAgentID != current.AgentID() || currentAutonomy != string(current.Autonomy()) {
+		return brain.ErrConfigurationChanged
+	}
+	var validAgent bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agents a JOIN agent_capabilities c ON c.agent_id=a.id
+		WHERE a.id=? AND a.runtime='API' AND a.credential_id IS NOT NULL AND c.capability='brain.execute')`, replacement.AgentID()).Scan(&validAgent); err != nil {
+		return fmt.Errorf("validate replacement Brain agent: %w", err)
+	}
+	if !validAgent {
+		return brain.ErrInvalidAgent
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE brain_configuration SET agent_id=?, autonomy=?
+		WHERE brain_id=? AND agent_id=? AND autonomy=?`, replacement.AgentID(), replacement.Autonomy(), current.ID(), current.AgentID(), current.Autonomy())
+	if err != nil {
+		return fmt.Errorf("update Brain configuration: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check Brain replacement update: %w", err)
+	}
+	if rows != 1 {
+		return brain.ErrConfigurationChanged
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, from_status, to_status, reason)
+		VALUES (?, 'user', ?, 'brain.replaced', 'brain', ?, ?, ?, ?)`, current.ProjectID(), actorID, current.ID(),
+		current.AgentID()+"/"+string(current.Autonomy()), replacement.AgentID()+"/"+string(replacement.Autonomy()), reason); err != nil {
+		return fmt.Errorf("audit Brain replacement: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit Brain replacement: %w", err)
+	}
+	return nil
+}
+
 func (r *BrainRepository) GetActiveByProject(ctx context.Context, projectID string) (brain.Brain, error) {
 	var id, agentID string
 	var autonomy brain.AutonomyMode
