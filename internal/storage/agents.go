@@ -157,8 +157,8 @@ func insertAgent(ctx context.Context, executor sqlExecutor, snapshot agent.Snaps
 }
 
 func insertAgentRelations(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
-	for _, language := range snapshot.LanguagePreferences {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_languages(agent_id, language) VALUES (?, ?)", snapshot.ID, language); err != nil {
+	for position, language := range snapshot.LanguagePreferences {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_languages(agent_id, position, language) VALUES (?, ?, ?)", snapshot.ID, position, language); err != nil {
 			return fmt.Errorf("insert agent language: %w", err)
 		}
 	}
@@ -171,7 +171,7 @@ func insertAgentRelations(ctx context.Context, tx *sql.Tx, snapshot agent.Snapsh
 }
 
 func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.Snapshot) error {
-	languages, err := database.QueryContext(ctx, "SELECT language FROM agent_languages WHERE agent_id = ? ORDER BY language COLLATE NOCASE", snapshot.ID)
+	languages, err := database.QueryContext(ctx, "SELECT language FROM agent_languages WHERE agent_id = ? ORDER BY position", snapshot.ID)
 	if err != nil {
 		return fmt.Errorf("query agent languages: %w", err)
 	}

@@ -27,7 +27,7 @@ func TestAgentRepositoryPersistsConfigurationAndRelations(t *testing.T) {
 	}
 	value, err := manager.Create(context.Background(), agent.CreateInput{
 		Name: "Backend Go", Role: "developer", Runtime: agent.RuntimeAPI, Provider: "OpenAI", Model: "gpt-test",
-		CredentialID: "cred-1", Instructions: "Implement Go APIs", LanguagePreferences: []string{"English", "Português"},
+		CredentialID: "cred-1", Instructions: "Implement Go APIs", LanguagePreferences: []string{"pt-BR", "en-US"},
 		Capabilities: []string{"filesystem.read", "github.issue.create"},
 	})
 	if err != nil {
@@ -44,13 +44,16 @@ func TestAgentRepositoryPersistsConfigurationAndRelations(t *testing.T) {
 		t.Fatalf("capability count = %d, want 2", got)
 	}
 	languages := loaded.LanguagePreferences()
-	if len(languages) != 2 || languages[0] != "English" || languages[1] != "Português" {
+	if len(languages) != 2 || languages[0] != "pt-BR" || languages[1] != "en-US" {
 		t.Fatalf("language preferences = %#v", languages)
 	}
 	newName := "Backend Go Senior"
 	updated, err := manager.Update(context.Background(), value.ID(), agent.UpdateInput{Name: &newName})
 	if err != nil || updated.Name() != newName || updated.Provider() != "openai" {
 		t.Fatalf("Update() = %+v, %v", updated.Snapshot(), err)
+	}
+	if got := updated.LanguagePreferences(); len(got) != 2 || got[0] != "pt-BR" || got[1] != "en-US" {
+		t.Fatalf("language preferences after update = %#v", got)
 	}
 	listed, err := manager.List(context.Background(), 0, 0)
 	if err != nil || len(listed) != 1 || listed[0].Name() != newName {

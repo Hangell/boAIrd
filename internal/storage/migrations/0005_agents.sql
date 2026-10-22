@@ -41,8 +41,10 @@ END;
 
 CREATE TABLE agent_languages (
     agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK(position >= 0),
     language TEXT NOT NULL CHECK(length(trim(language)) BETWEEN 1 AND 100),
-    PRIMARY KEY(agent_id, language)
+    PRIMARY KEY(agent_id, position),
+    UNIQUE(agent_id, language)
 );
 
 CREATE TABLE agent_capabilities (
