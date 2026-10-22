@@ -128,8 +128,8 @@ func (p EndpointPolicy) dialContext(ctx context.Context, network, address string
 
 func (p EndpointPolicy) addressAllowed(address netip.Addr, host string) bool {
 	address = address.Unmap()
-	if isExplicitLoopbackHost(host) && address.IsLoopback() {
-		return true
+	if isExplicitLoopbackHost(host) {
+		return address.IsLoopback()
 	}
 	if isPrivateOrSpecialAddress(address) {
 		for _, prefix := range p.allowedIPRanges {

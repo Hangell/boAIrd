@@ -113,6 +113,53 @@ func TestEndpointPolicyRejectsSpecialIPv6DNSAnswersUnlessCIDRIsAllowed(t *testin
 	}
 }
 
+func TestEndpointPolicyRestrictsLocalhostDNSAnswersToLoopback(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		addresses []string
+		wantDial  bool
+	}{
+		{name: "IPv4 loopback", addresses: []string{"127.0.0.1"}, wantDial: true},
+		{name: "IPv6 loopback", addresses: []string{"::1"}, wantDial: true},
+		{name: "public address", addresses: []string{"1.1.1.1"}},
+		{name: "mixed loopback and public", addresses: []string{"127.0.0.1", "2606:4700:4700::1111"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			policy, err := NewEndpointPolicy(nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy.lookupIP = func(context.Context, string) ([]netip.Addr, error) {
+				addresses := make([]netip.Addr, 0, len(test.addresses))
+				for _, value := range test.addresses {
+					addresses = append(addresses, netip.MustParseAddr(value))
+				}
+				return addresses, nil
+			}
+			dialCalled := false
+			dialErr := errors.New("dial reached")
+			policy.dialer = func(context.Context, string, string) (net.Conn, error) {
+				dialCalled = true
+				return nil, dialErr
+			}
+
+			_, err = policy.dialContext(context.Background(), "tcp", "localhost:8080")
+			if test.wantDial {
+				if !dialCalled || !errors.Is(err, dialErr) {
+					t.Fatalf("loopback resolution = (dialCalled %t, error %v), want dial", dialCalled, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("non-loopback localhost resolution was allowed")
+			}
+			if dialCalled {
+				t.Fatal("network dial occurred before all localhost DNS answers were validated")
+			}
+		})
+	}
+}
+
 func TestEndpointPolicyRequiresAnApprovedResolvedIPAtDialTime(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
