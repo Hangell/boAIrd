@@ -2114,21 +2114,13 @@ not individuals.
 
 # Licensing
 
-boAIrd is distributed under the:
+boAIrd is distributed under the MIT License. See [LICENSE](LICENSE) for the full terms.
 
-```text
-boAIrd Community License 1.0
-```
-
-Contributors should review the project's LICENSE file before submitting code.
-
-By submitting a contribution, you represent that:
+By submitting a contribution, you confirm that:
 
 1. you created the contribution or have the legal right to submit it;
 2. the contribution does not knowingly violate third-party intellectual property rights;
-3. you allow the boAIrd project to use, modify, distribute, sublicense, and relicense the contribution as described by the project's licensing terms.
-
-Contributions may become part of versions distributed under the boAIrd Community License and potentially under separate commercial licensing agreements.
+3. you agree that your contribution may be distributed under the project's MIT License.
 
 If you are not comfortable with these terms, do not submit the contribution.
 
@@ -2138,13 +2130,7 @@ If you are not comfortable with these terms, do not submit the contribution.
 
 Companies may contribute code to boAIrd.
 
-Contribution of code does not automatically grant commercial usage rights beyond the rights established in the boAIrd Community License or a separate commercial agreement.
-
-Commercial use should follow the rules described in:
-
-```text
-LICENSE
-```
+The MIT License permits commercial use, subject to its terms. No separate commercial authorization is required by the project's license.
 
 ---
 
