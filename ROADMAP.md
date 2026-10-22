@@ -446,12 +446,12 @@ Each response must also have a persisted Run.
 
 ## Current implementation
 
-- Projects can attach one active Brain to an API agent with the explicit `brain.execute` capability.
+- Projects can attach one active Brain to an API or MCP agent with the explicit `brain.execute` capability.
 - Active Brain configuration can be replaced only with an authenticated administrator session and a required reason; the replacement is recorded as an immutable audit event.
-- The Brain can request a provider response through the configured provider adapter and credential reference.
+- An API Brain can request a provider response through its configured provider adapter and credential reference; an MCP Brain uses authenticated, capability-checked MCP tools.
 - Each execution persists its project, agent, provider, model, objective, status, and response in `runs`.
 - The current runtime returns a proposed plan as text. It does not apply task mutations or grant capabilities.
-- SQLite prevents an active Brain agent from switching away from the API runtime and requires a configured active Brain before a project enters READY or RUNNING.
+- SQLite permits active Brains only on the API or MCP runtime and requires a configured active Brain before a project enters READY or RUNNING.
 
 ## API
 
@@ -1266,6 +1266,11 @@ BrainRuntime
 ```
 
 regardless of where it runs.
+
+The first external implementation is an authenticated MCP Agent configured as
+the project's active Brain. MCP tools remain the execution contract and enforce
+the Agent's explicit capabilities and project policies. Provider-run endpoints
+remain API-runtime-only and reject MCP Brains without creating a provider run.
 
 ---
 

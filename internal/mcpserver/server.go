@@ -129,7 +129,7 @@ func (s *Server) registerTools(server *mcp.Server) {
 	mcp.AddTool[conversationReadInput, conversationOutput](server, add("boaird.conversation.read", "Read a bounded page of messages for a task assigned to this Agent."), s.conversationRead)
 	mcp.AddTool[conversationSendInput, messageOutput](server, add("boaird.conversation.send", "Send a message as the authenticated Agent on an assigned task."), s.conversationSend)
 	mcp.AddTool[taskInput, contextOutput](server, add("boaird.context.get", "Get assigned task context with a bounded recent conversation page; project metadata is included only for explicitly scoped projects."), s.contextGet)
-	mcp.AddTool[brainRequestInput, brainOutput](server, add("boaird.brain.request", "Submit a planning request only when this identity is the configured Brain for the project."), s.brainRequest)
+	mcp.AddTool[brainRequestInput, brainOutput](server, add("boaird.brain.request", "Submit a planning request to an API-backed active Brain. An MCP Brain performs work through its authenticated tools."), s.brainRequest)
 	mcp.AddTool[runInput, runOutput](server, add("boaird.run.get", "Get a run in a project explicitly assigned to this Agent."), s.runGet)
 }
 

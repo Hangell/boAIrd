@@ -48,3 +48,27 @@ func TestProjectExecutionRequiresExactlyOneActiveBrain(t *testing.T) {
 		t.Fatal("expected a project to have at most one active Brain")
 	}
 }
+
+func TestProjectExecutionAcceptsMCPBrain(t *testing.T) {
+	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	statements := []string{
+		`INSERT INTO projects(id, name, status, human_review_required) VALUES ('p1', 'Project', 'CREATED', 1)`,
+		`INSERT INTO agents(id, name, role, runtime) VALUES ('a1', 'External Brain', 'coordinator', 'MCP')`,
+		`INSERT INTO agent_capabilities(agent_id, capability) VALUES ('a1', 'brain.execute')`,
+		`INSERT INTO brains(id, project_id, active) VALUES ('b1', 'p1', 1)`,
+		`INSERT INTO brain_configuration(brain_id, agent_id, autonomy) VALUES ('b1', 'a1', 'SEMI_AUTO')`,
+		`UPDATE projects SET brain_id = 'b1', status = 'READY' WHERE id = 'p1'`,
+	}
+	for _, statement := range statements {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatalf("execute %q: %v", statement, err)
+		}
+	}
+	if _, err := database.Exec(`UPDATE agents SET runtime='LOCAL' WHERE id='a1'`); err == nil {
+		t.Fatal("expected active Brain to reject a runtime without authenticated external support")
+	}
+}

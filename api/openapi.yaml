@@ -217,7 +217,7 @@ paths:
       operationId: configureProjectBrain
       x-required-capability: brain.attach
       summary: Attach the project's only Brain
-      description: Requires an API agent with the explicit brain.execute capability. The autonomy value controls Brain decision behavior but never adds capabilities. Provider credential resolution is scoped to this Brain agent and project. A project Brain cannot replace itself.
+      description: Requires a registered API or MCP Agent with the explicit brain.execute capability. MCP Agents authenticate with their issued MCP token when using tools. The autonomy value controls Brain decision behavior but never adds capabilities. Provider credential resolution is scoped to an API Brain and this project. A project Brain cannot replace itself.
       requestBody:
         required: true
         content:
@@ -250,7 +250,7 @@ paths:
       operationId: replaceProjectBrain
       x-required-capability: brain.replace
       summary: Replace the project's active Brain configuration
-      description: Requires an authenticated local administrator bearer token or browser session. The replacement must use an API agent with the explicit brain.execute capability and include an audit reason. Autonomy changes are recorded as brain.autonomy.changed.
+      description: Requires an authenticated local administrator bearer token or browser session. The replacement must use a registered API or MCP Agent with the explicit brain.execute capability and include an audit reason. Autonomy changes are recorded as brain.autonomy.changed.
       security:
         - localBearerAuth: []
         - localSessionCookie: []
@@ -281,7 +281,7 @@ paths:
       operationId: executeProjectBrain
       x-required-capability: brain.execute
       summary: Ask the Brain to propose a plan
-      description: Persists a run and returns text from the configured provider. Credential resolution is limited to the active Brain Agent and this project. This endpoint does not apply task or project mutations.
+      description: For an API-backed Brain, persists a run and returns text from the configured provider. Credential resolution is limited to the active Brain Agent and this project. An MCP Brain uses its authenticated MCP tools; this endpoint returns 409 and creates no run. This endpoint does not apply task or project mutations.
       requestBody:
         required: true
         content:
@@ -297,6 +297,8 @@ paths:
         '403':
           description: Brain action is not allowed by project policy or explicit capabilities.
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The active Brain uses an external runtime and must execute through its authenticated MCP session.
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/projects/{id}/runs:
     parameters:

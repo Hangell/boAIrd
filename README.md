@@ -1198,7 +1198,7 @@ Tool inputs and required capabilities:
 | `boaird.conversation.read` | `task_id`, optional `before`, `limit` (1–100; default 50) | `task.read` and `conversation.read`; exact assignment |
 | `boaird.conversation.send` | `task_id`, `content`, optional `content_type` | `conversation.write`; exact assignment |
 | `boaird.context.get` | `task_id` | `task.read` and `conversation.read`; exact assignment or persisted/active-Brain project scope, at most 20 messages; project metadata is included only with effective project scope and `project.read` |
-| `boaird.brain.request` | `project_id`, `objective`, optional `max_tokens` (1–4096; default 2048) | `brain.execute`; authenticated Agent must be the project's active Brain |
+| `boaird.brain.request` | `project_id`, `objective`, optional `max_tokens` (1–4096; default 2048) | `brain.execute`; API-backed active Brain only. An MCP Brain uses its authenticated MCP tools directly |
 | `boaird.run.get` | `run_id` | `run.read`; persisted project membership or the authenticated Agent's active Brain relationship for the run's project; run ownership alone does not grant access |
 
 An active Brain's scope is derived from the Brain-to-project relationship and is
@@ -2103,9 +2103,9 @@ boaird projects list
 boaird agents list
 ```
 
-The local API supports `POST /api/v1/agents`, `GET /api/v1/agents`, `GET /api/v1/agents/{id}`, and `PATCH /api/v1/agents/{id}`. API-backed agents identify a provider, model, and stored credential by ID; raw provider keys are not part of agent configuration. `role` is descriptive and does not grant capabilities. Agent status is managed by the runtime and is read-only through these endpoints.
+The local API supports `POST /api/v1/agents`, `GET /api/v1/agents`, `GET /api/v1/agents/{id}`, and `PATCH /api/v1/agents/{id}`. API-backed agents identify a provider, model, and stored credential by ID; raw provider keys are not part of agent configuration. MCP agents authenticate with their issued, revocable MCP token. `role` is descriptive and does not grant capabilities. Agent status is managed by the runtime and is read-only through these endpoints.
 
-All `/api/v1` operations except status require the local administrator bearer token or a valid browser session. `POST /api/v1/session` exchanges the bearer token for a 30-minute HttpOnly, SameSite=Strict cookie containing a random opaque session ID; the server stores session state in memory and revokes it at logout or restart. The dashboard keeps the root token only in the login form until the exchange completes. Cookie-authenticated mutations require a trusted dashboard Origin. The API evaluates an explicit capability for each operation and verifies `project_members` for project-scoped resources. Denials are stored in the immutable `authorization_denials` table. Projects can attach one active API Brain with `POST /api/v1/projects/{id}/brain`; the selected agent must explicitly have the `brain.execute` capability. Replacing an active Brain uses `PUT /api/v1/projects/{id}/brain` with a required audit reason; the server attributes the event to `local-administrator`. `POST /api/v1/projects/{id}/brain/runs` sends an objective to the configured provider and persists a run. The Brain returns a proposed plan as text; this runtime does not apply task or project mutations. Autonomy mode does not grant permissions, and project human review remains in force.
+All `/api/v1` operations except status require the local administrator bearer token or a valid browser session. `POST /api/v1/session` exchanges the bearer token for a 30-minute HttpOnly, SameSite=Strict cookie containing a random opaque session ID; the server stores session state in memory and revokes it at logout or restart. The dashboard keeps the root token only in the login form until the exchange completes. Cookie-authenticated mutations require a trusted dashboard Origin. The API evaluates an explicit capability for each operation and verifies `project_members` for project-scoped resources. Denials are stored in the immutable `authorization_denials` table. Projects can attach one active API or MCP Brain with `POST /api/v1/projects/{id}/brain`; the selected Agent must explicitly have the `brain.execute` capability. An MCP Brain must use its authenticated MCP session and existing capability-checked tools. Replacing an active Brain uses `PUT /api/v1/projects/{id}/brain` with a required audit reason; the server attributes the event to `local-administrator`. `POST /api/v1/projects/{id}/brain/runs` sends an objective to an API Brain's configured provider and persists a run; for an MCP Brain it returns HTTP 409 and does not create a run. API Brain output is proposed text and does not itself apply task or project mutations. Autonomy mode does not grant permissions, and project human review remains in force.
 
 Runs can be listed with `GET /api/v1/projects/{id}/runs`, filtered by `task_id` or `agent_id`, or fetched individually with `GET /api/v1/runs/{id}`. Responses include immutable audit events for run creation and status transitions. Common credential patterns are redacted from run input, output, tool names, and errors before persistence and display.
 
@@ -2668,14 +2668,8 @@ Implement the rule:
 Project requires Brain
 ```
 
-Initially, the Brain runs through an API.
-
-Later:
-
-```text
-MCP Brain
-External Brain
-```
+The Brain can run through an API provider or as an authenticated external MCP
+Agent. Local and remote runtime adapters remain future work.
 
 ---
 

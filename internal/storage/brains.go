@@ -43,7 +43,8 @@ func (r *BrainRepository) Create(ctx context.Context, value brain.Brain) error {
 	}
 	var validAgent bool
 	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agents a JOIN agent_capabilities c ON c.agent_id=a.id
-		WHERE a.id=? AND a.runtime='API' AND a.credential_id IS NOT NULL AND c.capability='brain.execute')`, value.AgentID()).Scan(&validAgent)
+		WHERE a.id=? AND a.runtime IN ('API', 'MCP') AND c.capability='brain.execute'
+		AND (a.runtime='MCP' OR a.credential_id IS NOT NULL))`, value.AgentID()).Scan(&validAgent)
 	if err != nil {
 		return fmt.Errorf("validate Brain agent: %w", err)
 	}
@@ -95,7 +96,8 @@ func (r *BrainRepository) Replace(ctx context.Context, current, replacement brai
 	}
 	var validAgent bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agents a JOIN agent_capabilities c ON c.agent_id=a.id
-		WHERE a.id=? AND a.runtime='API' AND a.credential_id IS NOT NULL AND c.capability='brain.execute')`, replacement.AgentID()).Scan(&validAgent); err != nil {
+		WHERE a.id=? AND a.runtime IN ('API', 'MCP') AND c.capability='brain.execute'
+		AND (a.runtime='MCP' OR a.credential_id IS NOT NULL))`, replacement.AgentID()).Scan(&validAgent); err != nil {
 		return fmt.Errorf("validate replacement Brain agent: %w", err)
 	}
 	if !validAgent {

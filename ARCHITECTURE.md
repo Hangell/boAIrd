@@ -587,7 +587,11 @@ External Agent
 
 # 18. External Brain
 
-The Brain may itself be an external MCP-connected agent.
+The Brain may itself be an external MCP-connected Agent. An administrator
+attaches a registered MCP Agent with `brain.execute` as the project's one active
+Brain. The MCP token authenticates that exact Agent; the relationship grants
+project scope, while every tool still checks its own capability and domain
+policy.
 
 Example:
 
@@ -610,6 +614,12 @@ boAIrd remains responsible for:
 - task state;
 - audit;
 - tool authorization.
+
+An MCP Brain uses the authenticated MCP tools directly. The local provider-run
+endpoint is available only to API-backed Brains and returns a conflict for an
+MCP Brain; it never attempts provider execution without provider configuration.
+External execution does not grant administrator authority or bypass Human
+Review.
 
 ---
 

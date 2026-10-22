@@ -113,6 +113,8 @@ func writeBrainError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_brain", err.Error())
 	case errors.Is(err, brain.ErrAlreadyExists):
 		writeAPIError(w, http.StatusConflict, "already_configured", "project already has a Brain")
+	case errors.Is(err, brain.ErrExternalRuntime):
+		writeAPIError(w, http.StatusConflict, "external_runtime", "the active Brain runs externally; use its authenticated MCP session")
 	case errors.Is(err, brain.ErrConfigurationChanged):
 		writeAPIError(w, http.StatusConflict, "configuration_changed", "Brain configuration changed; reload and retry")
 	default:

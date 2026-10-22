@@ -3,6 +3,7 @@ package brain_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -238,5 +239,33 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	}
 	if cancelledStatus != "CANCELLED" || call.result.Run.FinishedAt().IsZero() {
 		t.Fatalf("persisted cancellation = %s, %+v", cancelledStatus, call.result.Run.Snapshot())
+	}
+
+	externalAgent, err := agentManager.Create(ctx, agent.CreateInput{
+		Name: "External Brain", Role: "coordinator", Runtime: agent.RuntimeMCP,
+		Capabilities: []string{"brain.execute"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalProject, err := projectManager.Create(ctx, project.CreateInput{Name: "MCP Brain project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Create(ctx, externalProject.ID(), brain.CreateInput{AgentID: externalAgent.ID(), Autonomy: brain.AutonomySemiAuto}); err != nil {
+		t.Fatalf("create project with MCP Brain: %v", err)
+	}
+	if _, err := service.Replace(ctx, projects.ID(), brain.CreateInput{AgentID: externalAgent.ID(), Autonomy: brain.AutonomySemiAuto}, project.LocalAdministratorID, "move Brain to authenticated MCP runtime"); err != nil {
+		t.Fatalf("replace Brain with MCP agent: %v", err)
+	}
+	if _, err := service.Execute(ctx, projects.ID(), "must not call a provider", 64); !errors.Is(err, brain.ErrExternalRuntime) {
+		t.Fatalf("Execute() error = %v, want ErrExternalRuntime", err)
+	}
+	var totalRuns int
+	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM runs WHERE project_id = ?", projects.ID()).Scan(&totalRuns); err != nil {
+		t.Fatal(err)
+	}
+	if totalRuns != 3 {
+		t.Fatalf("runs after external Brain request = %d, want only the three API runs", totalRuns)
 	}
 }

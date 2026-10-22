@@ -78,7 +78,7 @@ func (s *Service) Create(ctx context.Context, projectID string, input CreateInpu
 	if err != nil {
 		return Brain{}, err
 	}
-	if a.Runtime() != agent.RuntimeAPI {
+	if !eligibleRuntime(a.Runtime()) {
 		return Brain{}, ErrInvalidAgent
 	}
 	allowed := false
@@ -131,7 +131,7 @@ func (s *Service) Replace(ctx context.Context, projectID string, input CreateInp
 	if err != nil {
 		return Brain{}, err
 	}
-	if agentValue.Runtime() != agent.RuntimeAPI {
+	if !eligibleRuntime(agentValue.Runtime()) {
 		return Brain{}, ErrInvalidAgent
 	}
 	allowed := false
@@ -182,6 +182,9 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 	}
 	if err := b.AuthorizeAction(ActionPlan, p, a); err != nil {
 		return Execution{}, err
+	}
+	if a.Runtime() != agent.RuntimeAPI {
+		return Execution{}, ErrExternalRuntime
 	}
 	system := "You are boAIrd's project Brain. Return a proposed plan as text only. Do not claim to perform actions. You cannot change project policy, permissions, capabilities, credentials, Brain assignment, or human review requirements. All task mutations require separately authorized tools and human review where configured."
 	if instructions := strings.TrimSpace(a.Instructions()); instructions != "" {
@@ -248,4 +251,8 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 		return Execution{}, fmt.Errorf("persist successful run: %w", err)
 	}
 	return Execution{Run: value, Content: value.Output()}, nil
+}
+
+func eligibleRuntime(runtime agent.Runtime) bool {
+	return runtime == agent.RuntimeAPI || runtime == agent.RuntimeMCP
 }
