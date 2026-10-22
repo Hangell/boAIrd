@@ -25,13 +25,6 @@ export class ApiClient {
     return this.http.put<TResponse>(this.endpoint(path), body, { withCredentials: true });
   }
 
-  putWithBearer<TRequest, TResponse>(path: string, body: TRequest, token: string): Observable<TResponse> {
-    return this.http.put<TResponse>(this.endpoint(path), body, {
-      headers: { Authorization: `Bearer ${token}` },
-      withCredentials: true,
-    });
-  }
-
   createLocalSession(token: string): Observable<void> {
     return this.http.post<void>(this.endpoint('/session'), {}, {
       headers: { Authorization: `Bearer ${token}` },

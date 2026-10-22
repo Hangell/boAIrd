@@ -26,7 +26,7 @@ npm run extract-i18n
 
 Routes and feature pages live under `src/app`. Shared API transport is provided through `ApiClient` and the `API_BASE_URL` injection token. Do not cache task status as a second source of truth in the browser.
 
-The `/login` route exchanges `BOAIRD_LOCAL_AUTH_TOKEN` for an HttpOnly, SameSite=Strict cookie through `POST /api/v1/session`. The dashboard does not persist the token in application storage. During development, the API accepts credentialed browser requests only from the configured loopback dashboard origins (`localhost:4200` and `127.0.0.1:4200`).
+The `/login` route sends `BOAIRD_LOCAL_AUTH_TOKEN` only to exchange it for an HttpOnly, SameSite=Strict cookie through `POST /api/v1/session`. The dashboard does not persist the token in application storage or attach it to later requests; dashboard API calls use the session cookie. During development, the API accepts credentialed browser requests only from the configured loopback dashboard origins (`localhost:4200` and `127.0.0.1:4200`).
 
 The project list opens a project scoped overview using the existing project, task, Brain, agent, and run endpoints. The view reports blocked tasks and recent failed runs, and provides loading, empty, and retryable error states.
 
