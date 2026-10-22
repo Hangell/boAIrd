@@ -1,0 +1,236 @@
+openapi: 3.1.0
+info:
+  title: boAIrd API
+  version: 1.0.0
+  description: >-
+    Versioned local-first API for managing boAIrd projects. Until authenticated
+    remote mode exists, the server binds only to a loopback IP address.
+servers:
+  - url: http://127.0.0.1:3110
+paths:
+  /api/v1/projects:
+    post:
+      operationId: createProject
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProject'
+      responses:
+        '201':
+          description: Project created in CREATED state.
+          headers:
+            Location:
+              schema:
+                type: string
+              description: URL of the created project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listProjects
+      summary: List projects
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Projects ordered by name and ID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/projects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getProject
+      summary: Get a project
+      responses:
+        '200':
+          description: Project found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      operationId: updateProject
+      summary: Update project configuration
+      description: Archived projects are immutable. Omitted fields are unchanged. An empty brain_id unsets the Brain association.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProject'
+      responses:
+        '200':
+          description: Updated project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      operationId: archiveProject
+      summary: Archive a project
+      description: Archives the project instead of deleting its stored data. Repeated requests are safe and return the archived project.
+      responses:
+        '200':
+          description: Archived project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  schemas:
+    CreateProject:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 4000
+          default: ''
+        workspace_path:
+          type: string
+          description: Optional absolute path to an existing directory; the server resolves symlinks and stores the canonical path.
+        repository_url:
+          type: string
+          description: Optional absolute HTTP, HTTPS, or SSH URL.
+        human_review_required:
+          type: boolean
+          default: true
+    UpdateProject:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 4000
+        workspace_path:
+          type: string
+          description: Empty string clears the workspace. Non-empty values must resolve to an existing directory.
+        repository_url:
+          type: string
+          description: Empty string clears the repository URL.
+        human_review_required:
+          type: boolean
+        brain_id:
+          type: string
+          description: Empty string clears the Brain association. Non-empty values must identify an active Brain registered to this project.
+    Project:
+      type: object
+      description: Status is read-only through the project API. Lifecycle transitions are managed by the backend and require a registered active Brain before READY or RUNNING.
+      required: [id, name, description, status, human_review_required]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [CREATED, CONFIGURING, READY, RUNNING, PAUSED, ARCHIVED]
+        brain_id:
+          type: string
+        workspace_path:
+          type: string
+        repository_url:
+          type: string
+        human_review_required:
+          type: boolean
+    ProjectPage:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        limit:
+          type: integer
+        offset:
+          type: integer
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+  responses:
+    BadRequest:
+      description: Invalid request body, query parameter, or project value.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Project does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Unexpected server or storage failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

@@ -8,6 +8,7 @@ import (
 
 	"boAIrd/internal/api"
 	"boAIrd/internal/config"
+	"boAIrd/internal/project"
 	"boAIrd/internal/storage"
 )
 
@@ -28,7 +29,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	}()
 
 	logger.Info("SQLite database ready", "path", cfg.DatabasePath)
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandler(database), logger); err != nil {
+	projectRepository, err := storage.NewProjectRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize project repository: %w", err)
+	}
+	projectManager, err := project.NewManager(projectRepository)
+	if err != nil {
+		return fmt.Errorf("initialize project manager: %w", err)
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandler(database, projectManager), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

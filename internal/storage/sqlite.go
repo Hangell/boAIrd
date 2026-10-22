@@ -44,6 +44,9 @@ func OpenSQLite(ctx context.Context, path string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		return nil, errors.Join(fmt.Errorf("enable SQLite foreign keys: %w", err), db.Close())
+	}
 
 	if err := db.PingContext(ctx); err != nil {
 		return nil, errors.Join(fmt.Errorf("connect to SQLite database: %w", err), db.Close())
