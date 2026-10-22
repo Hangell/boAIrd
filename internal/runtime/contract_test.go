@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/capability"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/provider"
 	"boAIrd/internal/runtime"
@@ -33,6 +35,23 @@ func (fakeCredentialResolver) Resolve(context.Context, string, credential.Scope)
 	return "provider-secret", nil
 }
 
+type fakeRuntime struct {
+	calls atomic.Int32
+}
+
+func (f *fakeRuntime) Execute(context.Context, runtime.Request) (runtime.Result, error) {
+	f.calls.Add(1)
+	return runtime.Result{Output: "executed"}, nil
+}
+
+func (*fakeRuntime) Runtime() agent.Runtime { return agent.RuntimeRemote }
+func (*fakeRuntime) RequiredCapabilities() []capability.Capability {
+	return []capability.Capability{"task.transition"}
+}
+func (*fakeRuntime) Status(context.Context, string) (agent.Status, error) {
+	return agent.StatusIdle, nil
+}
+
 func mustAgent(t *testing.T, id string, kind agent.Runtime, capabilities ...string) agent.Agent {
 	t.Helper()
 	configuration := agent.Configuration{Name: "Agent", Role: "worker", Runtime: kind, Capabilities: capabilities}
@@ -42,6 +61,12 @@ func mustAgent(t *testing.T, id string, kind agent.Runtime, capabilities ...stri
 		configuration.CredentialID = "cred-1"
 	}
 	value, err := agent.NewConfigured(id, configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := value.Snapshot()
+	snapshot.ProjectIDs = []string{"p1"}
+	value, err = agent.Restore(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +151,48 @@ func TestEnforcerAppliesPolicyToEveryAdapter(t *testing.T) {
 	}
 }
 
+func TestEnforcerChecksProjectScopeBeforeCallingAnyAdapter(t *testing.T) {
+	worker := mustAgent(t, "worker", agent.RuntimeRemote, "task.transition")
+	snapshot := worker.Snapshot()
+	snapshot.ProjectIDs = nil
+	worker, err := agent.Restore(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeRuntime{}
+	registry := runtime.NewRegistry()
+	if err := registry.Register(agent.RuntimeRemote, adapter); err != nil {
+		t.Fatal(err)
+	}
+	enforcer, err := runtime.NewEnforcer(registry, fakeAgentReader{agents: map[string]agent.Agent{"worker": worker}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enforcer.Execute(context.Background(), runtime.Request{AgentID: "worker", ProjectID: "p2", Input: "work"}); !errors.Is(err, runtime.ErrDenied) {
+		t.Fatalf("cross-project execute error = %v, want ErrDenied", err)
+	}
+	if calls := adapter.calls.Load(); calls != 0 {
+		t.Fatalf("adapter executions = %d, want 0", calls)
+	}
+}
+
 func TestEnforcerExecutesAPIAdapter(t *testing.T) {
+	t.Run("cross-project denied before provider call", func(t *testing.T) {
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			_, _ = w.Write([]byte(`{"model":"test-model","choices":[{"message":{"content":"unexpected"},"finish_reason":"stop"}]}`))
+		}))
+		defer server.Close()
+		enforcer := newAPIEnforcer(t, server.URL+"/v1", 0)
+		if _, err := enforcer.Execute(context.Background(), runtime.Request{AgentID: "worker", ProjectID: "p2", Input: "work"}); !errors.Is(err, runtime.ErrDenied) {
+			t.Fatalf("cross-project execute error = %v, want ErrDenied", err)
+		}
+		if got := calls.Load(); got != 0 {
+			t.Fatalf("provider calls = %d, want 0", got)
+		}
+	})
+
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"model":"test-model","choices":[{"message":{"content":"worker deliverable"},"finish_reason":"stop"}]}`))
@@ -232,6 +298,12 @@ func newAPIEnforcer(t *testing.T, baseURL string, timeout time.Duration) *runtim
 		ProviderBaseURL: baseURL, Model: "test-model", CredentialID: "cred-1",
 		Capabilities: []string{"task.transition"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := worker.Snapshot()
+	snapshot.ProjectIDs = []string{"p1"}
+	worker, err = agent.Restore(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}

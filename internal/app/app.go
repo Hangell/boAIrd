@@ -169,9 +169,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 			return fmt.Errorf("register agent runtime: %w", err)
 		}
 	}
-	// The orchestrator owns the per-execution deadline; the enforcer only applies
-	// capability and error-mapping policy here.
-	executor, err := runtime.NewEnforcer(runtimeRegistry, agentManager, 0)
+	// The orchestrator owns the per-execution deadline; the enforcer applies
+	// scope, capability, and error-mapping policy before adapter execution.
+	executor, err := runtime.NewEnforcer(runtimeRegistry, agentManager, 0, runtimeExecutionScope{tasks: taskService})
 	if err != nil {
 		return fmt.Errorf("initialize agent runtime enforcer: %w", err)
 	}

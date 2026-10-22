@@ -52,28 +52,46 @@ func (r *Registry) Resolve(kind agent.Runtime) (AgentRuntime, error) {
 }
 
 // Enforcer applies the shared policy around every resolved runtime: Agent
-// resolution, runtime kind, declared capabilities, a bounded deadline, and
-// uniform error mapping. It implements Executor for domain services.
+// resolution, project/resource scope, runtime kind, declared capabilities, a
+// bounded deadline, and uniform error mapping. It implements Executor for
+// domain services.
 type Enforcer struct {
 	registry *Registry
 	agents   AgentReader
+	scope    ScopeAuthorizer
 	timeout  time.Duration
 }
 
-func NewEnforcer(registry *Registry, agents AgentReader, timeout time.Duration) (*Enforcer, error) {
+func NewEnforcer(registry *Registry, agents AgentReader, timeout time.Duration, scopes ...ScopeAuthorizer) (*Enforcer, error) {
 	if registry == nil || agents == nil {
 		return nil, errors.New("runtime registry and agent reader are required")
+	}
+	if len(scopes) > 1 {
+		return nil, fmt.Errorf("%w: at most one runtime scope authorizer is allowed", ErrInvalidRequest)
 	}
 	if timeout < 0 {
 		return nil, fmt.Errorf("%w: timeout must be non-negative", ErrInvalidRequest)
 	}
-	return &Enforcer{registry: registry, agents: agents, timeout: timeout}, nil
+	scope := ScopeAuthorizer(ProjectMembershipScope{})
+	if len(scopes) == 1 {
+		if scopes[0] == nil {
+			return nil, errors.New("runtime scope authorizer cannot be nil")
+		}
+		scope = scopes[0]
+	}
+	return &Enforcer{registry: registry, agents: agents, scope: scope, timeout: timeout}, nil
 }
 
 func (e *Enforcer) Execute(ctx context.Context, request Request) (Result, error) {
+	if strings.TrimSpace(request.ProjectID) == "" {
+		return Result{}, fmt.Errorf("%w: project is required", ErrInvalidRequest)
+	}
 	a, err := e.agents.Get(ctx, request.AgentID)
 	if err != nil {
 		return Result{}, err
+	}
+	if err := e.scope.Authorize(ctx, a, request); err != nil {
+		return Result{}, fmt.Errorf("%w: %v", ErrDenied, err)
 	}
 	adapter, err := e.registry.Resolve(a.Runtime())
 	if err != nil {
@@ -91,6 +109,15 @@ func (e *Enforcer) Execute(ctx context.Context, request Request) (Result, error)
 	}
 	result, err := adapter.Execute(ctx, request)
 	return result, mapExecutionError(err)
+}
+
+func hasProjectScope(a agent.Agent, projectID string) bool {
+	for _, id := range a.ProjectIDs() {
+		if id == projectID {
+			return true
+		}
+	}
+	return false
 }
 
 // Status resolves an Agent's status through its registered runtime adapter.
