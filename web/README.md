@@ -26,4 +26,6 @@ npm run extract-i18n
 
 Routes and feature pages live under `src/app`. Shared API transport is provided through `ApiClient` and the `API_BASE_URL` injection token. Do not cache task status as a second source of truth in the browser.
 
+The project list opens a project scoped overview using the existing project, task, Brain, agent, and run endpoints. The view reports blocked tasks and recent failed runs, and provides loading, empty, and retryable error states.
+
 Template strings use Angular `i18n` markers and TypeScript strings use `$localize` IDs. English is the source locale. The shell provides semantic landmarks, a keyboard skip link, visible focus indicators, and reduced-motion styling.
