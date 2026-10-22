@@ -12,6 +12,13 @@ import (
 
 type AgentRepository struct{ database *sql.DB }
 
+func closeRowsAfter(rows *sql.Rows, operation string, operationErr error) error {
+	if closeErr := rows.Close(); closeErr != nil {
+		return errors.Join(operationErr, fmt.Errorf("close %s rows: %w", operation, closeErr))
+	}
+	return operationErr
+}
+
 func NewAgentRepository(database *sql.DB) (*AgentRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
@@ -24,7 +31,7 @@ func (r *AgentRepository) Create(ctx context.Context, value agent.Agent) error {
 	if err != nil {
 		return fmt.Errorf("begin create agent: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := validateAgentCredential(ctx, tx, value.Snapshot()); err != nil {
 		return err
 	}
@@ -67,14 +74,12 @@ func (r *AgentRepository) List(ctx context.Context, limit, offset int) ([]agent.
 	for rows.Next() {
 		snapshot, err := scanAgent(rows)
 		if err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scan agent: %w", err)
+			return nil, closeRowsAfter(rows, "agents", fmt.Errorf("scan agent: %w", err))
 		}
 		snapshots = append(snapshots, snapshot)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("iterate agents: %w", err)
+		return nil, closeRowsAfter(rows, "agents", fmt.Errorf("iterate agents: %w", err))
 	}
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close agent rows: %w", err)
@@ -99,7 +104,7 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 	if err != nil {
 		return fmt.Errorf("begin update agent: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var previousCredentialID sql.NullString
 	if err := tx.QueryRowContext(ctx, "SELECT credential_id FROM agents WHERE id=?", snapshot.ID).Scan(&previousCredentialID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -157,14 +162,12 @@ func auditAgentCredentialScopeChange(ctx context.Context, tx *sql.Tx, agentID, p
 	for rows.Next() {
 		var projectID string
 		if err := rows.Scan(&projectID); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan credential scope audit project: %w", err)
+			return closeRowsAfter(rows, "credential scope audit projects", fmt.Errorf("scan credential scope audit project: %w", err))
 		}
 		projectIDs = append(projectIDs, projectID)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("iterate credential scope audit projects: %w", err)
+		return closeRowsAfter(rows, "credential scope audit projects", fmt.Errorf("iterate credential scope audit projects: %w", err))
 	}
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("close credential scope audit projects: %w", err)
@@ -184,7 +187,7 @@ func (r *AgentRepository) AddProject(ctx context.Context, agentID, projectID, ac
 	if err != nil {
 		return fmt.Errorf("begin agent project membership: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_projects(agent_id, project_id) VALUES (?, ?)`, agentID, projectID)
 	if err != nil {
 		return fmt.Errorf("add agent project membership: %w", err)
@@ -211,7 +214,7 @@ func (r *AgentRepository) RemoveProject(ctx context.Context, agentID, projectID,
 	if err != nil {
 		return fmt.Errorf("begin agent project membership removal: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `DELETE FROM agent_projects WHERE agent_id = ? AND project_id = ?`, agentID, projectID)
 	if err != nil {
 		return fmt.Errorf("remove agent project membership: %w", err)
@@ -289,14 +292,12 @@ func syncAgentCapabilities(ctx context.Context, tx *sql.Tx, snapshot agent.Snaps
 	for rows.Next() {
 		var capability string
 		if err := rows.Scan(&capability); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan current agent capability: %w", err)
+			return closeRowsAfter(rows, "current agent capabilities", fmt.Errorf("scan current agent capability: %w", err))
 		}
 		current[capability] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("iterate current agent capabilities: %w", err)
+		return closeRowsAfter(rows, "current agent capabilities", fmt.Errorf("iterate current agent capabilities: %w", err))
 	}
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("close current agent capabilities: %w", err)
@@ -333,14 +334,12 @@ func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.S
 	for languages.Next() {
 		var value string
 		if err := languages.Scan(&value); err != nil {
-			languages.Close()
-			return fmt.Errorf("scan agent language: %w", err)
+			return closeRowsAfter(languages, "agent languages", fmt.Errorf("scan agent language: %w", err))
 		}
 		snapshot.LanguagePreferences = append(snapshot.LanguagePreferences, value)
 	}
 	if err := languages.Err(); err != nil {
-		languages.Close()
-		return fmt.Errorf("iterate agent languages: %w", err)
+		return closeRowsAfter(languages, "agent languages", fmt.Errorf("iterate agent languages: %w", err))
 	}
 	if err := languages.Close(); err != nil {
 		return fmt.Errorf("close agent languages: %w", err)
@@ -352,14 +351,12 @@ func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.S
 	for capabilities.Next() {
 		var value string
 		if err := capabilities.Scan(&value); err != nil {
-			capabilities.Close()
-			return fmt.Errorf("scan agent capability: %w", err)
+			return closeRowsAfter(capabilities, "agent capabilities", fmt.Errorf("scan agent capability: %w", err))
 		}
 		snapshot.Capabilities = append(snapshot.Capabilities, value)
 	}
 	if err := capabilities.Err(); err != nil {
-		capabilities.Close()
-		return fmt.Errorf("iterate agent capabilities: %w", err)
+		return closeRowsAfter(capabilities, "agent capabilities", fmt.Errorf("iterate agent capabilities: %w", err))
 	}
 	if err := capabilities.Close(); err != nil {
 		return fmt.Errorf("close agent capabilities: %w", err)
@@ -371,14 +368,12 @@ func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.S
 	for projects.Next() {
 		var value string
 		if err := projects.Scan(&value); err != nil {
-			projects.Close()
-			return fmt.Errorf("scan agent project: %w", err)
+			return closeRowsAfter(projects, "agent projects", fmt.Errorf("scan agent project: %w", err))
 		}
 		snapshot.ProjectIDs = append(snapshot.ProjectIDs, value)
 	}
 	if err := projects.Err(); err != nil {
-		projects.Close()
-		return fmt.Errorf("iterate agent projects: %w", err)
+		return closeRowsAfter(projects, "agent projects", fmt.Errorf("iterate agent projects: %w", err))
 	}
 	if err := projects.Close(); err != nil {
 		return fmt.Errorf("close agent projects: %w", err)

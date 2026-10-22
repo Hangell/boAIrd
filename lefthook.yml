@@ -8,4 +8,4 @@ pre-commit:
       stage_fixed: true
     golangci-lint:
       glob: "**/*.go"
-      run: golangci-lint run --new-from-rev=HEAD
+      run: golangci-lint run

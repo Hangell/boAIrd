@@ -106,7 +106,9 @@ func TestServeShutsDownWhenContextIsCancelled(t *testing.T) {
 		cancel()
 		t.Fatalf("request health endpoint: %v", err)
 	}
-	response.Body.Close()
+	if err := response.Body.Close(); err != nil {
+		t.Errorf("close health response body: %v", err)
+	}
 	if response.StatusCode != http.StatusOK {
 		cancel()
 		t.Fatalf("health status = %d, want %d", response.StatusCode, http.StatusOK)
@@ -132,7 +134,11 @@ func TestServeReportsListenerStartupFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer listener.Close()
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	})
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	err = Serve(context.Background(), listener.Addr().String(), NewHandler(fakeDatabase{}, nil), logger)

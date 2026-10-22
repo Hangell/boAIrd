@@ -49,7 +49,11 @@ func TestAgentAPIReportsObservedStatusAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	repository, err := storage.NewAgentRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +135,11 @@ func TestAgentAPIWithoutObserverKeepsConfiguredStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	repository, err := storage.NewAgentRepository(database)
 	if err != nil {
 		t.Fatal(err)

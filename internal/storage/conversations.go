@@ -65,26 +65,28 @@ func (r *ConversationRepository) ListMessages(ctx context.Context, conversationI
 	if err != nil {
 		return nil, fmt.Errorf("query conversation messages: %w", err)
 	}
-	defer rows.Close()
 	values := make([]conversation.Message, 0)
 	for rows.Next() {
 		var id, parentID, senderID, content, contentType, metadata, created string
 		var senderType conversation.SenderType
 		if err := rows.Scan(&id, &parentID, &senderType, &senderID, &content, &contentType, &metadata, &created); err != nil {
-			return nil, fmt.Errorf("scan conversation message: %w", err)
+			return nil, closeRowsAfter(rows, "conversation messages", fmt.Errorf("scan conversation message: %w", err))
 		}
 		createdAt, err := parseDatabaseTime(created)
 		if err != nil {
-			return nil, fmt.Errorf("parse conversation message time: %w", err)
+			return nil, closeRowsAfter(rows, "conversation messages", fmt.Errorf("parse conversation message time: %w", err))
 		}
 		value, err := conversation.NewMessageWithMetadata(id, parentID, senderType, senderID, content, contentType, []byte(metadata), createdAt)
 		if err != nil {
-			return nil, fmt.Errorf("restore conversation message: %w", err)
+			return nil, closeRowsAfter(rows, "conversation messages", fmt.Errorf("restore conversation message: %w", err))
 		}
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate conversation messages: %w", err)
+		return nil, closeRowsAfter(rows, "conversation messages", fmt.Errorf("iterate conversation messages: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close conversation message rows: %w", err)
 	}
 	for left, right := 0, len(values)-1; left < right; left, right = left+1, right-1 {
 		values[left], values[right] = values[right], values[left]

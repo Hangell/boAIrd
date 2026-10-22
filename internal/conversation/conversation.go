@@ -170,7 +170,7 @@ func redactMetadataValue(value any) any {
 
 func containsSensitiveMarker(name string) bool {
 	for _, marker := range []string{"secret", "token", "api_key", "apikey", "authorization", "password", "cookie", "private_key", "client_key", "credential"} {
-		if strings.Contains(name, marker) && !(marker == "credential" && strings.HasSuffix(name, "_id")) {
+		if strings.Contains(name, marker) && (marker != "credential" || !strings.HasSuffix(name, "_id")) {
 			return true
 		}
 	}

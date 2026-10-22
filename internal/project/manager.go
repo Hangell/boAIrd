@@ -170,8 +170,10 @@ func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Pro
 		p = p.SetHumanReviewRequired(*input.HumanReviewRequired)
 	}
 	if input.BrainID != nil {
+		var updated Project
+		var updateErr error
 		if strings.TrimSpace(*input.BrainID) == "" {
-			p, err = p.WithoutBrain()
+			updated, updateErr = p.WithoutBrain()
 		} else {
 			active, err := m.repository.HasActiveBrain(ctx, p.ID(), strings.TrimSpace(*input.BrainID))
 			if err != nil {
@@ -180,11 +182,12 @@ func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Pro
 			if !active {
 				return Project{}, invalidInput(errors.New("brain_id must reference an active Brain belonging to this project"))
 			}
-			p, err = p.WithBrain(*input.BrainID)
+			updated, updateErr = p.WithBrain(*input.BrainID)
 		}
-		if err != nil {
-			return Project{}, invalidInput(err)
+		if updateErr != nil {
+			return Project{}, invalidInput(updateErr)
 		}
+		p = updated
 	}
 	if err := m.repository.Update(ctx, p); err != nil {
 		return Project{}, err

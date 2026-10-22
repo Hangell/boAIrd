@@ -945,11 +945,11 @@ go tool lefthook install
 ```
 
 Before committing, Lefthook formats staged Go files with `gofmt`, stages the
-formatted files, and runs the incremental linter. If the linter reports an
-issue, fix it before committing. To check changed lines manually:
+formatted files, and runs the full linter. If the linter reports an
+issue, fix it before committing. To run the full analysis manually:
 
 ```bash
-golangci-lint run --new-from-rev=HEAD
+golangci-lint run
 ```
 
 Always format Go code with `gofmt`. Before submitting, run:
@@ -990,8 +990,8 @@ go test -race ./...
 
 # Continuous Integration
 
-Pull requests targeting `main` run the Go checks, `golangci-lint` analysis for
-changed lines, Angular tests/builds, OpenAPI YAML parsing, and a changed-line
+Pull requests targeting `main` run the Go checks, full `golangci-lint`
+analysis, Angular tests/builds, OpenAPI YAML parsing, and a changed-line
 whitespace check in GitHub Actions. The workflow uses the versions from
 `go.mod` and `web/package-lock.json` and does not require repository secrets.
 
@@ -1005,7 +1005,7 @@ Run the same checks locally with:
 
 ```bash
 gofmt -w .
-golangci-lint run --new-from-rev=HEAD
+golangci-lint run
 go vet ./...
 go test ./...
 go test -race ./...

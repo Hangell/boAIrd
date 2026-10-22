@@ -20,7 +20,11 @@ func TestAgentAPIUsesDistinctProvidersAndDoesNotGrantByRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	credentialRepository, err := storage.NewCredentialRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +109,11 @@ func TestAgentProjectScopeRoutesRequireAdministratorProjectMembership(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	projectRepository, err := storage.NewProjectRepository(database)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +195,11 @@ func TestAgentAPIRejectsRawSecretsAndWritableStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	repository, err := storage.NewAgentRepository(database)
 	if err != nil {
 		t.Fatal(err)

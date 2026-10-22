@@ -85,6 +85,7 @@ func NewJSONClient(name string, config Config, defaultBaseURL, authHeader, authP
 	// Resolve and pin provider destinations ourselves; proxies could bypass this check.
 	transport.Proxy = nil
 	transport.DialContext = config.EndpointPolicy.dialContext
+	//nolint:staticcheck // Clear the legacy override so it cannot bypass endpoint validation.
 	transport.DialTLS = nil
 	transport.DialTLSContext = nil
 	client.Transport = transport
@@ -104,7 +105,7 @@ func NewJSONClient(name string, config Config, defaultBaseURL, authHeader, authP
 	}, nil
 }
 
-func (c *JSONClient) Do(ctx context.Context, method, resourcePath string, query url.Values, headers http.Header, requestBody, responseBody any) error {
+func (c *JSONClient) Do(ctx context.Context, method, resourcePath string, query url.Values, headers http.Header, requestBody, responseBody any) (resultErr error) {
 	if ctx == nil {
 		return fmt.Errorf("%s request: context is required", c.name)
 	}
@@ -150,7 +151,11 @@ func (c *JSONClient) Do(ctx context.Context, method, resourcePath string, query 
 	if err != nil {
 		return fmt.Errorf("%s request failed: %w", c.name, err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("%s close response: %w", c.name, err))
+		}
+	}()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maximumResponseBytes))
 		return &HTTPError{Provider: c.name, Operation: method + " " + resourcePath, StatusCode: response.StatusCode}

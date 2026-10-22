@@ -34,7 +34,6 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version-file: .golangci-lint-version
-          only-new-issues: true
 
   go:
     name: Go

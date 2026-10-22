@@ -20,7 +20,11 @@ import (
 func TestCreateRotateRevokeAndAuditLifecycle(t *testing.T) {
 	ctx := context.Background()
 	database, service, agentID := newTestService(t)
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	issued, raw, err := service.Create(ctx, agentID, time.Hour, "local-administrator")
 	if err != nil {
@@ -78,7 +82,11 @@ func TestCreateRotateRevokeAndAuditLifecycle(t *testing.T) {
 func TestExpiryAndBootstrapAreFiniteAndOneTime(t *testing.T) {
 	ctx := context.Background()
 	database, service, agentID := newTestService(t)
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	issued, raw, err := service.Create(ctx, agentID, time.Nanosecond, "local-administrator")
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +132,11 @@ func TestExpiryAndBootstrapAreFiniteAndOneTime(t *testing.T) {
 func TestCreateRequiresExistingMCPAgentAndBoundedExpiry(t *testing.T) {
 	ctx := context.Background()
 	database, service, _ := newTestService(t)
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 	if _, _, err := service.Create(ctx, "missing-agent", time.Hour, "local-administrator"); err == nil {
 		t.Fatal("Create() accepted a missing Agent")
 	}
@@ -143,40 +155,45 @@ func newTestService(t *testing.T) (*sql.DB, *mcptoken.Service, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	closeDatabase := func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database after setup failure: %v", err)
+		}
+	}
 	agentRepository, err := storage.NewAgentRepository(database)
 	if err != nil {
-		database.Close()
+		closeDatabase()
 		t.Fatal(err)
 	}
 	value, err := agent.NewConfigured("agent-1", agent.Configuration{Name: "External Agent", Role: "worker", Runtime: agent.RuntimeMCP})
 	if err != nil {
-		database.Close()
+		closeDatabase()
 		t.Fatal(err)
 	}
 	if err := agentRepository.Create(ctx, value); err != nil {
-		database.Close()
+		closeDatabase()
 		t.Fatal(err)
 	}
 	localValue, err := agent.NewConfigured("agent-local", agent.Configuration{Name: "Local Agent", Role: "worker", Runtime: agent.RuntimeLocal})
 	if err == nil {
 		if err := agentRepository.Create(ctx, localValue); err != nil {
-			database.Close()
+			closeDatabase()
 			t.Fatal(err)
 		}
 	}
 	tokenRepository, err := storage.NewMCPTokenRepository(database)
 	if err != nil {
-		database.Close()
+		closeDatabase()
 		t.Fatal(err)
 	}
 	manager, err := agent.NewManager(agentRepository)
 	if err != nil {
-		database.Close()
+		closeDatabase()
 		t.Fatal(err)
 	}
 	service, err := mcptoken.NewService(tokenRepository, manager)
 	if err != nil {
-		database.Close()
+		closeDatabase()
 		t.Fatal(err)
 	}
 	return database, service, value.ID()

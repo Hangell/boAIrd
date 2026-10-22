@@ -23,7 +23,11 @@ func TestOpenSQLiteAppliesMigrationsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen SQLite database: %v", err)
 	}
-	defer database.Close()
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	var migrationCount int
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
