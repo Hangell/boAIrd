@@ -128,7 +128,7 @@ Example:
 boaird serve
 ```
 
-E disponibilizar:
+The server should be available at:
 
 ```text
 http://localhost:3110
@@ -142,9 +142,9 @@ The same application may later run on:
 
 - a home server;
 - VPS;
-- servidor corporativo;
+- corporate server;
 - homelab;
-- cloud privada.
+- private cloud.
 
 Example:
 
@@ -710,7 +710,7 @@ Permissions will be implemented through capabilities.
 
 Do not create separate flags for every feature.
 
-Evitar:
+Avoid:
 
 ```text
 can_git
@@ -954,7 +954,7 @@ github.pr.merge
 
 ---
 
-# Falhas
+# Failures
 
 When an agent fails, responsibility returns to the Brain.
 
@@ -990,12 +990,12 @@ Administrator Notification
 
 The administrator can:
 
-- responder;
+- reply;
 - add context;
 - change the task;
 - change the agent;
-- trocar provider;
-- assumir controle.
+- switch provider;
+- take control.
 
 ---
 
@@ -1105,7 +1105,7 @@ boAIrd
 
 MCP will be one of boAIrd’s main external interfaces.
 
-Arquitetura:
+Architecture:
 
 ```text
                   boAIrd Core
@@ -1121,7 +1121,7 @@ Arquitetura:
 
 # MCP Tools
 
-Exemplos iniciais:
+Initial examples:
 
 ```text
 boaird.project.get
@@ -1589,8 +1589,8 @@ The user can choose:
 
 - upload;
 - icon;
-- imagem;
-- avatar gerado posteriormente.
+- image;
+- generate an avatar later.
 
 ---
 
@@ -1818,13 +1818,13 @@ RabbitMQ
 
 # Backend
 
-Backend principal:
+Primary backend:
 
 ```text
 Go
 ```
 
-Responsabilidades:
+Responsibilities:
 
 ```text
 MCP
