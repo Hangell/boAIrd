@@ -59,6 +59,7 @@ type ProjectService interface {
 type TaskService interface {
 	Get(context.Context, string) (task.Task, error)
 	List(context.Context, string, task.Status, string, int, int) ([]task.Task, error)
+	AssignAtVersion(context.Context, string, string, int64, string, task.Actor) (task.Task, error)
 	Claim(context.Context, string, string, int64, string, task.Actor) (task.Task, error)
 	Transition(context.Context, string, task.Status, string, task.Actor) (task.Task, error)
 }
@@ -123,10 +124,11 @@ func (s *Server) registerTools(server *mcp.Server) {
 	mcp.AddTool[heartbeatInput, agentOutput](server, add("boaird.agent.heartbeat", "Report authenticated activity for the calling Agent and return its server-derived status."), s.agentHeartbeat)
 	mcp.AddTool[taskListInput, []taskOutput](server, add("boaird.task.list", "List tasks in a project, or only tasks assigned to the authenticated Agent across projects."), s.taskList)
 	mcp.AddTool[taskInput, taskOutput](server, add("boaird.task.get", "Get a task assigned to this Agent or in its explicit project scope."), s.taskGet)
-	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.claim", "Claim a READY task assigned to this Agent, or self-assign an unassigned task when task.assign is explicitly granted."), s.taskClaim)
-	mcp.AddTool[taskUpdateInput, taskOutput](server, add("boaird.task.update", "Move an assigned task to WORKING, REVIEW, or BLOCKED with a reason."), s.taskUpdate)
-	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.complete", "Complete an assigned task after review when task.complete and Human Review policy allow it."), s.taskComplete)
-	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.fail", "Mark an assigned task failed with a reason."), s.taskFail)
+	mcp.AddTool[taskAssignInput, taskOutput](server, add("boaird.task.assign", "Assign a project task to an eligible Agent as the active Brain or an authorized project Agent; include the observed task version."), s.taskAssign)
+	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.claim", "Claim a READY task as its assigned Worker, or self-assign an unassigned task when task.assign is explicitly granted."), s.taskClaim)
+	mcp.AddTool[taskUpdateInput, taskOutput](server, add("boaird.task.update", "Move an assigned task as its Worker, or a project task as the active Brain under Brain policy."), s.taskUpdate)
+	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.complete", "Complete an assigned task or a project task as the active Brain when capability, autonomy, workflow, and Human Review policy allow it."), s.taskComplete)
+	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.fail", "Mark an assigned task failed as its Worker, or a project task as the active Brain under Brain policy."), s.taskFail)
 	mcp.AddTool[conversationReadInput, conversationOutput](server, add("boaird.conversation.read", "Read a bounded page of messages for a task assigned to this Agent."), s.conversationRead)
 	mcp.AddTool[conversationSendInput, messageOutput](server, add("boaird.conversation.send", "Send a message as the authenticated Agent on an assigned task."), s.conversationSend)
 	mcp.AddTool[taskInput, contextOutput](server, add("boaird.context.get", "Get assigned task context with a bounded recent conversation page; project metadata is included only for explicitly scoped projects."), s.contextGet)
@@ -175,6 +177,12 @@ type taskInput struct {
 type taskActionInput struct {
 	TaskID string `json:"task_id"`
 	Reason string `json:"reason"`
+}
+type taskAssignInput struct {
+	TaskID          string `json:"task_id"`
+	AgentID         string `json:"agent_id"`
+	ExpectedVersion int64  `json:"expected_version"`
+	Reason          string `json:"reason"`
 }
 type taskUpdateInput struct {
 	TaskID string `json:"task_id"`
@@ -276,6 +284,19 @@ func (s *Server) hasProjectScope(ctx context.Context, a agent.Agent, projectID s
 	}
 	b, err := s.services.Brains.Get(ctx, projectID)
 	return err == nil && b.Active() && b.AgentID() == a.ID() && b.ProjectID() == projectID
+}
+
+func (s *Server) isActiveBrain(ctx context.Context, a agent.Agent, projectID string) bool {
+	b, err := s.services.Brains.Get(ctx, projectID)
+	return err == nil && b.Active() && b.AgentID() == a.ID() && b.ProjectID() == projectID
+}
+
+func (s *Server) taskActor(ctx context.Context, a agent.Agent, projectID string) task.Actor {
+	actorType := task.ActorAgent
+	if s.isActiveBrain(ctx, a, projectID) {
+		actorType = task.ActorBrain
+	}
+	return task.Actor{Type: actorType, ID: a.ID()}
 }
 func agentView(a agent.Agent, observed agent.Observed, hasObservation bool) agentOutput {
 	caps := make([]string, 0, len(a.Capabilities()))
@@ -549,6 +570,10 @@ func (s *Server) taskClaim(ctx context.Context, _ *mcp.CallToolRequest, in taskA
 	if err != nil {
 		return nil, taskOutput{}, toolError(err)
 	}
+	if s.isActiveBrain(ctx, a, value.ProjectID()) {
+		s.recordDenial(ctx, a, value.ProjectID(), "task.claim", "active_brain_must_delegate")
+		return nil, taskOutput{}, toolError(task.ErrForbidden)
+	}
 	if value.Status() != task.StatusReady {
 		return nil, taskOutput{}, toolError(task.ErrForbidden)
 	}
@@ -567,9 +592,33 @@ func (s *Server) taskClaim(ctx context.Context, _ *mcp.CallToolRequest, in taskA
 	}
 	return nil, taskView(value), nil
 }
+func (s *Server) taskAssign(ctx context.Context, _ *mcp.CallToolRequest, in taskAssignInput) (*mcp.CallToolResult, taskOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, taskOutput{}, toolError(err)
+	}
+	value, err := s.services.Tasks.Get(ctx, in.TaskID)
+	if err != nil {
+		return nil, taskOutput{}, toolError(err)
+	}
+	projectID := value.ProjectID()
+	if !s.hasProjectScope(ctx, a, projectID) || s.authorizeProject(ctx, a, "task.assign", projectID) != nil {
+		return nil, taskOutput{}, toolError(task.ErrForbidden)
+	}
+	assignee, err := s.services.Agents.Get(ctx, strings.TrimSpace(in.AgentID))
+	if err != nil || assignee.ID() != a.ID() && !s.hasProjectScope(ctx, assignee, projectID) {
+		s.recordDenial(ctx, a, projectID, "task.assign", "assignee_must_have_project_scope")
+		return nil, taskOutput{}, toolError(task.ErrForbidden)
+	}
+	updated, err := s.services.Tasks.AssignAtVersion(ctx, value.ID(), assignee.ID(), in.ExpectedVersion, in.Reason, s.taskActor(ctx, a, projectID))
+	if err != nil {
+		return nil, taskOutput{}, toolError(err)
+	}
+	return nil, taskView(updated), nil
+}
 func (s *Server) taskUpdate(ctx context.Context, _ *mcp.CallToolRequest, in taskUpdateInput) (*mcp.CallToolResult, taskOutput, error) {
 	to := task.Status(in.Status)
-	if to != task.StatusWorking && to != task.StatusReview && to != task.StatusBlocked {
+	if to != task.StatusWorking && to != task.StatusReview && to != task.StatusHumanReview && to != task.StatusBlocked {
 		return nil, taskOutput{}, toolError(task.ErrForbidden)
 	}
 	return s.transition(ctx, in.TaskID, to, in.Reason, "task.transition")
@@ -585,10 +634,29 @@ func (s *Server) transition(ctx context.Context, id string, to task.Status, reas
 	if e != nil {
 		return nil, taskOutput{}, toolError(e)
 	}
-	if _, e = s.assignedTask(ctx, a, id, required); e != nil {
+	value, e := s.services.Tasks.Get(ctx, id)
+	if e != nil {
 		return nil, taskOutput{}, toolError(e)
 	}
-	v, e := s.services.Tasks.Transition(ctx, id, to, reason, task.Actor{Type: task.ActorAgent, ID: a.ID()})
+	actor := task.Actor{Type: task.ActorAgent, ID: a.ID()}
+	if s.isActiveBrain(ctx, a, value.ProjectID()) {
+		brainCapability := required
+		switch to {
+		case task.StatusWorking:
+			brainCapability = "task.assign"
+		case task.StatusReview, task.StatusHumanReview, task.StatusBlocked, task.StatusFailed, task.StatusCancelled:
+			brainCapability = "task.review"
+		case task.StatusDone:
+			brainCapability = "task.complete"
+		}
+		if !s.hasProjectScope(ctx, a, value.ProjectID()) || s.authorizeProject(ctx, a, brainCapability, value.ProjectID()) != nil {
+			return nil, taskOutput{}, toolError(task.ErrForbidden)
+		}
+		actor = task.Actor{Type: task.ActorBrain, ID: a.ID()}
+	} else if _, e = s.assignedTask(ctx, a, id, required); e != nil {
+		return nil, taskOutput{}, toolError(e)
+	}
+	v, e := s.services.Tasks.Transition(ctx, id, to, reason, actor)
 	if e != nil {
 		return nil, taskOutput{}, toolError(e)
 	}

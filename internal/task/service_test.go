@@ -90,9 +90,13 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	if value.Status() != task.StatusBacklog || !value.HumanReview() {
 		t.Fatalf("new task state = %s, human review = %v", value.Status(), value.HumanReview())
 	}
-	value, err = service.Assign(ctx, value.ID(), worker.ID(), "assign to worker", local)
+	observedVersion := value.Version()
+	value, err = service.AssignAtVersion(ctx, value.ID(), worker.ID(), observedVersion, "assign to worker", local)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := service.AssignAtVersion(ctx, value.ID(), worker.ID(), observedVersion, "retry stale assignment", local); !errors.Is(err, task.ErrConflict) {
+		t.Fatalf("stale versioned assignment error = %v, want conflict", err)
 	}
 	reloadedWorker, err := agents.Get(ctx, worker.ID())
 	if err != nil {

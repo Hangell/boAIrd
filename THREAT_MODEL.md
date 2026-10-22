@@ -53,7 +53,7 @@ flowchart LR
   API -->|redacted run text and lifecycle metadata| DB
 ```
 
-API Brain objectives use provider adapters, with Run records and lifecycle audit events persisted by SQLite. An external MCP Brain connects with its Agent token and uses the running MCP tool server; each tool applies its explicit capability, project scope, and domain policy. Local and remote non-MCP runtimes are not connected to the service.
+API Brain objectives use provider adapters, with Run records and lifecycle audit events persisted by SQLite. An external MCP Brain connects with its Agent token and uses the running MCP tool server; the active Brain relationship derives its project scope, and the server attributes task mutations as Brain actions so the task service applies capability, autonomy, workflow, and Human Review policy. Delegation uses the observed task version, so stale retries fail without reassigning work. Local and remote non-MCP runtimes are not connected to the service.
 
 ## 2. Assets, actors, and assumptions
 

@@ -159,9 +159,24 @@ func (s *Service) List(ctx context.Context, projectID string, status Status, ass
 }
 
 func (s *Service) Assign(ctx context.Context, id, agentID, reason string, actor Actor) (Task, error) {
+	return s.assign(ctx, id, agentID, 0, reason, actor)
+}
+
+// AssignAtVersion prevents a retried external request from applying an assignment twice.
+func (s *Service) AssignAtVersion(ctx context.Context, id, agentID string, expectedVersion int64, reason string, actor Actor) (Task, error) {
+	if expectedVersion < 1 {
+		return Task{}, invalidTaskInput(errors.New("expected task version is required"))
+	}
+	return s.assign(ctx, id, agentID, expectedVersion, reason, actor)
+}
+
+func (s *Service) assign(ctx context.Context, id, agentID string, expectedVersion int64, reason string, actor Actor) (Task, error) {
 	value, err := s.tasks.Get(ctx, id)
 	if err != nil {
 		return Task{}, err
+	}
+	if expectedVersion != 0 && value.Version() != expectedVersion {
+		return Task{}, ErrConflict
 	}
 	if err := s.ensureProjectActive(ctx, value.ProjectID()); err != nil {
 		return Task{}, err

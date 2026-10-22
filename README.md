@@ -1191,10 +1191,11 @@ Tool inputs and required capabilities:
 | `boaird.agent.list`, `.get`, `.status` | optional `agent_id` for get/status | `agent.read`; returns only the authenticated Agent |
 | `boaird.task.list` | optional `project_id`, `status`, `limit` (1–100), `offset` (0–10,000) | `task.read`; returns all tasks for projects in persisted membership or the authenticated Agent's active Brain scope, and otherwise only tasks assigned to that Agent |
 | `boaird.task.get` | `task_id` | `task.read`; exact assignment or persisted/active-Brain project scope |
-| `boaird.task.claim` | `task_id`, `reason` | `task.assign` + `task.transition` for an unassigned READY task in a project where the Agent has persisted membership; `task.transition` for a task already assigned to that Agent |
-| `boaird.task.update` | `task_id`, `status` (`WORKING`, `REVIEW`, `BLOCKED`), `reason` | `task.transition`; exact assignment |
-| `boaird.task.complete` | `task_id`, `reason` | `task.complete`; exact assignment, domain workflow and Human Review policy |
-| `boaird.task.fail` | `task_id`, `reason` | `task.transition`; exact assignment |
+| `boaird.task.assign` | `task_id`, `agent_id`, `expected_version`, `reason` | `task.assign`; active Brain project scope or authorized Agent project scope; assignee must have project scope or be the caller; stale versions fail with a conflict |
+| `boaird.task.claim` | `task_id`, `reason` | Worker self-claim only: `task.assign` + `task.transition` for an unassigned READY task in a project where the Agent has persisted membership; `task.transition` for a task already assigned to that Agent; active Brains must delegate with `task.assign` |
+| `boaird.task.update` | `task_id`, `status` (`WORKING`, `REVIEW`, `HUMAN_REVIEW`, `BLOCKED`), `reason` | Worker: `task.transition` and exact assignment; active Brain: matching Brain capability, project scope, autonomy policy, and task workflow; `HUMAN_REVIEW` is allowed only when project policy requires it |
+| `boaird.task.complete` | `task_id`, `reason` | Worker: `task.complete` and exact assignment; active Brain: `task.complete`, project scope, autonomy policy, domain workflow, and Human Review policy |
+| `boaird.task.fail` | `task_id`, `reason` | Worker: `task.transition` and exact assignment; active Brain: `task.review`, project scope, autonomy policy, and task workflow |
 | `boaird.conversation.read` | `task_id`, optional `before`, `limit` (1–100; default 50) | `task.read` and `conversation.read`; exact assignment |
 | `boaird.conversation.send` | `task_id`, `content`, optional `content_type` | `conversation.write`; exact assignment |
 | `boaird.context.get` | `task_id` | `task.read` and `conversation.read`; exact assignment or persisted/active-Brain project scope, at most 20 messages; project metadata is included only with effective project scope and `project.read` |
@@ -1207,11 +1208,15 @@ membership. Every project-scoped operation still requires its named
 capability. Assignment grants access only to that exact task and does not grant
 project metadata or project-wide task visibility.
 
-An MCP Agent may self-assign an unassigned READY task only when it has persisted
+An MCP Worker may self-assign an unassigned READY task only when it has persisted
 membership in that project and the explicit `task.assign` capability. The claim
 is recorded through the task service before the task transitions to WORKING;
-concurrent claims fail through task version checks. Agents cannot claim tasks
-assigned to another Agent or tasks in any other status.
+concurrent claims fail through task version checks. Active MCP Brains use
+`boaird.task.assign` with the observed task version to delegate work, then use
+Brain task tools under the same capability, autonomy, workflow, and Human Review
+checks as other Brain execution paths. Brains cannot use the Worker self-claim
+flow. Agents cannot claim tasks assigned to another Agent or tasks in any other
+status.
 
 Missing or invalid bearer tokens receive HTTP 401. A service-level denied or
 invalid operation returns an MCP tool error with a generic message; malformed

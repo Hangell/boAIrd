@@ -1719,10 +1719,14 @@ the first database startup with a 90-day expiry. Idle MCP sessions expire after
 
 Each tool checks explicit capabilities and project scope, with task assignment
 providing scope only for that exact assigned task. The MCP adapter calls
-existing project, task, conversation, Brain, and run services. Claim means
-starting work on a task already assigned by an authorized administrator or
-Brain; an MCP Agent cannot assign a task to itself. Agent completion requires
-`task.complete` and the existing task workflow and Human Review policy.
+existing project, task, conversation, Brain, and run services. Workers may
+claim eligible READY tasks through the versioned self-claim operation. An
+active MCP Brain instead assigns tasks through `boaird.task.assign`, which
+requires the observed task version and records the authenticated Brain as the
+actor. Brain task mutations enter the task service as `ActorBrain`, so
+capabilities, autonomy, workflow, and Human Review checks apply just as they do
+to other Brain execution paths. Agent completion requires `task.complete` and
+the existing task workflow and Human Review policy.
 
 Agent project scope is stored in the `agent_projects` relation and loaded with
 the Agent record. The authenticated local administrator manages it through
