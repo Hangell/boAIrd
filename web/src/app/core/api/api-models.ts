@@ -18,7 +18,44 @@ export interface TaskSummary {
   project_id: string;
   title: string;
   status: string;
+  priority: string;
   assigned_to?: string;
+}
+
+export interface TaskAuditEvent {
+  id: string;
+  event_type: string;
+  actor_type: string;
+  actor_id: string;
+  from_status?: string;
+  to_status?: string;
+  reason?: string;
+  created_at: string;
+}
+
+export interface TaskDetail extends TaskSummary {
+  description: string;
+  human_review_required: boolean;
+  created_at: string;
+  updated_at: string;
+  audit_events: TaskAuditEvent[];
+}
+
+export interface TaskConversationMessage {
+  id: string;
+  sender_type: 'USER' | 'AGENT' | 'BRAIN' | 'SYSTEM';
+  sender_id: string;
+  content: string;
+  content_type: string;
+  created_at: string;
+}
+
+export interface TaskConversation {
+  id: string;
+  project_id: string;
+  task_id: string;
+  messages: TaskConversationMessage[];
+  next_before?: string;
 }
 
 export interface AgentSummary {

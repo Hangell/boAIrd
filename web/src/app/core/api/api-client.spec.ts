@@ -60,12 +60,12 @@ describe('ApiClient', () => {
     expect(response).toEqual({ id: 'a1' });
   });
 
-  it('sends bearer authorization only with the requested PUT', () => {
-    client.putWithBearer<{ reason: string }, { id: string }>('api/v1/projects/p1/brain', { reason: 'replace' }, 'admin-token').subscribe();
+  it('puts typed payloads to a resource path', () => {
+    client.put<{ reason: string }, { id: string }>('api/v1/projects/p1/brain', { reason: 'replace' }).subscribe();
 
     const request = http.expectOne('http://127.0.0.1:3110/api/v1/projects/p1/brain');
     expect(request.request.method).toBe('PUT');
-    expect(request.request.headers.get('Authorization')).toBe('Bearer admin-token');
+    expect(request.request.body).toEqual({ reason: 'replace' });
     request.flush({ id: 'brain-1' });
   });
 

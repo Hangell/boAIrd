@@ -17,14 +17,12 @@ export class ApiClient {
     return this.http.post<TResponse>(this.endpoint(path), body);
   }
 
-  patch<TRequest, TResponse>(path: string, body: TRequest): Observable<TResponse> {
-    return this.http.patch<TResponse>(this.endpoint(path), body);
+  put<TRequest, TResponse>(path: string, body: TRequest): Observable<TResponse> {
+    return this.http.put<TResponse>(this.endpoint(path), body);
   }
 
-  putWithBearer<TRequest, TResponse>(path: string, body: TRequest, token: string): Observable<TResponse> {
-    return this.http.put<TResponse>(this.endpoint(path), body, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+  patch<TRequest, TResponse>(path: string, body: TRequest): Observable<TResponse> {
+    return this.http.patch<TResponse>(this.endpoint(path), body);
   }
 
   getAllPages<TItem>(path: string): Observable<TItem[]> {

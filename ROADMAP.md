@@ -761,6 +761,7 @@ i18n foundation
 - The `web/` standalone Angular workspace builds with strict TypeScript and SCSS, Angular Material, feature routes, and a responsive shell.
 - `API_BASE_URL` defaults to the loopback API in development; production builds use `/api/v1`. The browser projects a view of backend state and does not own task status.
 - The project list and project detail view use the current project, task, Brain, agent, and run endpoints to show operational status, blocked tasks, and recent failed runs, with explicit loading, empty, and retryable error states.
+- The Kanban board groups backend tasks by API status, submits status changes with a required audit reason, and refreshes from the server. Task detail pages expose audit history, text conversation messages, linked runs, and human-review state.
 - Shared infrastructure includes a typed HTTP client, an SSE client with caller-provided event decoding, and a global error handler that avoids logging error payloads.
 - The shell includes semantic landmarks, keyboard skip navigation, visible focus, reduced-motion styling, and Angular i18n markers with English as the source locale.
 

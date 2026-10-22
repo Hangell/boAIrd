@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, OnInit, signal 
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, EMPTY, expand, forkJoin, map, Observable, of, reduce, switchMap, throwError } from 'rxjs';
+import { catchError, forkJoin, map, Observable, of, switchMap, throwError } from 'rxjs';
 import { ApiClient } from '../../core/api/api-client';
 import { AgentSummary, ApiPage, BrainSummary, ProjectSummary, RunSummary, TaskSummary } from '../../core/api/api-models';
 
@@ -191,7 +191,7 @@ export class ProjectDashboardComponent implements OnInit {
 
     return forkJoin({
       project: this.api.get<ProjectSummary>(`projects/${encodedID}`),
-      tasks: this.listAllPages<TaskSummary>(`projects/${encodedID}/tasks`),
+      tasks: this.api.getAllPages<TaskSummary>(`projects/${encodedID}/tasks`),
       runs: this.api.get<ApiPage<RunSummary>>(`projects/${encodedID}/runs?limit=5&offset=0`).pipe(map((page) => page.items)),
       brain: optionalBrain,
     }).pipe(
@@ -213,14 +213,4 @@ export class ProjectDashboardComponent implements OnInit {
     );
   }
 
-  private listAllPages<TItem>(path: string): Observable<TItem[]> {
-    const firstPage = (offset: number): Observable<ApiPage<TItem>> =>
-      this.api.get<ApiPage<TItem>>(`${path}?limit=100&offset=${offset}`);
-
-    return firstPage(0).pipe(
-      expand((page) => page.items.length === 100 ? firstPage(page.offset + page.limit) : EMPTY),
-      map((page) => page.items),
-      reduce((items, nextPage) => items.concat(nextPage), [] as TItem[]),
-    );
-  }
 }
