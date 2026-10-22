@@ -16,10 +16,11 @@ Agent configuration validates runtime, provider/model/credential references, lan
 | HTTP API | Health/status, project CRUD/archive, and credential create/list/delete. Credential responses contain only ID, name, and provider; request JSON is size-limited and rejects unknown fields. | No caller identity, authentication, or per-user authorization. Same-host processes can create, enumerate, or delete credentials through the unauthenticated listener. |
 | Agent configuration | Agent create/list/read/update; role is descriptive, runtime status is read-only, and capabilities are stored only when explicitly supplied. API runtimes store a provider-matched credential ID. | Same-host callers can configure agents because the API has no authentication or per-user authorization. |
 | Brain and runs | Project Brain attach/read and objective execution; only API agents with `brain.execute` may be attached; provider output and run state are persisted; autonomy does not grant capability. | The Brain returns proposed text only. No tool or task mutation is exposed. The API remains unauthenticated to local processes, and provider-bound objectives/responses may contain sensitive data. |
+| Run history and audit | Run input/output/tool/error text is redacted for common secret patterns before persistence and display. SQLite creates immutable audit rows for Run creation and status changes; project history filters by task and agent. | Redaction is pattern-based and cannot identify every secret format. Run content is stored as plaintext in SQLite after redaction. SQL triggers protect audit rows from application updates/deletes but do not protect against an OS user who can directly alter the database file. |
 | SQLite | Opens/migrates the configured database; creates parent directories with mode `0700` and database file mode `0600`. Credential secrets are stored only as AES-256-GCM ciphertext; agent rows store provider configuration and credential IDs. | Permissions on a pre-existing parent directory are not changed. Local OS users with database access can read or replace ciphertext and metadata. |
 | Project data | Validates project names, workspace paths, repository URL schemes, page limits, and Brain references; SQL uses parameters. | Workspace and repository values are stored, not acted upon by this API. No tenant boundary exists. |
 | Provider adapters | Provider-specific chat/model requests; credential reference resolved immediately before each HTTP call; bounded JSON transport and sanitized HTTP status errors. The Brain runtime invokes chat on demand. | Prompt objectives and Brain instructions are sent to the configured provider. No context-selection/consent policy or provider endpoint allowlist is implemented here. |
-| MCP, tools, dashboard, audit | Present as design goals in repository documentation. | No executable MCP server, tool executor, browser dashboard, or durable audit pipeline is wired in the application. |
+| MCP, tools, dashboard, general audit | Present as design goals in repository documentation. | No executable MCP server, tool executor, browser dashboard, or audit coverage for project/agent/credential mutations is wired in the application. Run lifecycle events are audited. |
 
 ### Effective configuration and data locations
 
@@ -40,12 +41,14 @@ flowchart LR
   Runtime[Credential resolver] -->|decrypt by credential ID| Vault[Credential manager]
   Vault -->|ciphertext lookup| DB
   API -->|validate and store only| Meta[Workspace path and repository URL]
-  Brain[Brain execution service] -->|Objective and credential reference| Registry[Provider registry and adapter]
+  Brain[Brain execution service] -->|Run state transitions| Audit[(SQLite audit events)]
+  Brain -->|Objective and credential reference| Registry[Provider registry and adapter]
   Registry -->|resolve credential| Resolver[Injected credential resolver]
   Registry -->|HTTPS, auth header, objective and instructions| Vendor[Configured external provider]
+  API -->|redacted run text and lifecycle metadata| DB
 ```
 
-The Brain runtime uses the provider adapters when an objective is submitted. Other agent runtimes and tool execution are not connected to the running HTTP service.
+The Brain runtime uses the provider adapters when an objective is submitted. Run records and lifecycle audit events are persisted by SQLite. Other agent runtimes and tool execution are not connected to the running HTTP service.
 
 ## 2. Assets, actors, and assumptions
 
@@ -54,8 +57,8 @@ The Brain runtime uses the provider adapters when an objective is submitted. Oth
 - Project names, descriptions, lifecycle state, Brain association, and configuration metadata stored in SQLite.
 - Local database integrity and availability.
 - Workspace path and repository URL metadata, which may reveal local layout or private repository locations.
-- If provider adapters are used: credential values returned by the injected resolver, provider-bound message content, and provider responses.
-- Assets not currently handled by the application: agent execution authority, MCP sessions, tool authority, audit records, and user/tenant data. Agent identity and configuration are persisted, while capability enforcement is not yet wired.
+- Provider credentials resolved for Brain calls, provider-bound objectives/instructions, provider responses, persisted Run text, and Run lifecycle audit events.
+- Assets not currently handled by the application: general agent execution authority, MCP sessions, tool authority, audit records for non-Run mutations, and user/tenant data. Agent roles remain descriptive; Brain execution requires the explicit capability.
 
 ### Actors and capabilities
 
@@ -65,8 +68,8 @@ The Brain runtime uses the provider adapters when an objective is submitted. Oth
 | Other process on the same host | Can attempt HTTP requests to the loopback listener. The API has no authentication layer. | It does not automatically have filesystem access to the SQLite file; OS permissions still apply. |
 | Agent configuration caller | Can create and update agent configuration through the unauthenticated local API, including explicit capability labels. | A role label does not grant authority. Brain execution requires `brain.execute` and returns proposed text without tools or project mutations. |
 | Remote network caller | Cannot directly reach the default listener through a non-loopback bind because configuration rejects non-loopback IPs. | No claim is made about host firewall, port forwarding, local proxies, or a separately exposed reverse proxy. |
-| Provider caller/configuration owner | Chooses provider config and request messages, and supplies a resolver implementation. | The adapter itself does not select or filter project context and does not validate that a credential is authorized for a particular project. |
-| Configured provider | Receives request messages and credentials in its required auth header when an adapter call is made. | No provider calls are made by the default application startup path. |
+| Provider configuration owner | Chooses provider configuration and Brain instructions through the local API. | The adapter does not select or filter project context or validate that a credential is authorized for a particular project. |
+| Configured provider | Receives Brain objectives/instructions and its credential in the required auth header when a Brain run is requested. | The service does not automatically call providers at startup. |
 | Future MCP client, worker, or tool author | Would cross planned trust boundaries if those features are wired. | These actors have no current executable MCP, agent-runtime, or tool capability through this application. |
 
 ### Trust boundaries
@@ -76,7 +79,7 @@ The Brain runtime uses the provider adapters when an objective is submitted. Oth
 3. **Provider adapter to credential resolver.** The adapter passes a credential reference to the injected resolver, then sends the returned value only in the provider auth header. The credential manager implements encrypted storage and resolution; scoped authorization, rotation, and caller identity are not implemented.
 4. **Provider adapter to external host.** HTTPS is required except for loopback development endpoints. Redirects are not followed, and error response bodies are not returned. Custom HTTPS base URLs remain caller-trusted, so a party controlling provider configuration can select the recipient host.
 5. **Project metadata to filesystem or Git.** The current API validates and persists these strings but performs no filesystem operation, clone, DNS lookup, or network fetch based on the repository URL.
-6. **Credential, agent, and provider boundary.** Brain runs resolve a stored credential by ID and pass it to the provider adapter; secrets are not included in Brain responses or run error messages. Provider endpoint selection, scoped authorization, key rotation, Brain run quotas, and durable audit remain future boundaries.
+6. **Credential, agent, and provider boundary.** Brain runs resolve a stored credential by ID and pass it to the provider adapter; provider error bodies are not stored, and common credential forms are redacted from run text. Pattern-based redaction is incomplete and Run content remains readable from the local database. Provider endpoint selection, scoped authorization, key rotation, Brain run quotas, and audit for other resource mutations remain future boundaries.
 
 ## 3. Threat scenarios and mitigations
 
@@ -92,10 +95,10 @@ These are hypotheses to guide implementation and review. Priority reflects poten
 | P2 | **SQLite disclosure or tampering:** another local account reads or replaces project data. | Attacker can access the database path or parent directory under OS permissions. | Newly created database directories/files use restrictive modes. Existing parent permissions, symlink ownership, backups, and filesystem-level access are not managed here. | Document secure placement and backup permissions; harden symlink and existing-directory handling if the local threat model includes other OS users. |
 | P1 | **Unauthenticated local caller consumes provider quota:** a local process repeatedly submits objectives that incur provider costs. | Attacker can reach the loopback listener and a configured credential is usable. | Brain execution bounds request size and max_tokens (1–4096) and persists a Run, but callers are unauthenticated and no rate limit or quota exists. | Add local caller authentication, rate limits, and per-project/provider usage budgets before shared-host deployment. |
 | P2 | **Future MCP/tool authority confusion:** a client or prompt-injection payload obtains project or host operations beyond its grant. | MCP sessions or tool execution are implemented and reachable. | No MCP server or tool executor is wired in the current application. | Bind each action to authenticated identity, project, and capability; reauthorize on the backend; treat repository/provider content as untrusted. |
-| P2 | **Future audit omission:** a sensitive mutation occurs without durable attribution. | Sensitive actions and audit persistence are implemented. | Project mutations are persisted, but there is no durable audit pipeline in the application bootstrap. | Add durable actor/resource/outcome events and define behavior when audit persistence fails before introducing privileged runtime actions. |
+| P2 | **Audit coverage or local tampering gap:** a project/credential mutation is not attributed, or a local database owner edits Run history. | A sensitive resource mutation occurs, or an attacker can write to the SQLite file. | Run create/status events are written in the same SQLite transaction and SQL statements cannot update/delete them. Other resource mutations are not audited, and an OS-level database writer can alter rows or triggers directly. | Extend audit coverage to sensitive mutations and use protected backups or external append-only storage if local database owners are in scope. |
 
 ## 4. Verification evidence and scope limits
 
-The source inventory for this model includes the executable and configuration under `cmd/boaird` and `internal/config`, HTTP routing under `internal/api`, project, agent, and credential services, SQLite access under `internal/storage`, structured log redaction under `internal/logging`, and provider contracts/adapters under `internal/provider`. The runtime composition in `internal/app` wires project, agent, credential, Brain, and run services to SQLite. MCP, general agent execution, and tools are not wired.
+The source inventory for this model includes the executable and configuration under `cmd/boaird` and `internal/config`, HTTP routing under `internal/api`, project, agent, Brain, run, and credential services, SQLite access under `internal/storage`, structured log redaction under `internal/logging`, and provider contracts/adapters under `internal/provider`. The runtime composition in `internal/app` wires project, agent, credential, Brain, and run services to SQLite. MCP, general agent execution, tools, and audit coverage beyond Run lifecycle events are not wired.
 
 The source-backed controls described here should be rechecked when code or deployment configuration changes. This model is not a complete security audit, does not establish the safety of the host deployment, and does not claim that tests prove upstream provider behavior. Future remote access, tool execution, user isolation, key rotation, usage controls, or audit implementation requires a fresh threat-model review.

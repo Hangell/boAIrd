@@ -9,8 +9,9 @@ import (
 
 var (
 	bearerPattern     = regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+`)
-	keyPattern        = regexp.MustCompile(`(?i)\b(sk-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{20,})\b`)
-	assignmentPattern = regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|authorization)(\s*[:=]\s*)[^\s,;]+`)
+	keyPattern        = regexp.MustCompile(`(?i)\b(sk-(proj-|ant-)?[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b`)
+	assignmentPattern = regexp.MustCompile(`(?i)(["']?(api[_-]?key|token|secret|password|authorization|cookie|client[_-]?secret|refresh[_-]?token|private[_-]?key)["']?\s*[:=]\s*["']?)[^"'\s,;}\]]+`)
+	privateKeyPattern = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`)
 )
 
 // NewRedactingHandler prevents secret-bearing attributes and common token forms from reaching logs.
@@ -81,7 +82,11 @@ func isSensitiveName(name string) bool {
 }
 
 func redactText(value string) string {
+	value = privateKeyPattern.ReplaceAllString(value, "[REDACTED PRIVATE KEY]")
 	value = bearerPattern.ReplaceAllString(value, "$1[REDACTED]")
 	value = keyPattern.ReplaceAllString(value, "[REDACTED]")
-	return assignmentPattern.ReplaceAllString(value, "$1$2[REDACTED]")
+	return assignmentPattern.ReplaceAllString(value, "$1[REDACTED]")
 }
+
+// RedactSensitiveText removes common credentials and secret assignments from stored or displayed text.
+func RedactSensitiveText(value string) string { return redactText(value) }

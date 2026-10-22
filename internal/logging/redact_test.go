@@ -24,3 +24,16 @@ func TestRedactingHandlerSanitizesSensitiveAttributesAndText(t *testing.T) {
 		t.Fatalf("expected redaction and safe metadata, got %s", result)
 	}
 }
+
+func TestRedactSensitiveTextHandlesJSONAndCommonTokens(t *testing.T) {
+	input := `{"api_key":"raw-secret-value","authorization":"Bearer raw-token-value","key":"ghp_012345678901234567890123456789012345"}`
+	output := RedactSensitiveText(input)
+	for _, secret := range []string{"raw-secret-value", "raw-token-value", "ghp_012345678901234567890123456789012345"} {
+		if strings.Contains(output, secret) {
+			t.Errorf("redaction leaked %q in %q", secret, output)
+		}
+	}
+	if !strings.Contains(output, "[REDACTED]") {
+		t.Fatalf("redacted text = %q", output)
+	}
+}
