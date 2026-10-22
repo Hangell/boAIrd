@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/api"
@@ -12,6 +13,7 @@ import (
 	"boAIrd/internal/config"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
+	"boAIrd/internal/heartbeat"
 	"boAIrd/internal/mcpserver"
 	"boAIrd/internal/mcptoken"
 	"boAIrd/internal/project"
@@ -65,7 +67,19 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize agent repository: %w", err)
 	}
-	agentManager, err := agent.NewManager(agentRepository)
+	agentActivityRepository, err := storage.NewAgentActivityRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize agent activity repository: %w", err)
+	}
+	agentPolicy, err := heartbeat.NewPolicy(cfg.AgentStaleAfter, cfg.AgentOfflineAfter)
+	if err != nil {
+		return fmt.Errorf("configure agent liveness policy: %w", err)
+	}
+	heartbeatService, err := heartbeat.NewService(agentActivityRepository, agentPolicy)
+	if err != nil {
+		return fmt.Errorf("initialize heartbeat service: %w", err)
+	}
+	agentManager, err := agent.NewManager(agentRepository, heartbeatService)
 	if err != nil {
 		return fmt.Errorf("initialize agent manager: %w", err)
 	}
@@ -125,13 +139,34 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize conversation service: %w", err)
 	}
-	mcp, err := mcpserver.New(mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository, Conversations: conversationService, Brains: brainService, Runs: runManager}, mcpTokenService)
+	mcp, err := mcpserver.New(mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository, Conversations: conversationService, Brains: brainService, Runs: runManager, Heartbeats: heartbeatService}, mcpTokenService)
 	if err != nil {
 		return fmt.Errorf("initialize MCP server: %w", err)
 	}
 	logger.Info("MCP endpoint initialized", "path", "/mcp")
+	go reconcileAgentStatus(ctx, heartbeatService, cfg.AgentStatusInterval, logger)
 	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithMCPTokenManagement(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, mcp.Handler()), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil
+}
+
+// reconcileAgentStatus expires silent sessions and records observed Agent
+// status transitions on a bounded, cancellable schedule.
+func reconcileAgentStatus(ctx context.Context, service *heartbeat.Service, interval time.Duration, logger *slog.Logger) {
+	if err := service.Reconcile(ctx); err != nil && ctx.Err() == nil {
+		logger.Error("reconcile agent status", "error", err)
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := service.Reconcile(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("reconcile agent status", "error", err)
+			}
+		}
+	}
 }

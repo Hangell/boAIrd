@@ -36,6 +36,13 @@ type Record struct {
 	RevokedAt *time.Time
 }
 
+// Identity is the authenticated Agent behind a bearer token. The token ID binds
+// a runtime session to the exact credential that opened it.
+type Identity struct {
+	AgentID string
+	TokenID string
+}
+
 type Metadata struct {
 	ID        string     `json:"id"`
 	AgentID   string     `json:"agent_id"`
@@ -135,39 +142,39 @@ func (s *Service) List(ctx context.Context) ([]Metadata, error) {
 }
 
 // Verify checks the full verifier set so token comparisons do not reveal the matching record position.
-func (s *Service) Verify(ctx context.Context, raw string) (string, error) {
+func (s *Service) Verify(ctx context.Context, raw string) (Identity, error) {
 	if len(raw) != 64 {
-		return "", ErrInactive
+		return Identity{}, ErrInactive
 	}
 	decoded, err := hex.DecodeString(raw)
 	if err != nil || len(decoded) != 32 {
 		clear(decoded)
-		return "", ErrInactive
+		return Identity{}, ErrInactive
 	}
 	defer clear(decoded)
 	digest := sha256.Sum256(decoded)
 	values, err := s.repository.VerificationRecords(ctx)
 	if err != nil {
-		return "", err
+		return Identity{}, err
 	}
 	now := s.now().UTC()
 	matched := 0
-	agentID := ""
+	identity := Identity{}
 	for _, value := range values {
 		equal := subtle.ConstantTimeCompare(digest[:], value.Digest[:])
 		valid := equal & boolToInt(active(value, now))
 		matched |= valid
 		if valid == 1 {
-			agentID = value.AgentID
+			identity = Identity{AgentID: value.AgentID, TokenID: value.ID}
 		}
 	}
 	if matched != 1 {
-		return "", ErrInactive
+		return Identity{}, ErrInactive
 	}
-	if err := s.validateAgent(ctx, agentID); err != nil {
-		return "", ErrInactive
+	if err := s.validateAgent(ctx, identity.AgentID); err != nil {
+		return Identity{}, ErrInactive
 	}
-	return agentID, nil
+	return identity, nil
 }
 
 // Bootstrap imports legacy environment tokens once, assigning each a finite lifetime.

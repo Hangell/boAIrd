@@ -4,10 +4,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadUsesLocalDefaults(t *testing.T) {
-	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES")
+	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES",
+		"BOAIRD_AGENT_STALE_AFTER", "BOAIRD_AGENT_OFFLINE_AFTER", "BOAIRD_AGENT_STATUS_INTERVAL")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -17,6 +19,9 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.Host != defaultHost || cfg.Port != defaultPort || cfg.DatabasePath != defaultDatabasePath {
 		t.Fatalf("Load() = %+v, want local defaults", cfg)
+	}
+	if cfg.AgentStaleAfter != defaultAgentStaleAfter || cfg.AgentOfflineAfter != defaultAgentOfflineAfter || cfg.AgentStatusInterval != defaultAgentStatusInterval {
+		t.Fatalf("agent liveness defaults = %s/%s/%s", cfg.AgentStaleAfter, cfg.AgentOfflineAfter, cfg.AgentStatusInterval)
 	}
 }
 
@@ -32,6 +37,40 @@ func TestLoadRegistersMCPAgentTokenWithoutExposingIt(t *testing.T) {
 	}
 	if strings.Contains(cfg.MCPAgentTokens[0].String(), "030303") || strings.Contains(cfg.MCPAgentTokens[0].GoString(), "030303") {
 		t.Fatal("MCP agent token formatting exposed the secret")
+	}
+}
+
+func TestLoadAcceptsConfiguredAgentPolicy(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_AGENT_STALE_AFTER", "2m")
+	t.Setenv("BOAIRD_AGENT_OFFLINE_AFTER", "10m")
+	t.Setenv("BOAIRD_AGENT_STATUS_INTERVAL", "15s")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentStaleAfter != 2*time.Minute || cfg.AgentOfflineAfter != 10*time.Minute || cfg.AgentStatusInterval != 15*time.Second {
+		t.Fatalf("configured agent policy = %s/%s/%s", cfg.AgentStaleAfter, cfg.AgentOfflineAfter, cfg.AgentStatusInterval)
+	}
+}
+
+func TestLoadRejectsInvalidAgentPolicy(t *testing.T) {
+	for name, values := range map[string][3]string{
+		"stale equals offline":   {"5m", "5m", "30s"},
+		"stale below minimum":    {"500ms", "5m", "30s"},
+		"offline above maximum":  {"90s", "25h", "30s"},
+		"interval below minimum": {"90s", "5m", "0s"},
+		"malformed duration":     {"ninety", "5m", "30s"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setValidSecrets(t)
+			t.Setenv("BOAIRD_AGENT_STALE_AFTER", values[0])
+			t.Setenv("BOAIRD_AGENT_OFFLINE_AFTER", values[1])
+			t.Setenv("BOAIRD_AGENT_STATUS_INTERVAL", values[2])
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() accepted an invalid agent liveness policy")
+			}
+		})
 	}
 }
 
@@ -131,21 +170,24 @@ func TestLoadRejectsInvalidPort(t *testing.T) {
 	}
 }
 
+func testConfig(host string) Config {
+	return Config{
+		Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, MasterKey: MasterKey{1}, LocalAuthToken: LocalAuthToken{2},
+		AgentStaleAfter: defaultAgentStaleAfter, AgentOfflineAfter: defaultAgentOfflineAfter, AgentStatusInterval: defaultAgentStatusInterval,
+	}
+}
+
 func TestValidateRejectsOutOfRangePort(t *testing.T) {
-	cfg := Config{Host: "127.0.0.1", Port: 65536, DatabasePath: "./data/boaird.db", MasterKey: MasterKey{1}, LocalAuthToken: LocalAuthToken{2}}
+	cfg := testConfig("127.0.0.1")
+	cfg.Port = 65536
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() accepted an out-of-range port")
 	}
 }
 
 func TestValidateRejectsReusedMasterKeyForLocalAuthToken(t *testing.T) {
-	cfg := Config{
-		Host:           defaultHost,
-		Port:           defaultPort,
-		DatabasePath:   defaultDatabasePath,
-		MasterKey:      MasterKey{1},
-		LocalAuthToken: LocalAuthToken{1},
-	}
+	cfg := testConfig(defaultHost)
+	cfg.LocalAuthToken = LocalAuthToken{1}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() accepted the master key as the local auth token")
 	}
@@ -154,7 +196,7 @@ func TestValidateRejectsReusedMasterKeyForLocalAuthToken(t *testing.T) {
 func TestValidateRejectsNonLoopbackHosts(t *testing.T) {
 	for _, host := range []string{"0.0.0.0", "192.0.2.1", "localhost"} {
 		t.Run(host, func(t *testing.T) {
-			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, MasterKey: MasterKey{1}, LocalAuthToken: LocalAuthToken{2}}
+			cfg := testConfig(host)
 			if err := cfg.Validate(); err == nil {
 				t.Fatalf("Validate() accepted non-loopback host %q", host)
 			}
@@ -165,7 +207,7 @@ func TestValidateRejectsNonLoopbackHosts(t *testing.T) {
 func TestValidateAcceptsLoopbackHosts(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "::1"} {
 		t.Run(host, func(t *testing.T) {
-			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, MasterKey: MasterKey{1}, LocalAuthToken: LocalAuthToken{2}}
+			cfg := testConfig(host)
 			if err := cfg.Validate(); err != nil {
 				t.Fatalf("Validate() rejected loopback host %q: %v", host, err)
 			}

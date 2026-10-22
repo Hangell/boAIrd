@@ -1013,21 +1013,48 @@ STALE
 ERROR
 ```
 
+Status is **server-owned**. Clients authenticate; they never submit a status.
+The server derives the value from the most recent authenticated session plus the
+work the board shows for that Agent:
+
+```text
+no session ever                 IDLE
+silent >= offline threshold     OFFLINE
+silent >= stale threshold       STALE
+assigned task in WORKING        BUSY
+assigned task in REVIEW         WAITING
+recent FAILED task              ERROR
+fresh session without work      ONLINE
+```
+
+Liveness outranks work: an Agent that stops reporting becomes `STALE` and then
+`OFFLINE` even while it still holds a `WORKING` task.
+
 ---
 
 # Heartbeat
 
-External agents may send heartbeats.
-
-Example:
+A heartbeat is authenticated activity, not a client-declared state.
 
 ```text
 VS Code Agent
-     │
+     │ authenticated MCP request (bearer token)
      ├── heartbeat
      ├── heartbeat
      └── heartbeat
 ```
+
+- Any authenticated MCP request refreshes liveness for the verified Agent, and
+  the `boaird.agent.heartbeat` tool reports it explicitly.
+- A session is bound to the Agent **and** the credential that opened it. An
+  Agent name is never an identity, and a heartbeat that names another Agent is
+  rejected and recorded as a denied authorization.
+- Silence for `BOAIRD_AGENT_STALE_AFTER` marks the Agent `STALE`; silence for
+  `BOAIRD_AGENT_OFFLINE_AFTER` expires the session and marks it `OFFLINE`.
+- Reconnecting with the same credential opens a new session for the same
+  identity (`session.resumed`).
+- Every observed transition is stored as an immutable status event and exposed
+  at `GET /api/v1/agents/{id}/status-events`.
 
 If heartbeats stop:
 
@@ -2044,6 +2071,9 @@ The service reads these optional environment variables:
 | `BOAIRD_MCP_AGENT_TOKENS` | Empty | Legacy one-time bootstrap only: imported from the environment on first database startup with a 90-day expiry. Manage tokens through the authenticated MCP token API afterward. |
 | `BOAIRD_PROVIDER_ALLOWED_HOSTS` | Empty | Comma-separated exact hostnames or IPs approved for custom provider URLs. Built-in vendor defaults and explicit loopback development URLs remain available. |
 | `BOAIRD_PROVIDER_ALLOWED_IP_RANGES` | Empty | Comma-separated CIDR ranges that custom provider hosts may resolve to when private or special-use networks are intentionally required. |
+| `BOAIRD_AGENT_STALE_AFTER` | `90s` | Silence after which an Agent is reported `STALE`. Must be at least `1s` and shorter than the offline threshold. |
+| `BOAIRD_AGENT_OFFLINE_AFTER` | `5m` | Silence after which an Agent session expires and the Agent is reported `OFFLINE`. Maximum `24h`. |
+| `BOAIRD_AGENT_STATUS_INTERVAL` | `30s` | How often silent sessions are expired and status transitions are recorded. Between `1s` and `1h`. |
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 
