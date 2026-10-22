@@ -1318,6 +1318,8 @@ Remote Runtime
 
 Select context intelligently.
 
+Initial implementation: bounded project/task context composition for API Agent Runs with source/trust provenance, deterministic selection, conversation and same-task Run history, and explicit omission reporting. Files, memory, Git, issues, PRs, and documentation require scoped readers and remain unavailable until those are implemented.
+
 Final context:
 
 ```text

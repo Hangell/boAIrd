@@ -195,7 +195,7 @@ func newFixture(t *testing.T, options fixtureOptions) *fixture {
 	escalations := &fakeEscalations{}
 	service, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
-		Brains: brainRepository, Executor: executor, Conversations: conversationService, Escalations: escalations,
+		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService, Escalations: escalations,
 		Config: orchestrator.Config{MaxAttempts: options.maxAttempts},
 	})
 	if err != nil {
@@ -245,6 +245,13 @@ func TestDispatchExecutesTaskAndReviewCompletes(t *testing.T) {
 	}
 	if len(report.Outcomes) != 1 || report.Outcomes[0].Status != orchestrator.OutcomeSucceeded {
 		t.Fatalf("dispatch outcomes = %+v", report.Outcomes)
+	}
+	selection := report.Outcomes[0].ContextSelection
+	if selection == nil || selection.ProjectID != f.project.ID() || selection.TaskID != ready.ID() {
+		t.Fatalf("context selection = %+v", selection)
+	}
+	if len(selection.Selected) < 2 {
+		t.Fatalf("context selection omitted project/task inputs: %+v", selection.Selected)
 	}
 	calls := f.executor.Calls()
 	if len(calls) != 1 || calls[0].TaskID != ready.ID() || calls[0].AgentID != f.worker.ID() {
@@ -302,6 +309,9 @@ func TestReviewReworkReexecutesWithInstructions(t *testing.T) {
 	}
 	if !strings.Contains(calls[1].Input, "add regression tests") {
 		t.Fatalf("rework input missing instructions: %q", calls[1].Input)
+	}
+	if !strings.Contains(calls[1].Input, "delivered work") {
+		t.Fatalf("rework input missing prior Run output: %q", calls[1].Input)
 	}
 	runs, err := f.runs.List(ctx, f.project.ID(), ready.ID(), "", 10, 0)
 	if err != nil {

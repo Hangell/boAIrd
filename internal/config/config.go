@@ -25,6 +25,10 @@ const (
 	maximumOrchestratorMaxAttempts      = 10
 	defaultOrchestratorExecutionTimeout = 5 * time.Minute
 	maximumOrchestratorExecutionTimeout = time.Hour
+	defaultContextMaxBytes              = 16 << 10
+	maximumContextMaxBytes              = 1 << 20
+	defaultContextMaxTokens             = 4096
+	maximumContextMaxTokens             = 100_000
 )
 
 // Config contains the settings required to start the local service.
@@ -42,6 +46,8 @@ type Config struct {
 	AgentStatusInterval     time.Duration
 	OrchestratorMaxAttempts int
 	OrchestratorTimeout     time.Duration
+	ContextMaxBytes         int
+	ContextMaxTokens        int
 }
 
 // MCPAgentToken registers one MCP bearer token for an existing Agent identity.
@@ -74,6 +80,8 @@ func Load() (Config, error) {
 		AgentStaleAfter:     defaultAgentStaleAfter,
 		AgentOfflineAfter:   defaultAgentOfflineAfter,
 		AgentStatusInterval: defaultAgentStatusInterval,
+		ContextMaxBytes:     defaultContextMaxBytes,
+		ContextMaxTokens:    defaultContextMaxTokens,
 	}
 
 	if rawPort, ok := os.LookupEnv("BOAIRD_PORT"); ok {
@@ -155,6 +163,20 @@ func Load() (Config, error) {
 		}
 		cfg.OrchestratorTimeout = timeout
 	}
+	if rawLimit, ok := os.LookupEnv("BOAIRD_CONTEXT_MAX_BYTES"); ok {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_CONTEXT_MAX_BYTES: %w", err)
+		}
+		cfg.ContextMaxBytes = limit
+	}
+	if rawLimit, ok := os.LookupEnv("BOAIRD_CONTEXT_MAX_TOKENS"); ok {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_CONTEXT_MAX_TOKENS: %w", err)
+		}
+		cfg.ContextMaxTokens = limit
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -210,6 +232,12 @@ func (c Config) Validate() error {
 	}
 	if c.OrchestratorTimeout < 0 || c.OrchestratorTimeout > maximumOrchestratorExecutionTimeout {
 		return fmt.Errorf("BOAIRD_ORCHESTRATOR_TIMEOUT must be positive and at most %s", maximumOrchestratorExecutionTimeout)
+	}
+	if c.ContextMaxBytes < 512 || c.ContextMaxBytes > maximumContextMaxBytes {
+		return fmt.Errorf("BOAIRD_CONTEXT_MAX_BYTES must be between 512 and %d", maximumContextMaxBytes)
+	}
+	if c.ContextMaxTokens < 128 || c.ContextMaxTokens > maximumContextMaxTokens {
+		return fmt.Errorf("BOAIRD_CONTEXT_MAX_TOKENS must be between 128 and %d", maximumContextMaxTokens)
 	}
 	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
 	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))
