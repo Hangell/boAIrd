@@ -46,6 +46,7 @@ const (
 
 var ErrUnauthorizedAction = errors.New("Brain action is not authorized")
 var ErrHumanApprovalRequired = errors.New("Brain action requires human approval")
+var ErrExternalRuntime = errors.New("Brain uses an external runtime")
 var (
 	ErrNotFound             = errors.New("Brain not found")
 	ErrProjectNotFound      = errors.New("project not found")

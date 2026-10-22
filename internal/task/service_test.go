@@ -94,9 +94,13 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 	if value.Status() != task.StatusBacklog || !value.HumanReview() {
 		t.Fatalf("new task state = %s, human review = %v", value.Status(), value.HumanReview())
 	}
-	value, err = service.Assign(ctx, value.ID(), worker.ID(), "assign to worker", local)
+	observedVersion := value.Version()
+	value, err = service.AssignAtVersion(ctx, value.ID(), worker.ID(), observedVersion, "assign to worker", local)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := service.AssignAtVersion(ctx, value.ID(), worker.ID(), observedVersion, "retry stale assignment", local); !errors.Is(err, task.ErrConflict) {
+		t.Fatalf("stale versioned assignment error = %v, want conflict", err)
 	}
 	reloadedWorker, err := agents.Get(ctx, worker.ID())
 	if err != nil {
@@ -223,7 +227,7 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 		t.Fatalf("worker human review cancellation = %v, want forbidden", err)
 	}
 	var denialReason string
-	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, rejectedTask.ID()).Scan(&denialReason); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC, sequence DESC LIMIT 1`, rejectedTask.ID()).Scan(&denialReason); err != nil {
 		t.Fatal(err)
 	}
 	if denialReason != "human_review_action_requires_administrator" {
@@ -561,6 +565,23 @@ func TestBrainTaskActionsFollowAutonomyAndHumanReviewPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("semi-auto task creation: %v", err)
 	}
+	restrictedBrain, err := agents.Create(ctx, agent.CreateInput{
+		Name: "Restricted Brain", Role: "coordinator", Runtime: agent.RuntimeMCP,
+		Capabilities: []string{"brain.execute", "task.create"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := brainService.Replace(ctx, p.ID(), brain.CreateInput{AgentID: restrictedBrain.ID(), Autonomy: brain.AutonomySemiAuto}, project.LocalAdministratorID, "verify capability boundary"); err != nil {
+		t.Fatal(err)
+	}
+	restrictedActor := task.Actor{Type: task.ActorBrain, ID: restrictedBrain.ID()}
+	if _, err := tasks.AssignAtVersion(ctx, value.ID(), configuredAgent.ID(), value.Version(), "attempt assignment without capability", restrictedActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("Brain assignment without task.assign = %v, want forbidden", err)
+	}
+	if _, err := brainService.Replace(ctx, p.ID(), brain.CreateInput{AgentID: configuredAgent.ID(), Autonomy: brain.AutonomySemiAuto}, project.LocalAdministratorID, "restore test Brain"); err != nil {
+		t.Fatal(err)
+	}
 	for _, status := range []task.Status{task.StatusReady, task.StatusWorking, task.StatusReview} {
 		value, err = tasks.Transition(ctx, value.ID(), status, "advance task", brainActor)
 		if err != nil {
@@ -571,7 +592,7 @@ func TestBrainTaskActionsFollowAutonomyAndHumanReviewPolicy(t *testing.T) {
 		t.Fatalf("semi-auto completion error = %v, want forbidden", err)
 	}
 	var denialReason string
-	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, value.ID()).Scan(&denialReason); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC, sequence DESC LIMIT 1`, value.ID()).Scan(&denialReason); err != nil {
 		t.Fatal(err)
 	}
 	if denialReason != "human_approval_required" {
@@ -607,7 +628,7 @@ func TestBrainTaskActionsFollowAutonomyAndHumanReviewPolicy(t *testing.T) {
 	if _, err := tasks.Transition(ctx, reviewTask.ID(), task.StatusWorking, "attempt human rejection", brainActor); !errors.Is(err, task.ErrForbidden) {
 		t.Fatalf("Brain human review rejection = %v, want forbidden", err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, reviewTask.ID()).Scan(&denialReason); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC, sequence DESC LIMIT 1`, reviewTask.ID()).Scan(&denialReason); err != nil {
 		t.Fatal(err)
 	}
 	if denialReason != "human_review_action_requires_administrator" {
@@ -616,7 +637,7 @@ func TestBrainTaskActionsFollowAutonomyAndHumanReviewPolicy(t *testing.T) {
 	if _, err := tasks.Transition(ctx, reviewTask.ID(), task.StatusCancelled, "attempt human review cancellation", brainActor); !errors.Is(err, task.ErrForbidden) {
 		t.Fatalf("Brain human review cancellation = %v, want forbidden", err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, reviewTask.ID()).Scan(&denialReason); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC, sequence DESC LIMIT 1`, reviewTask.ID()).Scan(&denialReason); err != nil {
 		t.Fatal(err)
 	}
 	if denialReason != "human_review_action_requires_administrator" {

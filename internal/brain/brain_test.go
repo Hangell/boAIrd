@@ -123,3 +123,34 @@ func TestAutonomyModesGateDecisionsWithoutGrantingCapabilities(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPBrainKeepsExplicitCapabilitiesAndCannotEscalateAuthority(t *testing.T) {
+	a, err := agent.NewConfigured("mcp-brain", agent.Configuration{
+		Name: "External Brain", Role: "administrator", Runtime: agent.RuntimeMCP,
+		Capabilities: []string{"brain.execute"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := New("brain-1", "p1", a.ID(), AutonomyAutonomous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AuthorizeAction(ActionPlan, projectForBrainTest(t, "brain-1", false), a); err != nil {
+		t.Fatalf("MCP Brain planning denied: %v", err)
+	}
+	for _, action := range []Action{ActionReplaceBrain, ActionGrantCapability, ActionAccessCredential, ActionBypassHumanReview} {
+		if err := b.AuthorizeAction(action, projectForBrainTest(t, "brain-1", false), a); !errors.Is(err, ErrUnauthorizedAction) {
+			t.Errorf("MCP Brain action %s error = %v, want ErrUnauthorizedAction", action, err)
+		}
+	}
+}
+
+func projectForBrainTest(t *testing.T, brainID string, humanReview bool) project.Project {
+	t.Helper()
+	value, err := project.Restore(project.Snapshot{ID: "p1", Name: "Project", Status: project.StatusConfiguring, BrainID: brainID, HumanReviewRequired: humanReview})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
+}

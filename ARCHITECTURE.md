@@ -587,7 +587,11 @@ External Agent
 
 # 18. External Brain
 
-The Brain may itself be an external MCP-connected agent.
+The Brain may itself be an external MCP-connected Agent. An administrator
+attaches a registered MCP Agent with `brain.execute` as the project's one active
+Brain. The MCP token authenticates that exact Agent; the relationship grants
+project scope, while every tool still checks its own capability and domain
+policy.
 
 Example:
 
@@ -610,6 +614,12 @@ boAIrd remains responsible for:
 - task state;
 - audit;
 - tool authorization.
+
+An MCP Brain uses the authenticated MCP tools directly. The local provider-run
+endpoint is available only to API-backed Brains and returns a conflict for an
+MCP Brain; it never attempts provider execution without provider configuration.
+External execution does not grant administrator authority or bypass Human
+Review.
 
 ---
 
@@ -1709,10 +1719,14 @@ the first database startup with a 90-day expiry. Idle MCP sessions expire after
 
 Each tool checks explicit capabilities and project scope, with task assignment
 providing scope only for that exact assigned task. The MCP adapter calls
-existing project, task, conversation, Brain, and run services. Claim means
-starting work on a task already assigned by an authorized administrator or
-Brain; an MCP Agent cannot assign a task to itself. Agent completion requires
-`task.complete` and the existing task workflow and Human Review policy.
+existing project, task, conversation, Brain, and run services. Workers may
+claim eligible READY tasks through the versioned self-claim operation. An
+active MCP Brain instead assigns tasks through `boaird.task.assign`, which
+requires the observed task version and records the authenticated Brain as the
+actor. Brain task mutations enter the task service as `ActorBrain`, so
+capabilities, autonomy, workflow, and Human Review checks apply just as they do
+to other Brain execution paths. Agent completion requires `task.complete` and
+the existing task workflow and Human Review policy.
 
 Agent project scope is stored in the `agent_projects` relation and loaded with
 the Agent record. The authenticated local administrator manages it through
@@ -1722,6 +1736,12 @@ descriptive. An assigned task grants only task-specific access after the
 assignment check and never adds general project scope. A Brain receives scope
 only for the project whose active Brain relation names that Agent. MCP scope
 denials are written to the immutable authorization denial log.
+
+Conversation reads preserve that boundary: Workers use the exact-assignment
+reader, while the active Brain uses a separate reader that verifies the
+Brain-to-project relation against the task's project. Brain conversation writes
+require `task.read` and `conversation.write` in that project and are persisted
+with `SenderBrain`; Workers remain assignment-bound and persist as `SenderAgent`.
 
 ---
 

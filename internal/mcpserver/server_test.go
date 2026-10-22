@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/brain"
@@ -32,14 +33,21 @@ func (s agentStub) Get(_ context.Context, id string) (agent.Agent, error) {
 }
 func (s agentStub) List(context.Context, int, int) ([]agent.Agent, error) { return nil, nil }
 
-type projectStub struct{}
+type projectStub struct{ values map[string]project.Project }
 
-func (projectStub) Get(context.Context, string) (project.Project, error) {
-	return project.Project{}, project.ErrNotFound
+func (s projectStub) Get(_ context.Context, id string) (project.Project, error) {
+	value, ok := s.values[id]
+	if !ok {
+		return project.Project{}, project.ErrNotFound
+	}
+	return value, nil
 }
 func (projectStub) List(context.Context, int, int) ([]project.Project, error) { return nil, nil }
 
-type taskStub struct{ values map[string]task.Task }
+type taskStub struct {
+	values       map[string]task.Task
+	actorRecords map[string]task.Actor
+}
 
 func (s taskStub) Get(_ context.Context, id string) (task.Task, error) {
 	value, ok := s.values[id]
@@ -63,6 +71,33 @@ func (s taskStub) List(_ context.Context, projectID string, status task.Status, 
 		values = values[:limit]
 	}
 	return values, nil
+}
+func (s taskStub) AssignAtVersion(_ context.Context, id, agentID string, expectedVersion int64, reason string, actor task.Actor) (task.Task, error) {
+	value, ok := s.values[id]
+	if !ok {
+		return task.Task{}, task.ErrNotFound
+	}
+	if value.Version() != expectedVersion {
+		return task.Task{}, task.ErrConflict
+	}
+	var err error
+	value, err = value.Assign(agentID)
+	if err != nil {
+		return task.Task{}, err
+	}
+	value, err = value.RecordMutation(actor, reason)
+	if err != nil {
+		return task.Task{}, err
+	}
+	value, err = value.AdvanceVersion()
+	if err != nil {
+		return task.Task{}, err
+	}
+	s.values[id] = value
+	if s.actorRecords != nil {
+		s.actorRecords[id] = actor
+	}
+	return value, nil
 }
 func (s taskStub) Claim(_ context.Context, id, agentID string, expectedVersion int64, reason string, actor task.Actor) (task.Task, error) {
 	value, ok := s.values[id]
@@ -94,7 +129,7 @@ func (s taskStub) Claim(_ context.Context, id, agentID string, expectedVersion i
 	s.values[id] = value
 	return value, nil
 }
-func (s taskStub) Transition(_ context.Context, id string, to task.Status, _ string, _ task.Actor) (task.Task, error) {
+func (s taskStub) Transition(_ context.Context, id string, to task.Status, reason string, actor task.Actor) (task.Task, error) {
 	value, ok := s.values[id]
 	if !ok {
 		return task.Task{}, task.ErrNotFound
@@ -103,17 +138,42 @@ func (s taskStub) Transition(_ context.Context, id string, to task.Status, _ str
 	if err != nil {
 		return task.Task{}, err
 	}
+	next, err = next.RecordMutation(actor, reason)
+	if err != nil {
+		return task.Task{}, err
+	}
 	s.values[id] = next
+	if s.actorRecords != nil {
+		s.actorRecords[id] = actor
+	}
 	return next, nil
 }
 
-type conversationStub struct{}
-
-func (conversationStub) GetPageForAgent(context.Context, string, string, string, int) (conversation.Conversation, []conversation.Message, string, error) {
-	return conversation.Conversation{}, nil, "", nil
+type conversationStub struct {
+	brainReads *[]string
+	agentReads *[]string
+	senders    *[]conversation.SenderType
 }
-func (conversationStub) Append(context.Context, string, conversation.SenderType, string, conversation.MessageInput) (conversation.Message, error) {
-	return conversation.Message{}, nil
+
+func (s conversationStub) GetPageForAgent(_ context.Context, taskID, _ string, _ string, _ int) (conversation.Conversation, []conversation.Message, string, error) {
+	if s.agentReads != nil {
+		*s.agentReads = append(*s.agentReads, taskID)
+	}
+	value, _ := conversation.New("conversation-"+taskID, "project-one", taskID)
+	return value, nil, "", nil
+}
+func (s conversationStub) GetPageForBrain(_ context.Context, taskID, _ string, _ string, _ int) (conversation.Conversation, []conversation.Message, string, error) {
+	if s.brainReads != nil {
+		*s.brainReads = append(*s.brainReads, taskID)
+	}
+	value, _ := conversation.New("conversation-"+taskID, "project-one", taskID)
+	return value, nil, "", nil
+}
+func (s conversationStub) Append(_ context.Context, taskID string, senderType conversation.SenderType, senderID string, input conversation.MessageInput) (conversation.Message, error) {
+	if s.senders != nil {
+		*s.senders = append(*s.senders, senderType)
+	}
+	return conversation.NewMessage("message-"+taskID, "conversation-"+taskID, senderType, senderID, input.Content, input.ContentType, time.Now().UTC())
 }
 
 type brainStub struct{ values map[string]brain.Brain }
@@ -210,7 +270,7 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Services{Agents: agentStub{map[string]agent.Agent{first.ID(): first, second.ID(): second}}, Projects: projectStub{}, Tasks: taskStub{map[string]task.Task{"task-a": assigned, "task-b": other, "task-c": claimable, "task-d": outOfScope}}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, staticVerifier{firstToken: first.ID(), secondToken: second.ID()})
+	server, err := New(Services{Agents: agentStub{map[string]agent.Agent{first.ID(): first, second.ID(): second}}, Projects: projectStub{}, Tasks: taskStub{values: map[string]task.Task{"task-a": assigned, "task-b": other, "task-c": claimable, "task-d": outOfScope}}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}}, staticVerifier{firstToken: first.ID(), secondToken: second.ID()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +292,7 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	wantTools := []string{"boaird.project.get", "boaird.agent.list", "boaird.agent.get", "boaird.agent.status", "boaird.agent.heartbeat", "boaird.task.list", "boaird.task.get", "boaird.task.claim", "boaird.task.update", "boaird.task.complete", "boaird.task.fail", "boaird.conversation.read", "boaird.conversation.send", "boaird.context.get", "boaird.brain.request", "boaird.run.get"}
+	wantTools := []string{"boaird.project.get", "boaird.agent.list", "boaird.agent.get", "boaird.agent.status", "boaird.agent.heartbeat", "boaird.task.list", "boaird.task.get", "boaird.task.assign", "boaird.task.claim", "boaird.task.update", "boaird.task.complete", "boaird.task.fail", "boaird.conversation.read", "boaird.conversation.send", "boaird.context.get", "boaird.brain.request", "boaird.run.get"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("tool count = %d, want %d", len(result.Tools), len(wantTools))
 	}
@@ -284,6 +344,162 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	current = secondToken
 	if _, err := session.ListTools(context.Background(), nil); err == nil || !strings.Contains(strings.ToLower(err.Error()), "forbidden") {
 		t.Fatalf("session accepted a different Agent token: %v", err)
+	}
+}
+
+func TestAuthenticatedMCPBrainUsesBrainTaskPolicyActor(t *testing.T) {
+	capabilities := []string{"agent.read", "task.read", "task.assign", "task.review", "task.complete", "task.transition", "conversation.read", "conversation.write", "brain.execute"}
+	brainAgent, err := testAgentWithCapabilities(t, "brain-agent", capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := testAgentWithCapabilities(t, "worker-agent", []string{"agent.read", "task.read", "conversation.read", "conversation.write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err = worker.AddProject("project-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherWorker, err := testAgentWithCapabilities(t, "other-worker", []string{"agent.read", "task.read", "conversation.read", "conversation.write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeBrain, err := brain.New("brain-one", "project-one", brainAgent.ID(), brain.AutonomySemiAuto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyTask, err := task.New("task-one", "project-one", "Task", "Details", "administrator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyTask, err = readyTask.Transition(task.StatusReady)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegatedTask := newAssignedTask(t, "task-other-project", "project-two", otherWorker.ID())
+	values := map[string]task.Task{readyTask.ID(): readyTask, delegatedTask.ID(): delegatedTask}
+	actorRecords := make(map[string]task.Actor)
+	brainReads := []string{}
+	agentReads := []string{}
+	senders := []conversation.SenderType{}
+	conversationService := conversationStub{brainReads: &brainReads, agentReads: &agentReads, senders: &senders}
+	brainToken := strings.Repeat("01", 32)
+	server, err := New(Services{
+		Agents:        agentStub{values: map[string]agent.Agent{brainAgent.ID(): brainAgent, worker.ID(): worker, otherWorker.ID(): otherWorker}},
+		Projects:      projectStub{},
+		Tasks:         taskStub{values: values, actorRecords: actorRecords},
+		Conversations: conversationService,
+		Brains:        brainStub{values: map[string]brain.Brain{"project-one": activeBrain}},
+		Runs:          runStub{},
+	}, staticVerifier{brainToken: brainAgent.ID(), "worker-token": worker.ID()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "brain-test", Version: "1"}, nil)
+	httpClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return brainToken }, base: http.DefaultTransport}}
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL, HTTPClient: httpClient, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	}()
+	assigned, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.assign", Arguments: map[string]any{
+		"task_id": readyTask.ID(), "agent_id": worker.ID(), "expected_version": float64(readyTask.Version()), "reason": "delegate task",
+	}})
+	if err != nil || assigned.IsError {
+		t.Fatalf("Brain task.assign result = %+v, error %v", assigned, err)
+	}
+	if actor := actorRecords[readyTask.ID()]; actor.Type != task.ActorBrain || actor.ID != brainAgent.ID() {
+		t.Fatalf("assignment actor = %+v, want authenticated active Brain", actorRecords[readyTask.ID()])
+	}
+	contextResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.context.get", Arguments: map[string]any{"task_id": readyTask.ID()}})
+	if err != nil || contextResult.IsError {
+		t.Fatalf("Brain context.get for delegated task = %+v, error %v", contextResult, err)
+	}
+	if len(brainReads) != 1 || brainReads[0] != readyTask.ID() || len(agentReads) != 0 {
+		t.Fatalf("context.get conversation reads: Brain=%v Agent=%v", brainReads, agentReads)
+	}
+	readResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.conversation.read", Arguments: map[string]any{"task_id": readyTask.ID()}})
+	if err != nil || readResult.IsError {
+		t.Fatalf("Brain conversation.read for delegated task = %+v, error %v", readResult, err)
+	}
+	if len(brainReads) != 2 || brainReads[1] != readyTask.ID() {
+		t.Fatalf("Brain conversation read path = %v, want delegated task", brainReads)
+	}
+	sendResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.conversation.send", Arguments: map[string]any{"task_id": readyTask.ID(), "content": "Brain review note"}})
+	if err != nil || sendResult.IsError {
+		t.Fatalf("Brain conversation.send for delegated task = %+v, error %v", sendResult, err)
+	}
+	if len(senders) != 1 || senders[0] != conversation.SenderBrain {
+		t.Fatalf("persisted sender types = %v, want BRAIN", senders)
+	}
+	for _, name := range []string{"boaird.context.get", "boaird.conversation.read", "boaird.conversation.send"} {
+		crossProject, callErr := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{"task_id": delegatedTask.ID(), "content": "must be denied"}})
+		if callErr != nil || crossProject == nil || !crossProject.IsError {
+			t.Fatalf("Brain %s cross-project result = %+v, error %v; want denial", name, crossProject, callErr)
+		}
+	}
+	workerClient := mcp.NewClient(&mcp.Implementation{Name: "worker-test", Version: "1"}, nil)
+	workerHTTPClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return "worker-token" }, base: http.DefaultTransport}}
+	workerSession, err := workerClient.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL, HTTPClient: workerHTTPClient, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatalf("Worker Connect() error = %v", err)
+	}
+	defer func() {
+		if err := workerSession.Close(); err != nil {
+			t.Errorf("close Worker session: %v", err)
+		}
+	}()
+	workerContext, err := workerSession.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.context.get", Arguments: map[string]any{"task_id": readyTask.ID()}})
+	if err != nil || workerContext.IsError {
+		t.Fatalf("assigned Worker context.get = %+v, error %v", workerContext, err)
+	}
+	workerRead, err := workerSession.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.conversation.read", Arguments: map[string]any{"task_id": readyTask.ID()}})
+	if err != nil || workerRead.IsError {
+		t.Fatalf("assigned Worker conversation.read = %+v, error %v", workerRead, err)
+	}
+	workerSend, err := workerSession.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.conversation.send", Arguments: map[string]any{"task_id": readyTask.ID(), "content": "Worker update"}})
+	if err != nil || workerSend.IsError {
+		t.Fatalf("assigned Worker conversation.send = %+v, error %v", workerSend, err)
+	}
+	if len(agentReads) != 2 || agentReads[0] != readyTask.ID() || agentReads[1] != readyTask.ID() {
+		t.Fatalf("Worker conversation reads = %v, want exact assigned task twice", agentReads)
+	}
+	if len(senders) != 2 || senders[1] != conversation.SenderAgent {
+		t.Fatalf("persisted sender types = %v, want BRAIN then AGENT", senders)
+	}
+	for _, name := range []string{"boaird.context.get", "boaird.conversation.read", "boaird.conversation.send"} {
+		workerDenied, callErr := workerSession.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{"task_id": delegatedTask.ID(), "content": "must be denied"}})
+		if callErr != nil || workerDenied == nil || !workerDenied.IsError {
+			t.Fatalf("Worker %s for unassigned task result = %+v, error %v; want denial", name, workerDenied, callErr)
+		}
+	}
+	stale, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.assign", Arguments: map[string]any{
+		"task_id": readyTask.ID(), "agent_id": brainAgent.ID(), "expected_version": float64(readyTask.Version()), "reason": "stale retry",
+	}})
+	if err != nil || stale == nil || !stale.IsError {
+		t.Fatalf("stale assignment retry result = %+v, error %v; want conflict", stale, err)
+	}
+	claim, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.claim", Arguments: map[string]any{
+		"task_id": readyTask.ID(), "reason": "Brain must delegate instead of claiming as worker",
+	}})
+	if err != nil || claim == nil || !claim.IsError {
+		t.Fatalf("Brain task.claim result = %+v, error %v; want denial", claim, err)
+	}
+	updated, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.task.update", Arguments: map[string]any{
+		"task_id": readyTask.ID(), "status": string(task.StatusWorking), "reason": "start delegated task",
+	}})
+	if err != nil || updated.IsError {
+		t.Fatalf("Brain task.update result = %+v, error %v", updated, err)
+	}
+	if actor := actorRecords[readyTask.ID()]; actor.Type != task.ActorBrain || actor.ID != brainAgent.ID() {
+		t.Fatalf("transition actor = %+v, want authenticated active Brain", actorRecords[readyTask.ID()])
 	}
 }
 

@@ -446,12 +446,12 @@ Each response must also have a persisted Run.
 
 ## Current implementation
 
-- Projects can attach one active Brain to an API agent with the explicit `brain.execute` capability.
+- Projects can attach one active Brain to an API or MCP agent with the explicit `brain.execute` capability.
 - Active Brain configuration can be replaced only with an authenticated administrator session and a required reason; the replacement is recorded as an immutable audit event.
-- The Brain can request a provider response through the configured provider adapter and credential reference.
+- An API Brain can request a provider response through its configured provider adapter and credential reference; an MCP Brain uses authenticated, capability-checked MCP tools.
 - Each execution persists its project, agent, provider, model, objective, status, and response in `runs`.
 - The current runtime returns a proposed plan as text. It does not apply task mutations or grant capabilities.
-- SQLite prevents an active Brain agent from switching away from the API runtime and requires a configured active Brain before a project enters READY or RUNNING.
+- SQLite permits active Brains only on the API or MCP runtime and requires a configured active Brain before a project enters READY or RUNNING.
 
 ## API
 
@@ -1142,7 +1142,7 @@ complete task
 
 - `/mcp` uses authenticated Streamable HTTP and checks expiring persisted token verifiers on every request.
 - The authenticated token determines Agent identity; stateful MCP sessions reject requests authenticated as a different Agent.
-- Tools use explicit capabilities and project scope. MCP Agents may atomically self-assign an unassigned READY task only with persisted project membership and both `task.assign` and `task.transition`; version checks reject competing claims.
+- Tools use explicit capabilities and project scope. MCP Workers may atomically self-assign an unassigned READY task only with persisted project membership and both `task.assign` and `task.transition`; version checks reject competing claims. The authenticated active MCP Brain delegates through `boaird.task.assign` with `expected_version`, and task mutations enter the task service as `ActorBrain` so autonomy, workflow, and Human Review policy remain enforced.
 - Agent project memberships are stored in `agent_projects` and managed by the authenticated administrator at `PUT`/`DELETE /api/v1/projects/{projectID}/agents/{agentID}`. The Agent response exposes read-only `project_ids`; changes are written to immutable audit history.
 - Project reads, Brain Runs, and other project-wide MCP operations require explicit membership. Assignment does not add project scope; active Brain scope is derived from the Brain-project relation. MCP scope denials are recorded.
 - Task transitions, Human Review checks, conversation access, and Brain autonomy rules remain enforced by domain services.
@@ -1275,6 +1275,11 @@ BrainRuntime
 ```
 
 regardless of where it runs.
+
+The first external implementation is an authenticated MCP Agent configured as
+the project's active Brain. MCP tools remain the execution contract and enforce
+the Agent's explicit capabilities and project policies. Provider-run endpoints
+remain API-runtime-only and reject MCP Brains without creating a provider run.
 
 ---
 

@@ -11,8 +11,9 @@ import (
 )
 
 type brainRouteStub struct {
-	actorID string
-	reason  string
+	actorID    string
+	reason     string
+	executeErr error
 }
 
 func (s *brainRouteStub) Create(context.Context, string, brain.CreateInput) (brain.Brain, error) {
@@ -24,7 +25,19 @@ func (s *brainRouteStub) Get(context.Context, string) (brain.Brain, error) {
 }
 
 func (s *brainRouteStub) Execute(context.Context, string, string, int) (brain.Execution, error) {
-	return brain.Execution{}, nil
+	return brain.Execution{}, s.executeErr
+}
+
+func TestExternalBrainRunEndpointReturnsConflict(t *testing.T) {
+	manager := &brainRouteStub{executeErr: brain.ErrExternalRuntime}
+	mux := http.NewServeMux()
+	registerBrainRoutes(mux, manager, testConversationToken(t), newLocalSessionStore())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/project-1/brain/runs", strings.NewReader(`{"objective":"plan"}`))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"external_runtime"`) {
+		t.Fatalf("external Brain run status = %d, body = %s", response.Code, response.Body.String())
+	}
 }
 
 func (s *brainRouteStub) Replace(_ context.Context, _ string, input brain.CreateInput, actorID, reason string) (brain.Brain, error) {

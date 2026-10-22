@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/brain"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/project"
 	"boAIrd/internal/storage"
@@ -49,6 +50,17 @@ func TestConversationPersistsStructuredMessagesWithScopedActorsAndRedaction(t *t
 
 	taskRepository, _ := storage.NewTaskRepository(database)
 	brainRepository, _ := storage.NewBrainRepository(database)
+	brainAgent, err := agents.Create(ctx, agent.CreateInput{Name: "Brain", Role: "brain", Runtime: agent.RuntimeMCP, Capabilities: []string{"brain.execute"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeBrain, err := brain.New("brain-one", p.ID(), brainAgent.ID(), brain.AutonomyManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := brainRepository.Create(ctx, activeBrain); err != nil {
+		t.Fatal(err)
+	}
 	tasks, err := task.NewService(taskRepository, projects, agents, brainRepository)
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +147,53 @@ func TestConversationPersistsStructuredMessagesWithScopedActorsAndRedaction(t *t
 	}
 	if _, _, _, err := service.GetPageForAgent(ctx, work.ID(), "another-agent", "", 10); !errors.Is(err, conversation.ErrForbidden) {
 		t.Fatalf("unassigned agent read error = %v, want forbidden", err)
+	}
+	if _, _, _, err := service.GetPageForAgent(ctx, work.ID(), brainAgent.ID(), "", 10); !errors.Is(err, conversation.ErrForbidden) {
+		t.Fatalf("active Brain used Worker assignment read path = %v, want forbidden", err)
+	}
+	brainMessage, err := service.Append(ctx, work.ID(), conversation.SenderBrain, brainAgent.ID(), conversation.MessageInput{Content: "review delegated work", ContentType: "text/plain"})
+	if err != nil {
+		t.Fatalf("active Brain append = %v", err)
+	}
+	brainConversation, brainMessages, _, err := service.GetPageForBrain(ctx, work.ID(), brainAgent.ID(), "", 10)
+	if err != nil || brainConversation.TaskID() != work.ID() {
+		t.Fatalf("active Brain read = conversation %q messages %d error %v", brainConversation.TaskID(), len(brainMessages), err)
+	}
+	foundBrainMessage := false
+	for _, value := range brainMessages {
+		if value.ID() == brainMessage.ID() && value.SenderType() == conversation.SenderBrain && value.SenderID() == brainAgent.ID() {
+			foundBrainMessage = true
+		}
+	}
+	if !foundBrainMessage {
+		t.Fatalf("Brain-authored message missing or identity changed: %+v", brainMessages)
+	}
+	otherProject, err := projects.Create(ctx, project.CreateInput{Name: "Other conversation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherAdministrator := task.Actor{Type: task.ActorAdministrator, ID: project.LocalAdministratorID, Capabilities: []string{"task.create", "task.assign"}, ProjectIDs: []string{otherProject.ID()}}
+	otherTask, err := tasks.Create(ctx, otherProject.ID(), task.CreateInput{Title: "Other task", Reason: "requested"}, otherAdministrator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTask, err = tasks.Assign(ctx, otherTask.ID(), worker.ID(), "assign worker", otherAdministrator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherBrain, err := agents.Create(ctx, agent.CreateInput{Name: "Other Brain", Role: "brain", Runtime: agent.RuntimeMCP, Capabilities: []string{"brain.execute"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherActiveBrain, err := brain.New("brain-two", otherProject.ID(), otherBrain.ID(), brain.AutonomyManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := brainRepository.Create(ctx, otherActiveBrain); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := service.GetPageForBrain(ctx, otherTask.ID(), brainAgent.ID(), "", 10); !errors.Is(err, conversation.ErrForbidden) {
+		t.Fatalf("Brain from another project read conversation = %v, want forbidden", err)
 	}
 	if _, _, _, err := service.GetPage(ctx, work.ID(), project.LocalAdministratorID, "missing-cursor", 10); !errors.Is(err, conversation.ErrInvalidCursor) {
 		t.Fatalf("invalid cursor error = %v, want invalid cursor", err)
