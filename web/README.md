@@ -32,4 +32,6 @@ The Agents route lists agents and provides create/detail configuration forms usi
 
 The Brain route selects a project and shows the active Brain agent status, autonomy mode, recent Brain Run proposals, and tasks blocked or waiting for human review. Replacing an active Brain requires the local administrator bearer token and a reason. The dashboard sends the token only with that request and does not persist it.
 
+The Kanban board groups tasks into the statuses defined by the API, submits each move with an audit reason, and reloads state from the server after a successful transition. Task details show audit history, text messages, linked runs, and the human review requirement.
+
 Template strings use Angular `i18n` markers and TypeScript strings use `$localize` IDs. English is the source locale. The shell provides semantic landmarks, a keyboard skip link, visible focus indicators, and reduced-motion styling.

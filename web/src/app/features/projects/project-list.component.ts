@@ -1,9 +1,9 @@
 import { AsyncPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { catchError, EMPTY, expand, map, Observable, reduce, startWith, Subject, switchMap } from 'rxjs';
+import { catchError, map, Observable, startWith, Subject, switchMap } from 'rxjs';
 import { ApiClient } from '../../core/api/api-client';
-import { ApiPage, ProjectSummary } from '../../core/api/api-models';
+import { ProjectSummary } from '../../core/api/api-models';
 
 type ProjectListState =
   | { kind: 'loading' }
@@ -92,13 +92,6 @@ export class ProjectListComponent {
   }
 
   private listAllProjects(): Observable<ProjectSummary[]> {
-    const firstPage = (offset: number): Observable<ApiPage<ProjectSummary>> =>
-      this.api.get<ApiPage<ProjectSummary>>(`projects?limit=100&offset=${offset}`);
-
-    return firstPage(0).pipe(
-      expand((page) => page.items.length === 100 ? firstPage(page.offset + page.limit) : EMPTY),
-      map((page) => page.items),
-      reduce((projects, items) => projects.concat(items), [] as ProjectSummary[]),
-    );
+    return this.api.getAllPages<ProjectSummary>('projects');
   }
 }

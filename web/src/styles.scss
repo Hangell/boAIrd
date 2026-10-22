@@ -19,7 +19,6 @@ html {
   @include mat.core-theme($boaird-theme);
   @include mat.button-theme($boaird-theme);
   @include mat.card-theme($boaird-theme);
-  @include mat.list-theme($boaird-theme);
   @include mat.sidenav-theme($boaird-theme);
   @include mat.toolbar-theme($boaird-theme);
   color-scheme: light;

@@ -8,13 +8,11 @@
     </a>
 
     <nav aria-label="Main menu" i18n-aria-label="@@a11y.mainMenu">
-      <mat-nav-list>
+      <ul class="navigation-list">
         @for (item of navigation; track item.path) {
-          <a mat-list-item [routerLink]="item.path" routerLinkActive="navigation-link-active" [routerLinkActiveOptions]="{ exact: true }">
-            {{ item.label }}
-          </a>
+          <li><a class="navigation-link" [routerLink]="item.path" routerLinkActive="navigation-link-active" [routerLinkActiveOptions]="{ exact: true }">{{ item.label }}</a></li>
         }
-      </mat-nav-list>
+      </ul>
     </nav>
 
     <div class="navigation-footer">

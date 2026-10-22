@@ -32,7 +32,7 @@ export const routes: Routes = [
   },
   {
     path: 'tasks',
-    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
+    loadComponent: () => import('./features/tasks/task-board.component').then((module) => module.TaskBoardComponent),
     title: $localize`:@@page.tasks.title:Kanban`,
     data: {
       title: $localize`:@@page.tasks.heading:Task board`,
