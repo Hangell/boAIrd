@@ -2355,6 +2355,8 @@ boaird/
 ├── data/
 │
 ├── docs/
+│   ├── adr/
+│   ├── measurements/
 │   ├── architecture/
 │   ├── mcp/
 │   ├── providers/

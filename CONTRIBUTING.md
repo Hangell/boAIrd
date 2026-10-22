@@ -1797,6 +1797,12 @@ how it interacts with existing components
 what alternatives were considered
 ```
 
+Decisions that are expensive to reverse — a new runtime, a new datastore, a new
+process boundary, a new protocol — are recorded as ADRs under
+[`docs/adr/`](docs/adr/). Evidence an ADR relies on (benchmarks, load
+measurements, incident data) lives under
+[`docs/measurements/`](docs/measurements/), not in commit messages or chat logs.
+
 ---
 
 # Comments

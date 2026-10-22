@@ -1638,9 +1638,37 @@ Repositories should prevent a strong dependency on the database from the start.
 
 # Phase 37 — Distributed Workers
 
-Only when truly necessary.
+Only when truly necessary, and only after a maintainer-approved decision.
 
-Possible technologies:
+This phase is a **decision gate**, recorded in
+[ADR 0001](docs/adr/0001-gate-distributed-workers.md). The gate stays closed
+while the single-process design (Go core, one SQLite writer, pull-based MCP
+claims) carries the target workload.
+
+It opens only when measured evidence shows at least one of:
+
+```text
+sustained task-state writes > 25/s for 10 minutes, or write p95 > 250 ms
+board list reads > 30/s with p95 > 500 ms
+an availability target a process restart cannot meet
+execution on hosts that cannot share one authoritative board
+delivery guarantees the pull model cannot express
+```
+
+When the gate trips, the response order is fixed: measure again, optimize the
+single node, Phase 36 (PostgreSQL), and only then consider a broker.
+
+Until approval:
+
+```text
+no broker
+no queue service
+no distributed worker runtime
+```
+
+Baseline evidence: [in-process measurements](docs/measurements/2026-10-22-in-process-baseline.md).
+
+Possible technologies, if the gate ever opens:
 
 ```text
 NATS
@@ -1649,7 +1677,7 @@ Redis Streams
 RabbitMQ
 ```
 
-Do not implement this until there is a real need.
+Do not implement this until the gate opens and the ADR is approved.
 
 ---
 
