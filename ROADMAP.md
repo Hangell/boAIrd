@@ -707,6 +707,15 @@ Brain
 Administrator Notification
 ```
 
+## Current implementation
+
+- `internal/orchestrator` schedules only READY tasks that already have an assigned API Agent with `task.transition`. Every claim and transition goes through `task.Service` using the configured project Brain actor, so capabilities, autonomy, and Human Review are enforced rather than reimplemented. Dispatch and review first verify the Brain through `Brain.AuthorizeAction`: without `brain.execute` no provider call is made; a missing task grant skips the task instead of bypassing policy. Worker attempts are persisted as worker-kind Runs, so Brain failure-analysis Runs linked to the same task do not consume the attempt budget.
+- External Agents are skipped because they claim work through authenticated MCP tools; the orchestrator does not push work to them.
+- Each attempt creates a linked Run (`task_id`, `agent_id`, `runtime`, `provider`, `model`, input, output, and terminal status). Successful work moves to REVIEW as the assigned Agent.
+- A failed or cancelled attempt is recorded as BLOCKED. The Brain analyzes the failure through `AnalyzeTaskFailure` (a Run linked to the same task), records retry instructions in the task conversation, and schedules a retry. Attempts are bounded by `BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS`; when exhausted, the task stays BLOCKED and an `orchestrator.escalated` audit event is written for administrator follow-up.
+- `POST /api/v1/tasks/{id}/review` applies the Brain verdict. APPROVE completes the task only when the Brain autonomy and project Human Review policy allow it; otherwise it moves the task to HUMAN_REVIEW. REWORK records the instructions and executes one more attempt within the same limit.
+- `POST /api/v1/projects/{id}/orchestration/dispatch` returns one bounded outcome per scheduled task. Concurrent claims are detected by task versions, so a task cannot be executed twice.
+
 ---
 
 # Phase 11 — Angular Bootstrap

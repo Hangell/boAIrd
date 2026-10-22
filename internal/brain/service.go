@@ -158,6 +158,19 @@ func (s *Service) Replace(ctx context.Context, projectID string, input CreateInp
 }
 
 func (s *Service) Execute(ctx context.Context, projectID, objective string, maxTokens int) (Execution, error) {
+	return s.execute(ctx, projectID, "", objective, maxTokens)
+}
+
+// AnalyzeTaskFailure runs the Brain and links the resulting Run to the failed task.
+func (s *Service) AnalyzeTaskFailure(ctx context.Context, projectID, taskID, objective string, maxTokens int) (Execution, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return Execution{}, fmt.Errorf("%w: task ID is required", ErrInvalidInput)
+	}
+	return s.execute(ctx, projectID, taskID, objective, maxTokens)
+}
+
+func (s *Service) execute(ctx context.Context, projectID, taskID, objective string, maxTokens int) (Execution, error) {
 	objective = strings.TrimSpace(objective)
 	if objective == "" || len(objective) > 16<<10 {
 		return Execution{}, fmt.Errorf("%w: objective must contain 1 to 16384 bytes", ErrInvalidInput)
@@ -207,6 +220,9 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 	}
 	input := "System message:\n" + system + "\nUser message:\n" + objective
 	value, err := run.NewBrainRun(id, projectID, a.ID())
+	if taskID != "" {
+		value, err = run.NewBrainAnalysisRun(id, projectID, taskID, a.ID())
+	}
 	if err != nil {
 		return Execution{}, err
 	}

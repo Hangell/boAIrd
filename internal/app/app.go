@@ -16,9 +16,11 @@ import (
 	"boAIrd/internal/heartbeat"
 	"boAIrd/internal/mcpserver"
 	"boAIrd/internal/mcptoken"
+	"boAIrd/internal/orchestrator"
 	"boAIrd/internal/project"
 	"boAIrd/internal/provider"
 	"boAIrd/internal/run"
+	"boAIrd/internal/runtime"
 	"boAIrd/internal/storage"
 	"boAIrd/internal/task"
 )
@@ -145,7 +147,24 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	}
 	logger.Info("MCP endpoint initialized", "path", "/mcp")
 	go reconcileAgentStatus(ctx, heartbeatService, cfg.AgentStatusInterval, logger)
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithMCPTokenManagement(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, mcp.Handler()), logger); err != nil {
+	executor, err := runtime.NewAPIExecutor(agentManager, credentialManager, endpointPolicy)
+	if err != nil {
+		return fmt.Errorf("initialize API agent executor: %w", err)
+	}
+	auditRepository, err := storage.NewAuditRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize audit repository: %w", err)
+	}
+	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
+		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
+		Brains: brainRepository, Executor: executor, Conversations: conversationService,
+		Escalations: auditRepository, Advisor: brainAdvisor{service: brainService},
+		Config: orchestrator.Config{MaxAttempts: cfg.OrchestratorMaxAttempts, ExecutionTimeout: cfg.OrchestratorTimeout},
+	})
+	if err != nil {
+		return fmt.Errorf("initialize orchestrator: %w", err)
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithOrchestration(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, mcp.Handler()), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil
@@ -169,4 +188,15 @@ func reconcileAgentStatus(ctx context.Context, service *heartbeat.Service, inter
 			}
 		}
 	}
+}
+
+// brainAdvisor lets the configured project Brain analyze worker failures before a retry.
+type brainAdvisor struct{ service *brain.Service }
+
+func (a brainAdvisor) Analyze(ctx context.Context, projectID, taskID, objective string) (string, error) {
+	execution, err := a.service.AnalyzeTaskFailure(ctx, projectID, taskID, objective, 1024)
+	if err != nil {
+		return "", err
+	}
+	return execution.Content, nil
 }
