@@ -147,9 +147,33 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	}
 	logger.Info("MCP endpoint initialized", "path", "/mcp")
 	go reconcileAgentStatus(ctx, heartbeatService, cfg.AgentStatusInterval, logger)
-	executor, err := runtime.NewAPIExecutor(agentManager, credentialManager, endpointPolicy)
+	runtimeRegistry := runtime.NewRegistry()
+	apiExecutor, err := runtime.NewAPIExecutor(agentManager, credentialManager, endpointPolicy)
 	if err != nil {
 		return fmt.Errorf("initialize API agent executor: %w", err)
+	}
+	mcpRuntime, err := runtime.NewMCPRuntime(agentManager)
+	if err != nil {
+		return fmt.Errorf("initialize MCP agent runtime: %w", err)
+	}
+	localRuntime, err := runtime.NewLocalRuntime(agentManager)
+	if err != nil {
+		return fmt.Errorf("initialize local agent runtime: %w", err)
+	}
+	remoteRuntime, err := runtime.NewRemoteRuntime(agentManager)
+	if err != nil {
+		return fmt.Errorf("initialize remote agent runtime: %w", err)
+	}
+	for _, adapter := range []runtime.AgentRuntime{apiExecutor, mcpRuntime, localRuntime, remoteRuntime} {
+		if err := runtimeRegistry.Register(adapter.Runtime(), adapter); err != nil {
+			return fmt.Errorf("register agent runtime: %w", err)
+		}
+	}
+	// The orchestrator owns the per-execution deadline; the enforcer only applies
+	// capability and error-mapping policy here.
+	executor, err := runtime.NewEnforcer(runtimeRegistry, agentManager, 0)
+	if err != nil {
+		return fmt.Errorf("initialize agent runtime enforcer: %w", err)
 	}
 	auditRepository, err := storage.NewAuditRepository(database)
 	if err != nil {
