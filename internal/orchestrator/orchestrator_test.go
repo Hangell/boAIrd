@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/audit"
@@ -99,7 +100,7 @@ func newFixture(t *testing.T, options fixtureOptions) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { database.Close() })
+	t.Cleanup(func() { _ = database.Close() })
 
 	projectRepository, err := storage.NewProjectRepository(database)
 	if err != nil {
@@ -622,13 +623,78 @@ func TestCancellationLeavesTaskRecoverable(t *testing.T) {
 	}
 }
 
+type delayedSuccessExecutor struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (d *delayedSuccessExecutor) Execute(context.Context, runtime.Request) (runtime.Result, error) {
+	close(d.started)
+	<-d.release
+	return runtime.Result{Output: "completed after cleanup timeout"}, nil
+}
+
+func TestSuccessfulExecutionGetsFreshCleanupContext(t *testing.T) {
+	const cleanupTimeout = 500 * time.Millisecond
+	f := newFixture(t, fixtureOptions{maxAttempts: 3})
+	ctx := context.Background()
+	ready := f.readyTask(t, ctx)
+	executor := &delayedSuccessExecutor{started: make(chan struct{}), release: make(chan struct{})}
+	service, err := orchestrator.New(orchestrator.Dependencies{
+		Tasks: f.tasks, Runs: f.runs, Agents: f.agents, Projects: f.projects,
+		Brains: f.brainRepository, Executor: executor,
+		Conversations: f.conversations, Escalations: f.escalations,
+		Config: orchestrator.Config{MaxAttempts: 3, ExecutionTimeout: time.Second, CleanupTimeout: cleanupTimeout},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	var report orchestrator.DispatchReport
+	var dispatchErr error
+	go func() {
+		report, dispatchErr = service.Dispatch(ctx, f.project.ID())
+		close(done)
+	}()
+	select {
+	case <-executor.started:
+	case <-done:
+		t.Fatalf("dispatch returned before worker execution: outcomes=%+v error=%v", report.Outcomes, dispatchErr)
+	}
+	time.Sleep(2 * cleanupTimeout)
+	close(executor.release)
+	<-done
+
+	if dispatchErr != nil {
+		t.Fatalf("dispatch error = %v", dispatchErr)
+	}
+	if len(report.Outcomes) != 1 || report.Outcomes[0].Status != orchestrator.OutcomeSucceeded {
+		t.Fatalf("outcomes = %+v, want one successful execution", report.Outcomes)
+	}
+	values, err := f.runs.List(ctx, f.project.ID(), ready.ID(), "", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].Status() != run.StatusSuccess {
+		t.Fatalf("runs = %+v, want one SUCCESS run", values)
+	}
+	updated, err := f.tasks.Get(ctx, ready.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status() != task.StatusReview {
+		t.Fatalf("task status = %s, want REVIEW", updated.Status())
+	}
+}
+
 func assertTransitions(t *testing.T, database *sql.DB, taskID string, expected [][2]string) {
 	t.Helper()
 	rows, err := database.Query(`SELECT from_status, to_status FROM audit_events WHERE task_id=? AND event_type='task.status.changed' ORDER BY sequence`, taskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var actual [][2]string
 	for rows.Next() {
 		var from, to string

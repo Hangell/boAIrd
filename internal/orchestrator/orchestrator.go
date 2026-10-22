@@ -37,6 +37,7 @@ const (
 	maximumExecutionTimeout = time.Hour
 	defaultAdvisorTimeout   = 45 * time.Second
 	finalizeTimeout         = 15 * time.Second
+	maximumCleanupTimeout   = time.Minute
 	workerMaxTokens         = 2048
 	maximumInputBytes       = 16 << 10
 )
@@ -46,6 +47,7 @@ type Config struct {
 	MaxAttempts         int
 	MaxTasksPerDispatch int
 	ExecutionTimeout    time.Duration
+	CleanupTimeout      time.Duration
 }
 
 // TaskManager is the policy-enforcing task service used for every transition.
@@ -153,6 +155,9 @@ func New(dependencies Dependencies) (*Service, error) {
 	if config.ExecutionTimeout == 0 {
 		config.ExecutionTimeout = defaultExecutionTimeout
 	}
+	if config.CleanupTimeout == 0 {
+		config.CleanupTimeout = finalizeTimeout
+	}
 	if config.MaxAttempts < 1 || config.MaxAttempts > maximumMaxAttempts {
 		return nil, fmt.Errorf("%w: max attempts must be between 1 and %d", ErrInvalidRequest, maximumMaxAttempts)
 	}
@@ -161,6 +166,9 @@ func New(dependencies Dependencies) (*Service, error) {
 	}
 	if config.ExecutionTimeout < 0 || config.ExecutionTimeout > maximumExecutionTimeout {
 		return nil, fmt.Errorf("%w: execution timeout must be positive and at most %s", ErrInvalidRequest, maximumExecutionTimeout)
+	}
+	if config.CleanupTimeout < 0 || config.CleanupTimeout > maximumCleanupTimeout {
+		return nil, fmt.Errorf("%w: cleanup timeout must be positive and at most %s", ErrInvalidRequest, maximumCleanupTimeout)
 	}
 	return &Service{
 		tasks: dependencies.Tasks, runs: dependencies.Runs, agents: dependencies.Agents, projects: dependencies.Projects,
@@ -341,18 +349,21 @@ func (s *Service) execute(ctx context.Context, p project.Project, b brain.Brain,
 	if err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be configured"}, err
 	}
-	persistCtx, cancelPersist := detached(ctx)
-	defer cancelPersist()
+	persistCtx, cancelPersist := s.detached(ctx)
 	if err := s.runs.Create(persistCtx, value); err != nil {
+		cancelPersist()
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be persisted"}, err
 	}
 	value, err = value.Transition(run.StatusRunning)
 	if err != nil {
+		cancelPersist()
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be started"}, err
 	}
 	if err := s.runs.Update(persistCtx, value); err != nil {
+		cancelPersist()
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be started"}, err
 	}
+	cancelPersist()
 
 	execCtx, cancel := context.WithTimeout(ctx, s.config.ExecutionTimeout)
 	defer cancel()
@@ -362,6 +373,8 @@ func (s *Service) execute(ctx context.Context, p project.Project, b brain.Brain,
 	if executionErr != nil {
 		return s.failExecution(ctx, p, b, work, a, value, attempt, executionErr)
 	}
+	persistCtx, cancelPersist = s.detached(ctx)
+	defer cancelPersist()
 	value, err = value.SetOutput(result.Output)
 	if err == nil {
 		value, err = value.Transition(run.StatusSuccess)
@@ -390,7 +403,7 @@ func (s *Service) failExecution(ctx context.Context, p project.Project, b brain.
 	}
 	value, _ = value.SetError(summary)
 	value, _ = value.Transition(status)
-	persistCtx, cancelPersist := detached(ctx)
+	persistCtx, cancelPersist := s.detached(ctx)
 	defer cancelPersist()
 	if err := s.runs.Update(persistCtx, value); err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeEscalated, Reason: summary}, err
@@ -476,8 +489,8 @@ func (s *Service) authorizeBrain(ctx context.Context, b brain.Brain, p project.P
 }
 
 // detached returns a bounded cleanup context that survives request cancellation.
-func detached(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), finalizeTimeout)
+func (s *Service) detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), s.config.CleanupTimeout)
 }
 
 func hasCapability(a agent.Agent, required string) bool {
