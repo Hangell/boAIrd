@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"boAIrd/internal/agent"
 	"boAIrd/internal/api"
 	"boAIrd/internal/config"
 	"boAIrd/internal/credential"
@@ -47,7 +48,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize credential manager: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandler(database, projectManager, credentialManager), logger); err != nil {
+	agentRepository, err := storage.NewAgentRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize agent repository: %w", err)
+	}
+	agentManager, err := agent.NewManager(agentRepository)
+	if err != nil {
+		return fmt.Errorf("initialize agent manager: %w", err)
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithAgents(database, projectManager, credentialManager, agentManager), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

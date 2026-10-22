@@ -2000,6 +2000,8 @@ boaird projects list
 boaird agents list
 ```
 
+The local API supports `POST /api/v1/agents`, `GET /api/v1/agents`, `GET /api/v1/agents/{id}`, and `PATCH /api/v1/agents/{id}`. API-backed agents identify a provider, model, and stored credential by ID; raw provider keys are not part of agent configuration. `role` is descriptive and does not grant capabilities. Agent status is managed by the runtime and is read-only through these endpoints.
+
 ---
 
 # Tasks

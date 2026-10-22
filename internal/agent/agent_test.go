@@ -26,6 +26,32 @@ func TestAgentConstructorAndStatus(t *testing.T) {
 	}
 }
 
+func TestConfiguredAgentRequiresRuntimeAndDoesNotDeriveCapabilitiesFromRole(t *testing.T) {
+	value, err := NewConfigured("a1", Configuration{Name: "Admin Agent", Role: "administrator", Runtime: RuntimeLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(value.Capabilities()) != 0 {
+		t.Fatalf("role granted capabilities: %v", value.Capabilities())
+	}
+	if _, err := NewConfigured("a2", Configuration{Name: "Incomplete API", Role: "worker", Runtime: RuntimeAPI, Provider: "openai", Model: "gpt"}); err == nil {
+		t.Fatal("API agent without credential reference was accepted")
+	}
+	configured, err := NewConfigured("a3", Configuration{
+		Name: "Configured API", Role: "worker", Runtime: RuntimeAPI, Provider: " OpenAI ", Model: " gpt-test ", CredentialID: " cred-1 ",
+		Capabilities: []string{"filesystem.read", "filesystem.read"}, LanguagePreferences: []string{"English", "English"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.Provider() != "openai" || configured.Model() != "gpt-test" || configured.CredentialID() != "cred-1" {
+		t.Fatalf("provider config not normalized: %+v", configured.Snapshot())
+	}
+	if len(configured.Capabilities()) != 1 || len(configured.LanguagePreferences()) != 1 {
+		t.Fatalf("duplicate configuration values were not removed: %+v", configured.Snapshot())
+	}
+}
+
 func TestAddProjectRejectsEmptyAndAvoidsDuplicates(t *testing.T) {
 	a, _ := New("a1", "Worker", "developer")
 	if _, err := a.AddProject(" "); err == nil {

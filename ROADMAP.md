@@ -371,6 +371,8 @@ PATCH /api/v1/agents/:id
 
 It must be possible to create two agents using different providers.
 
+The role is a descriptive label and must not grant capabilities. API runtimes reference a stored credential by ID; an agent record and API response must never contain a raw provider secret. Agent status is runtime-managed and read-only through the configuration API.
+
 Example:
 
 ```text
