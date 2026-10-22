@@ -2116,13 +2116,7 @@ not individuals.
 
 boAIrd is distributed under the MIT License. See [LICENSE](LICENSE) for the full terms.
 
-By submitting a contribution, you confirm that:
-
-1. you created the contribution or have the legal right to submit it;
-2. the contribution does not knowingly violate third-party intellectual property rights;
-3. you agree that your contribution may be distributed under the project's MIT License.
-
-If you are not comfortable with these terms, do not submit the contribution.
+This repository does not specify a separate Contributor License Agreement (CLA) or Developer Certificate of Origin (DCO). If a contribution has licensing restrictions or its compatibility with the MIT License is unclear, raise the question with the maintainers before submitting it.
 
 ---
 
@@ -2130,7 +2124,7 @@ If you are not comfortable with these terms, do not submit the contribution.
 
 Companies may contribute code to boAIrd.
 
-The MIT License permits commercial use, subject to its terms. No separate commercial authorization is required by the project's license.
+The project license is MIT. The project documentation does not add commercial restrictions or require separate commercial authorization.
 
 ---
 
