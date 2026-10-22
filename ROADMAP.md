@@ -1131,13 +1131,13 @@ complete task
 
 ## Current implementation
 
-- `/mcp` uses authenticated Streamable HTTP and is disabled unless `BOAIRD_MCP_AGENT_TOKENS` maps bearer tokens to existing Agents.
+- `/mcp` uses authenticated Streamable HTTP and checks expiring persisted token verifiers on every request.
 - The authenticated token determines Agent identity; stateful MCP sessions reject requests authenticated as a different Agent.
 - Tools use explicit capabilities and project scope. Task assignment grants access only to that assigned task; MCP cannot self-assign.
 - Agent project memberships are stored in `agent_projects` and managed by the authenticated administrator at `PUT`/`DELETE /api/v1/projects/{projectID}/agents/{agentID}`. The Agent response exposes read-only `project_ids`; changes are written to immutable audit history.
 - Project reads, Brain Runs, and other project-wide MCP operations require explicit membership. Assignment does not add project scope; active Brain scope is derived from the Brain-project relation. MCP scope denials are recorded.
 - Task transitions, Human Review checks, conversation access, and Brain autonomy rules remain enforced by domain services.
-- Tokens are static process configuration and become invalid after replacement plus restart. MCP sessions idle for 30 minutes are closed.
+- MCP Agent tokens are issued, rotated, revoked, and listed through administrator-only REST operations. Only SHA-256 verifiers are persisted; plaintext is returned once. Expiry is explicit and capped at 365 days; legacy environment tokens are imported once with a 90-day expiry. Lifecycle events are immutable and contain no secret material. Revocation blocks the next request on an existing MCP session; idle sessions expire after 30 minutes.
 - Integration tests cover authentication, session binding, task-completion policy, and assigned-Agent conversation scope.
 
 ---

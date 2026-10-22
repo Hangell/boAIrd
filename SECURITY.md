@@ -1147,21 +1147,27 @@ MCP clients must not be trusted by default.
 
 Remote MCP must require authentication.
 
-The current `/mcp` endpoint is loopback-only, like the rest of the server. When
-enabled, `BOAIRD_MCP_AGENT_TOKENS` maps unique 32-byte random bearer tokens to
-existing Agent IDs. The token, not a tool argument, determines the caller. The
-token verifier rejects missing or invalid tokens and unknown Agent IDs. The MCP
-SDK binds each stateful session to the verified Agent ID, so a different Agent
-cannot reuse that session. Tokens are static configuration with no individual
-expiry; replacing configuration and restarting the service rotates them. Idle
-sessions expire after 30 minutes. Do not write token values to logs, source
-control, client prompts, or MCP responses. The endpoint is disabled when no
-Agent tokens are configured.
+The current `/mcp` endpoint is loopback-only, like the rest of the server. It
+checks a persisted verifier on every authenticated request. Administrators
+issue tokens through `POST /api/v1/mcp/tokens`; each token is a random 32-byte
+bearer secret bound to one existing MCP Agent, has an explicit expiry of at
+most 365 days, and is returned only once. SQLite stores a SHA-256 verifier and
+metadata, never plaintext. The token, not a tool argument, determines the
+caller. Verification compares the presented digest against the full verifier
+set using constant-time comparisons, rejects expired/revoked tokens and
+unknown Agents, and binds every stateful MCP session to the verified Agent ID.
+Rotation atomically revokes the old token and returns a replacement; revocation
+blocks the next MCP HTTP request, including on an existing session. Idle
+sessions expire after 30 minutes. Issue, rotate, revoke, and legacy import
+events are immutable and exclude token material. Legacy
+`BOAIRD_MCP_AGENT_TOKENS` values are imported once on first startup against a
+database and receive a 90-day expiry; remove the setting after migration.
+Subsequent environment changes cannot restore or revoke managed tokens. Do not
+write token values to logs, source control, client prompts, or MCP responses.
 
 Possible future mechanisms:
 
 ```text
-API token
 OAuth
 mTLS
 OIDC

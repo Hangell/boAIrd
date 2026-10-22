@@ -14,6 +14,7 @@ import (
 	"boAIrd/internal/brain"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
+	"boAIrd/internal/mcptoken"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/task"
@@ -88,6 +89,13 @@ type ConversationManager interface {
 	Append(context.Context, string, conversation.SenderType, string, conversation.MessageInput) (conversation.Message, error)
 }
 
+type MCPTokenManager interface {
+	Create(context.Context, string, time.Duration, string) (mcptoken.Metadata, string, error)
+	Rotate(context.Context, string, time.Duration, string) (mcptoken.Metadata, string, error)
+	Revoke(context.Context, string, string) error
+	List(context.Context) ([]mcptoken.Metadata, error)
+}
+
 // NewHandler returns the HTTP handler for the configured service endpoints.
 func NewHandler(database DatabaseHealth, projects ProjectManager, credentials ...CredentialManager) http.Handler {
 	var credentialManager CredentialManager
@@ -114,7 +122,15 @@ func NewHandlerWithConversations(database DatabaseHealth, projects ProjectManage
 	return newHandler(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, mcpHandlers...)
 }
 
+func NewHandlerWithMCPTokenManagement(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithMCP(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, mcpHandlers...)
+}
+
 func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithMCP(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, nil, mcpHandlers...)
+}
+
+func newHandlerWithMCP(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	sessions := newLocalSessionStore()
 	registerSessionRoutes(mux, database, localAuthToken, sessions)
@@ -157,6 +173,9 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 	}
 	if conversations != nil {
 		registerConversationRoutes(mux, conversations, localAuthToken, sessions)
+	}
+	if tokens != nil {
+		registerMCPTokenRoutes(mux, tokens)
 	}
 	if len(mcpHandlers) > 0 && mcpHandlers[0] != nil {
 		mux.Handle("/mcp", mcpHandlers[0])

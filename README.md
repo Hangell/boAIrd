@@ -1103,9 +1103,13 @@ boAIrd
 
 # MCP
 
-MCP is an optional authenticated integration endpoint at `/mcp`. It is enabled
-only when `BOAIRD_MCP_AGENT_TOKENS` registers bearer tokens for existing Agents.
-Each token maps to one Agent and the MCP session remains bound to that identity.
+MCP is an authenticated integration endpoint at `/mcp`; requests fail until an
+active token is issued for an MCP Agent. Each token maps to one Agent and the
+MCP session remains bound to that identity. Administrators create tokens with
+`POST /api/v1/mcp/tokens`, rotate them with `POST /api/v1/mcp/tokens/{id}/rotate`,
+and revoke them with `DELETE /api/v1/mcp/tokens/{id}`. Each token expires within
+365 days. The plaintext is returned once; SQLite stores only a SHA-256 verifier.
+Revocation blocks the next MCP HTTP request, including on an existing session.
 The server exposes project, Agent, task, conversation, context, Brain-request,
 and run tools listed below; every operation applies the Agent's explicit
 capabilities and project or assignment scope.
@@ -1184,19 +1188,23 @@ session, then lists and calls tools on that session. The SDK binds that session
 to the Agent authenticated at initialization; switching Agent tokens is
 rejected. Sessions expire after 30 minutes idle.
 
-Configure one or more clients with a JSON array in the environment. Each token
-must be a unique random 32-byte value encoded as 64 hexadecimal characters and
-must belong to an existing Agent. Generate a token and place the JSON value in
-the service's secret environment configuration:
+New tokens should be issued through the authenticated administrator API and
+stored in the MCP client's secret store. For migration only,
+`BOAIRD_MCP_AGENT_TOKENS` is imported on first startup against a database, and
+each imported token expires after 90 days. Remove this environment variable
+after initial startup; later configuration changes do not create or restore
+tokens.
 
 ```sh
-MCP_AGENT_TOKEN="$(openssl rand -hex 32)"
-export BOAIRD_MCP_AGENT_TOKENS="[{\"agent_id\":\"agent-id\",\"token\":\"${MCP_AGENT_TOKEN}\"}]"
+curl --request POST http://127.0.0.1:3110/api/v1/mcp/tokens \
+  --header "Authorization: Bearer ${BOAIRD_LOCAL_AUTH_TOKEN}" \
+  --header 'Content-Type: application/json' \
+  --data '{"agent_id":"agent-id","expires_in_seconds":7776000}'
 ```
 
-The endpoint is disabled when this setting is empty. Registered tokens remain
-valid until configuration changes and the server restarts. An MCP session is
-closed after 30 minutes of inactivity. `boaird.task.claim` starts work only on
+Token lifecycle operations are recorded in immutable audit events without
+token material. MCP sessions expire after 30 minutes of inactivity.
+`boaird.task.claim` starts work only on
 a task already assigned to that Agent; assignment remains an administrator or
 authorized Brain operation.
 
@@ -2033,6 +2041,7 @@ The service reads these optional environment variables:
 | `BOAIRD_DATABASE_PATH` | `./data/boaird.db` | SQLite database file |
 | `BOAIRD_MASTER_KEY` | Required | 32-byte encryption key encoded as 64 hexadecimal characters; never store it in SQLite or commit it. |
 | `BOAIRD_LOCAL_AUTH_TOKEN` | Required | 32-byte bearer token encoded as 64 hexadecimal characters; authenticates all versioned API routes except status and can be exchanged for a browser session. |
+| `BOAIRD_MCP_AGENT_TOKENS` | Empty | Legacy one-time bootstrap only: imported from the environment on first database startup with a 90-day expiry. Manage tokens through the authenticated MCP token API afterward. |
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 

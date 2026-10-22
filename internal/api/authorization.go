@@ -29,7 +29,7 @@ var administratorCapabilities = []capability.Capability{
 	"agent.create", "agent.read", "agent.update", "agent.scope.manage",
 	"brain.attach", "brain.read", "brain.replace", "brain.execute",
 	"run.read", "task.create", "task.read", "task.assign", "task.transition",
-	"task.review", "task.complete", "conversation.read", "conversation.write",
+	"task.review", "task.complete", "conversation.read", "conversation.write", "mcp.token.manage",
 }
 
 func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, token []byte, sessions *localSessionStore) http.Handler {
@@ -142,6 +142,12 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 	}
 	method := r.Method
 	switch {
+	case len(parts) == 4 && parts[2] == "mcp" && parts[3] == "tokens" && (method == http.MethodGet || method == http.MethodPost):
+		return "mcp.token.manage", "", true
+	case len(parts) == 5 && parts[2] == "mcp" && parts[3] == "tokens" && parts[4] != "" && method == http.MethodDelete:
+		return "mcp.token.manage", "", true
+	case len(parts) == 6 && parts[2] == "mcp" && parts[3] == "tokens" && parts[4] != "" && parts[5] == "rotate" && method == http.MethodPost:
+		return "mcp.token.manage", "", true
 	case len(parts) == 3 && parts[2] == "projects" && method == http.MethodPost:
 		return "project.create", "", true
 	case len(parts) == 3 && parts[2] == "projects" && method == http.MethodGet:

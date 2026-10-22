@@ -592,6 +592,85 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/mcp/tokens:
+    get:
+      operationId: listMCPAgentTokens
+      x-required-capability: mcp.token.manage
+      summary: List MCP Agent token metadata
+      description: Returns token IDs, Agent IDs, issue/expiry/revocation metadata, and status. Token verifiers and plaintext credentials are never returned.
+      responses:
+        '200':
+          description: MCP Agent token metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MCPAgentTokenPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createMCPAgentToken
+      x-required-capability: mcp.token.manage
+      summary: Issue an expiring MCP Agent bearer token
+      description: The 32-byte random token is returned once. Only its one-way SHA-256 verifier is persisted. Expiry must be between one second and 365 days.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMCPAgentToken' }
+      responses:
+        '201':
+          description: Token issued. Store the returned token securely; it cannot be retrieved again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssuedMCPAgentToken' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/mcp/tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: revokeMCPAgentToken
+      x-required-capability: mcp.token.manage
+      summary: Revoke an MCP Agent token
+      description: Revocation takes effect on the next MCP HTTP request. Any session using the revoked token can no longer make requests.
+      responses:
+        '204': { description: Token revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Token is already revoked or expired. }
+  /api/v1/mcp/tokens/{id}/rotate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: rotateMCPAgentToken
+      x-required-capability: mcp.token.manage
+      summary: Atomically revoke an MCP Agent token and issue its replacement
+      description: The replacement remains bound to the same Agent and is returned once. Requests using the old token fail immediately after rotation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RotateMCPAgentToken' }
+      responses:
+        '201':
+          description: Replacement token issued once.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssuedMCPAgentToken' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Token is already revoked or expired. }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/agents/{id}:
     parameters:
       - name: id
@@ -854,6 +933,41 @@ components:
         task_id: { type: string }
         messages: { type: array, items: { $ref: '#/components/schemas/ConversationMessage' } }
         next_before: { type: string, description: Cursor for fetching the next older page; omitted when there are no older messages. }
+    CreateMCPAgentToken:
+      type: object
+      additionalProperties: false
+      required: [agent_id, expires_in_seconds]
+      properties:
+        agent_id: { type: string, format: uuid }
+        expires_in_seconds: { type: integer, minimum: 1, maximum: 31536000, description: Token lifetime in seconds, at most 365 days. }
+    RotateMCPAgentToken:
+      type: object
+      additionalProperties: false
+      required: [expires_in_seconds]
+      properties:
+        expires_in_seconds: { type: integer, minimum: 1, maximum: 31536000, description: Replacement token lifetime in seconds, at most 365 days. }
+    MCPAgentToken:
+      type: object
+      required: [id, agent_id, issued_at, expires_at, status]
+      properties:
+        id: { type: string }
+        agent_id: { type: string, format: uuid }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        status: { type: string, enum: [active, expired, revoked] }
+    MCPAgentTokenPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MCPAgentToken' } }
+    IssuedMCPAgentToken:
+      allOf:
+        - $ref: '#/components/schemas/MCPAgentToken'
+        - type: object
+          required: [token]
+          properties:
+            token: { type: string, pattern: '^[a-f0-9]{64}$', description: Raw token shown only once. }
     CreateAgent:
       type: object
       additionalProperties: false
@@ -1047,6 +1161,11 @@ components:
             message:
               type: string
   responses:
+    Unauthorized:
+      description: Missing or invalid administrator bearer token or session cookie.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     Forbidden:
       description: The administrator is not authorized for this operation or project.
       content:
