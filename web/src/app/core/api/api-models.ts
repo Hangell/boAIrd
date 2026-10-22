@@ -63,6 +63,7 @@ export interface AgentSummary {
   id: string;
   name: string;
   status: string;
+  project_ids?: string[];
 }
 
 export type AgentRuntime = 'API' | 'MCP' | 'LOCAL' | 'REMOTE';

@@ -2,9 +2,9 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, OnInit, signal 
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin, map, Observable, of, startWith, Subject, switchMap } from 'rxjs';
+import { catchError, forkJoin, map, Observable, of, startWith, Subject, switchMap } from 'rxjs';
 import { ApiClient } from '../../core/api/api-client';
-import { AgentSummary, ProjectSummary, RunAuditEvent, RunSummary, TaskAuditEvent, TaskDetail, TaskSummary } from '../../core/api/api-models';
+import { AgentSummary, BrainSummary, ProjectSummary, RunAuditEvent, RunSummary, TaskAuditEvent, TaskDetail, TaskSummary } from '../../core/api/api-models';
 
 interface ActivityItem {
   id: string;
@@ -124,16 +124,41 @@ export class ObservabilityComponent implements OnInit {
     this.projectSelection.next(id);
   }
   private loadData(projectId: string): Observable<ObservabilityData> {
-    if (!projectId) return of({ projects: [], selectedProject: '', runs: [], tasks: [], agents: [], activity: [] });
+    if (!projectId) {
+      return this.loadProjects().pipe(map((projects) => ({ projects, selectedProject: '', runs: [], tasks: [], agents: [], activity: [] })));
+    }
     const encoded = encodeURIComponent(projectId);
-    return forkJoin({ projects: this.loadProjects(), runs: this.api.getAllPages<RunSummary>(`projects/${encoded}/runs`), tasks: this.api.getAllPages<TaskSummary>(`projects/${encoded}/tasks`) }).pipe(
+    return forkJoin({
+      projects: this.loadProjects(),
+      runs: this.api.getAllPages<RunSummary>(`projects/${encoded}/runs`),
+      tasks: this.api.getAllPages<TaskSummary>(`projects/${encoded}/tasks`),
+    }).pipe(
       switchMap(({ projects, runs, tasks }) => {
-        const agentIDs = [...new Set(tasks.map((task) => task.assigned_to).filter((id): id is string => Boolean(id)))].slice(0, 50);
-        const agents$ = agentIDs.length ? forkJoin(agentIDs.map((id) => this.api.get<AgentSummary>(`agents/${encodeURIComponent(id)}`))) : of([]);
-        if (!this.isLogs) return agents$.pipe(map((agents) => ({ projects, selectedProject: projectId, runs, tasks, agents, activity: [] })));
-        const recentTasks = [...tasks].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? '')).slice(0, 50);
-        const details$ = recentTasks.length ? forkJoin(recentTasks.map((task) => this.api.get<TaskDetail>(`tasks/${encodeURIComponent(task.id)}`))) : of([]);
-        return forkJoin({ agents: agents$, details: details$ }).pipe(map(({ details }) => ({ projects, selectedProject: projectId, runs, tasks, agents: [], activity: this.toActivity(runs, details) })));
+        if (this.isLogs) {
+          const recentTasks = [...tasks].sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? '')).slice(0, 50);
+          const details$ = recentTasks.length ? forkJoin(recentTasks.map((task) => this.api.get<TaskDetail>(`tasks/${encodeURIComponent(task.id)}`))) : of([]);
+          return details$.pipe(map((details) => ({ projects, selectedProject: projectId, runs, tasks, agents: [], activity: this.toActivity(runs, details) })));
+        }
+        return this.loadProjectAgents(projectId).pipe(map((agents) => ({ projects, selectedProject: projectId, runs, tasks, agents, activity: [] })));
+      }),
+    );
+  }
+  private loadProjectAgents(projectId: string): Observable<AgentSummary[]> {
+    const encoded = encodeURIComponent(projectId);
+    return forkJoin({
+      agents: this.api.getAllPages<AgentSummary>('agents'),
+      brain: this.api.get<BrainSummary>(`projects/${encoded}/brain`).pipe(catchError(() => of(null))),
+    }).pipe(
+      switchMap(({ agents, brain }) => {
+        const members = agents.filter((agent) => agent.project_ids?.includes(projectId));
+        const brainAgentID = brain?.agent_id;
+        if (!brainAgentID || members.some((agent) => agent.id === brainAgentID)) {
+          return of(members);
+        }
+        return this.api.get<AgentSummary>(`agents/${encodeURIComponent(brainAgentID)}`).pipe(
+          map((brainAgent) => [...members, brainAgent]),
+          catchError(() => of(members)),
+        );
       }),
     );
   }
