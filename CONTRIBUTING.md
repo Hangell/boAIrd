@@ -585,7 +585,7 @@ Default development endpoint:
 http://localhost:3110
 ```
 
-The backend also accepts `BOAIRD_HOST`, `BOAIRD_PORT`, and `BOAIRD_DATABASE_PATH` to override the listen address, listen port, and SQLite file path. Defaults are `127.0.0.1`, `3110`, and `./data/boaird.db`.
+The backend also accepts `BOAIRD_HOST`, `BOAIRD_PORT`, and `BOAIRD_DATABASE_PATH` to override the listen address, listen port, and SQLite file path. Defaults are `127.0.0.1`, `3110`, and `./data/boaird.db`. `BOAIRD_HOST` must remain a loopback IP until authenticated remote mode is implemented.
 
 ---
 

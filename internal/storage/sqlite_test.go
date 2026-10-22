@@ -29,13 +29,19 @@ func TestOpenSQLiteAppliesMigrationsOnce(t *testing.T) {
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("query migration count: %v", err)
 	}
-	if migrationCount != 1 {
-		t.Fatalf("migration count = %d, want 1", migrationCount)
+	if migrationCount != 3 {
+		t.Fatalf("migration count = %d, want 3", migrationCount)
 	}
 
 	var tableName string
 	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_metadata'").Scan(&tableName); err != nil {
 		t.Fatalf("verify bootstrap migration: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'projects'").Scan(&tableName); err != nil {
+		t.Fatalf("verify projects migration: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'brains'").Scan(&tableName); err != nil {
+		t.Fatalf("verify active Brain registry migration: %v", err)
 	}
 }
 

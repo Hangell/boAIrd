@@ -28,6 +28,18 @@ type Project struct {
 	brainID       string
 	workspacePath string
 	repositoryURL string
+	humanReview   bool
+}
+
+type Snapshot struct {
+	ID                  string
+	Name                string
+	Description         string
+	Status              Status
+	BrainID             string
+	WorkspacePath       string
+	RepositoryURL       string
+	HumanReviewRequired bool
 }
 
 func New(id, name string) (Project, error) {
@@ -37,16 +49,43 @@ func New(id, name string) (Project, error) {
 	if strings.TrimSpace(name) == "" {
 		return Project{}, errors.New("project name is required")
 	}
-	return Project{id: id, name: name, status: StatusCreated}, nil
+	return Project{id: id, name: name, status: StatusCreated, humanReview: true}, nil
 }
 
-func (p Project) ID() string            { return p.id }
-func (p Project) Name() string          { return p.name }
-func (p Project) Description() string   { return p.description }
-func (p Project) Status() Status        { return p.status }
-func (p Project) BrainID() string       { return p.brainID }
-func (p Project) WorkspacePath() string { return p.workspacePath }
-func (p Project) RepositoryURL() string { return p.repositoryURL }
+func (p Project) ID() string                { return p.id }
+func (p Project) Name() string              { return p.name }
+func (p Project) Description() string       { return p.description }
+func (p Project) Status() Status            { return p.status }
+func (p Project) BrainID() string           { return p.brainID }
+func (p Project) WorkspacePath() string     { return p.workspacePath }
+func (p Project) RepositoryURL() string     { return p.repositoryURL }
+func (p Project) HumanReviewRequired() bool { return p.humanReview }
+
+func (p Project) Snapshot() Snapshot {
+	return Snapshot{
+		ID: p.id, Name: p.name, Description: p.description, Status: p.status,
+		BrainID: p.brainID, WorkspacePath: p.workspacePath, RepositoryURL: p.repositoryURL,
+		HumanReviewRequired: p.humanReview,
+	}
+}
+
+func Restore(snapshot Snapshot) (Project, error) {
+	if strings.TrimSpace(snapshot.ID) == "" || strings.TrimSpace(snapshot.Name) == "" {
+		return Project{}, errors.New("project ID and name are required")
+	}
+	if !validStatus(snapshot.Status) {
+		return Project{}, fmt.Errorf("unknown project status %q", snapshot.Status)
+	}
+	if (snapshot.Status == StatusReady || snapshot.Status == StatusRunning) && strings.TrimSpace(snapshot.BrainID) == "" {
+		return Project{}, errors.New("executable project requires a Brain")
+	}
+	return Project{
+		id: snapshot.ID, name: snapshot.Name, description: snapshot.Description,
+		status: snapshot.Status, brainID: snapshot.BrainID, workspacePath: snapshot.WorkspacePath,
+		repositoryURL: snapshot.RepositoryURL,
+		humanReview:   snapshot.HumanReviewRequired,
+	}, nil
+}
 
 func (p Project) Rename(name string) (Project, error) {
 	if strings.TrimSpace(name) == "" {
@@ -68,6 +107,11 @@ func (p Project) SetWorkspacePath(path string) Project {
 
 func (p Project) SetRepositoryURL(url string) Project {
 	p.repositoryURL = strings.TrimSpace(url)
+	return p
+}
+
+func (p Project) SetHumanReviewRequired(required bool) Project {
+	p.humanReview = required
 	return p
 }
 

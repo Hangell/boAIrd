@@ -22,7 +22,7 @@ func (f fakeDatabase) PingContext(context.Context) error {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	handler := NewHandler(fakeDatabase{err: errors.New("database is down")})
+	handler := NewHandler(fakeDatabase{err: errors.New("database is down")}, nil)
 	recorder := request(t, handler, http.MethodGet, "/health")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -55,7 +55,7 @@ func TestStatusEndpointReportsSQLiteState(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			recorder := request(t, NewHandler(tt.database), http.MethodGet, "/api/v1/status")
+			recorder := request(t, NewHandler(tt.database, nil), http.MethodGet, "/api/v1/status")
 			if recorder.Code != tt.statusCode {
 				t.Fatalf("status = %d, want %d", recorder.Code, tt.statusCode)
 			}
@@ -76,7 +76,7 @@ func TestServeShutsDownWhenContextIsCancelled(t *testing.T) {
 	done := make(chan error, 1)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	go func() {
-		done <- serve(ctx, listener, address, NewHandler(fakeDatabase{}), logger)
+		done <- serve(ctx, listener, address, NewHandler(fakeDatabase{}, nil), logger)
 	}()
 
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -121,7 +121,7 @@ func TestServeReportsListenerStartupFailure(t *testing.T) {
 	defer listener.Close()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	err = Serve(context.Background(), listener.Addr().String(), NewHandler(fakeDatabase{}), logger)
+	err = Serve(context.Background(), listener.Addr().String(), NewHandler(fakeDatabase{}, nil), logger)
 	if err == nil {
 		t.Fatal("Serve() succeeded while the address was already in use")
 	}

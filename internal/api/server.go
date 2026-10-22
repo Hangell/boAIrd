@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"boAIrd/internal/project"
 )
 
 const statusCheckTimeout = 2 * time.Second
@@ -23,8 +25,16 @@ type statusResponse struct {
 	Database string `json:"database"`
 }
 
+type ProjectManager interface {
+	Create(context.Context, project.CreateInput) (project.Project, error)
+	Get(context.Context, string) (project.Project, error)
+	List(context.Context, int, int) ([]project.Project, error)
+	Update(context.Context, string, project.UpdateInput) (project.Project, error)
+	Archive(context.Context, string) (project.Project, error)
+}
+
 // NewHandler returns the HTTP handler for the initial service endpoints.
-func NewHandler(database DatabaseHealth) http.Handler {
+func NewHandler(database DatabaseHealth, projects ProjectManager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -45,6 +55,9 @@ func NewHandler(database DatabaseHealth) http.Handler {
 			Database: "connected",
 		})
 	})
+	if projects != nil {
+		registerProjectRoutes(mux, projects)
+	}
 	return mux
 }
 

@@ -67,3 +67,44 @@ func TestArchivedProjectIsTerminal(t *testing.T) {
 		t.Fatal("expected archived project transition to be rejected")
 	}
 }
+
+func TestNewProjectUsesHumanReviewByDefault(t *testing.T) {
+	p, err := New("p1", "Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.HumanReviewRequired() {
+		t.Fatal("new project should require human review by default")
+	}
+}
+
+func TestProjectRestoreValidatesPersistedState(t *testing.T) {
+	snapshot := Snapshot{
+		ID: "p1", Name: "Project", Status: StatusCreated,
+		HumanReviewRequired: true,
+	}
+	p, err := Restore(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Snapshot() != snapshot {
+		t.Fatalf("restored snapshot = %+v, want %+v", p.Snapshot(), snapshot)
+	}
+	snapshot.Status = Status("UNKNOWN")
+	if _, err := Restore(snapshot); err == nil {
+		t.Fatal("expected invalid persisted status to be rejected")
+	}
+}
+
+func TestRestoreRejectsExecutableProjectWithoutBrain(t *testing.T) {
+	for _, status := range []Status{StatusReady, StatusRunning} {
+		t.Run(string(status), func(t *testing.T) {
+			_, err := Restore(Snapshot{
+				ID: "p1", Name: "Project", Status: status, HumanReviewRequired: true,
+			})
+			if err == nil {
+				t.Fatalf("Restore() accepted %s project without a Brain", status)
+			}
+		})
+	}
+}
