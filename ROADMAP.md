@@ -444,6 +444,22 @@ Response
 
 Each response must also have a persisted Run.
 
+## Current implementation
+
+- Projects can attach one active Brain to an API agent with the explicit `brain.execute` capability.
+- The Brain can request a provider response through the configured provider adapter and credential reference.
+- Each execution persists its project, agent, provider, model, objective, status, and response in `runs`.
+- The current runtime returns a proposed plan as text. It does not apply task mutations or grant capabilities.
+- SQLite prevents an active Brain agent from switching away from the API runtime and requires a configured active Brain before a project enters READY or RUNNING.
+
+## API
+
+```text
+POST /api/v1/projects/{id}/brain
+GET  /api/v1/projects/{id}/brain
+POST /api/v1/projects/{id}/brain/runs
+```
+
 ---
 
 # Phase 7 — Runs

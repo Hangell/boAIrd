@@ -103,9 +103,9 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE agents SET name = ?, avatar = ?, description = ?, role = ?, runtime = ?,
-		provider = ?, model = ?, credential_id = NULLIF(?, ''), instructions = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+		provider = ?, provider_base_url = ?, model = ?, credential_id = NULLIF(?, ''), instructions = ?, status = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`, snapshot.Name, snapshot.Avatar, snapshot.Description, snapshot.Role, snapshot.Runtime,
-		snapshot.Provider, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status, snapshot.ID)
+		snapshot.Provider, snapshot.ProviderBaseURL, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status, snapshot.ID)
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
 	}
@@ -116,12 +116,13 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 	if count == 0 {
 		return agent.ErrNotFound
 	}
-	for _, table := range []string{"agent_languages", "agent_capabilities"} {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE agent_id = ?", snapshot.ID); err != nil {
-			return fmt.Errorf("replace agent relations: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_languages WHERE agent_id = ?", snapshot.ID); err != nil {
+		return fmt.Errorf("replace agent languages: %w", err)
 	}
-	if err := insertAgentRelations(ctx, tx, snapshot); err != nil {
+	if err := syncAgentCapabilities(ctx, tx, snapshot); err != nil {
+		return err
+	}
+	if err := insertAgentLanguages(ctx, tx, snapshot); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -150,21 +151,73 @@ func validateAgentCredential(ctx context.Context, tx *sql.Tx, snapshot agent.Sna
 }
 
 func insertAgent(ctx context.Context, executor sqlExecutor, snapshot agent.Snapshot) error {
-	_, err := executor.ExecContext(ctx, `INSERT INTO agents (id, name, avatar, description, role, runtime, provider, model, credential_id, instructions, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`, snapshot.ID, snapshot.Name, snapshot.Avatar, snapshot.Description,
-		snapshot.Role, snapshot.Runtime, snapshot.Provider, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status)
+	_, err := executor.ExecContext(ctx, `INSERT INTO agents (id, name, avatar, description, role, runtime, provider, provider_base_url, model, credential_id, instructions, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`, snapshot.ID, snapshot.Name, snapshot.Avatar, snapshot.Description,
+		snapshot.Role, snapshot.Runtime, snapshot.Provider, snapshot.ProviderBaseURL, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status)
 	return err
 }
 
 func insertAgentRelations(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+	if err := insertAgentLanguages(ctx, tx, snapshot); err != nil {
+		return err
+	}
+	for _, capability := range snapshot.Capabilities {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_capabilities(agent_id, capability) VALUES (?, ?)", snapshot.ID, capability); err != nil {
+			return fmt.Errorf("insert agent capability: %w", err)
+		}
+	}
+	return nil
+}
+
+func insertAgentLanguages(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
 	for position, language := range snapshot.LanguagePreferences {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_languages(agent_id, position, language) VALUES (?, ?, ?)", snapshot.ID, position, language); err != nil {
 			return fmt.Errorf("insert agent language: %w", err)
 		}
 	}
+	return nil
+}
+
+func syncAgentCapabilities(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+	rows, err := tx.QueryContext(ctx, "SELECT capability FROM agent_capabilities WHERE agent_id = ?", snapshot.ID)
+	if err != nil {
+		return fmt.Errorf("query current agent capabilities: %w", err)
+	}
+	current := make(map[string]struct{})
+	for rows.Next() {
+		var capability string
+		if err := rows.Scan(&capability); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan current agent capability: %w", err)
+		}
+		current[capability] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate current agent capabilities: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close current agent capabilities: %w", err)
+	}
+
+	desired := make(map[string]struct{}, len(snapshot.Capabilities))
 	for _, capability := range snapshot.Capabilities {
+		desired[capability] = struct{}{}
+	}
+	for capability := range current {
+		if _, keep := desired[capability]; keep {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM agent_capabilities WHERE agent_id = ? AND capability = ?", snapshot.ID, capability); err != nil {
+			return fmt.Errorf("remove agent capability: %w", err)
+		}
+	}
+	for capability := range desired {
+		if _, exists := current[capability]; exists {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_capabilities(agent_id, capability) VALUES (?, ?)", snapshot.ID, capability); err != nil {
-			return fmt.Errorf("insert agent capability: %w", err)
+			return fmt.Errorf("add agent capability: %w", err)
 		}
 	}
 	return nil
@@ -214,11 +267,11 @@ func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.S
 
 type agentRowScanner interface{ Scan(...any) error }
 
-const agentSelect = `SELECT id, name, avatar, description, role, runtime, provider, model, COALESCE(credential_id, ''), instructions, status FROM agents`
+const agentSelect = `SELECT id, name, avatar, description, role, runtime, provider, provider_base_url, model, COALESCE(credential_id, ''), instructions, status FROM agents`
 
 func scanAgent(row agentRowScanner) (agent.Snapshot, error) {
 	var value agent.Snapshot
 	err := row.Scan(&value.ID, &value.Name, &value.Avatar, &value.Description, &value.Role, &value.Runtime,
-		&value.Provider, &value.Model, &value.CredentialID, &value.Instructions, &value.Status)
+		&value.Provider, &value.ProviderBaseURL, &value.Model, &value.CredentialID, &value.Instructions, &value.Status)
 	return value, err
 }

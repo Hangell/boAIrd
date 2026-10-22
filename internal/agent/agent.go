@@ -4,6 +4,8 @@ package agent
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -36,6 +38,7 @@ type Agent struct {
 	role                string
 	runtime             Runtime
 	provider            string
+	providerBaseURL     string
 	model               string
 	credentialID        string
 	instructions        string
@@ -53,6 +56,7 @@ type Configuration struct {
 	Role                string
 	Runtime             Runtime
 	Provider            string
+	ProviderBaseURL     string
 	Model               string
 	CredentialID        string
 	Instructions        string
@@ -68,6 +72,7 @@ type Snapshot struct {
 	Role                string
 	Runtime             Runtime
 	Provider            string
+	ProviderBaseURL     string
 	Model               string
 	CredentialID        string
 	Instructions        string
@@ -103,7 +108,7 @@ func NewConfigured(id string, configuration Configuration) (Agent, error) {
 func Restore(snapshot Snapshot) (Agent, error) {
 	configuration := Configuration{
 		Name: snapshot.Name, Avatar: snapshot.Avatar, Description: snapshot.Description, Role: snapshot.Role,
-		Runtime: snapshot.Runtime, Provider: snapshot.Provider, Model: snapshot.Model,
+		Runtime: snapshot.Runtime, Provider: snapshot.Provider, ProviderBaseURL: snapshot.ProviderBaseURL, Model: snapshot.Model,
 		CredentialID: snapshot.CredentialID, Instructions: snapshot.Instructions,
 		LanguagePreferences: snapshot.LanguagePreferences, Capabilities: snapshot.Capabilities,
 	}
@@ -127,6 +132,7 @@ func (a Agent) Configure(configuration Configuration) (Agent, error) {
 	configuration.Description = strings.TrimSpace(configuration.Description)
 	configuration.Runtime = Runtime(strings.ToUpper(strings.TrimSpace(string(configuration.Runtime))))
 	configuration.Provider = strings.ToLower(strings.TrimSpace(configuration.Provider))
+	configuration.ProviderBaseURL = strings.TrimSpace(configuration.ProviderBaseURL)
 	configuration.Model = strings.TrimSpace(configuration.Model)
 	configuration.CredentialID = strings.TrimSpace(configuration.CredentialID)
 	configuration.Instructions = strings.TrimSpace(configuration.Instructions)
@@ -151,6 +157,9 @@ func (a Agent) Configure(configuration Configuration) (Agent, error) {
 	if err := validateOptionalText(configuration.Provider, "provider", 100); err != nil {
 		return Agent{}, err
 	}
+	if err := validateOptionalText(configuration.ProviderBaseURL, "provider_base_url", 2048); err != nil {
+		return Agent{}, err
+	}
 	if err := validateOptionalText(configuration.Model, "model", 200); err != nil {
 		return Agent{}, err
 	}
@@ -161,7 +170,12 @@ func (a Agent) Configure(configuration Configuration) (Agent, error) {
 		if configuration.Provider == "" || configuration.Model == "" || configuration.CredentialID == "" {
 			return Agent{}, errors.New("API runtime requires provider, model, and credential_id")
 		}
-	} else if configuration.Provider != "" || configuration.Model != "" || configuration.CredentialID != "" {
+		if configuration.ProviderBaseURL != "" {
+			if err := validateProviderBaseURL(configuration.ProviderBaseURL); err != nil {
+				return Agent{}, err
+			}
+		}
+	} else if configuration.Provider != "" || configuration.ProviderBaseURL != "" || configuration.Model != "" || configuration.CredentialID != "" {
 		return Agent{}, errors.New("provider configuration is only valid for the API runtime")
 	}
 	languages, err := validateStringList(configuration.LanguagePreferences, "language_preferences", 20, 100)
@@ -185,7 +199,7 @@ func (a Agent) Configure(configuration Configuration) (Agent, error) {
 		capabilities = append(capabilities, value)
 	}
 	a.name, a.avatar, a.description, a.role = configuration.Name, configuration.Avatar, configuration.Description, configuration.Role
-	a.runtime, a.provider, a.model, a.credentialID = configuration.Runtime, configuration.Provider, configuration.Model, configuration.CredentialID
+	a.runtime, a.provider, a.providerBaseURL, a.model, a.credentialID = configuration.Runtime, configuration.Provider, configuration.ProviderBaseURL, configuration.Model, configuration.CredentialID
 	a.instructions, a.languagePreferences, a.capabilities = configuration.Instructions, languages, capabilities
 	return a, nil
 }
@@ -197,6 +211,7 @@ func (a Agent) Description() string           { return a.description }
 func (a Agent) Role() string                  { return a.role }
 func (a Agent) Runtime() Runtime              { return a.runtime }
 func (a Agent) Provider() string              { return a.provider }
+func (a Agent) ProviderBaseURL() string       { return a.providerBaseURL }
 func (a Agent) Model() string                 { return a.model }
 func (a Agent) CredentialID() string          { return a.credentialID }
 func (a Agent) Instructions() string          { return a.instructions }
@@ -217,7 +232,7 @@ func (a Agent) Snapshot() Snapshot {
 	}
 	return Snapshot{
 		ID: a.id, Name: a.name, Avatar: a.avatar, Description: a.description, Role: a.role,
-		Runtime: a.runtime, Provider: a.provider, Model: a.model, CredentialID: a.credentialID,
+		Runtime: a.runtime, Provider: a.provider, ProviderBaseURL: a.providerBaseURL, Model: a.model, CredentialID: a.credentialID,
 		Instructions: a.instructions, LanguagePreferences: append([]string{}, a.languagePreferences...),
 		Capabilities: capabilities, ProjectIDs: append([]string(nil), a.projectIDs...), Tools: append([]string(nil), a.tools...), Status: a.status,
 	}
@@ -317,6 +332,29 @@ func validateOptionalText(value, field string, maximum int) error {
 	}
 	if utf8.RuneCountInString(value) > maximum {
 		return fmt.Errorf("agent %s must be at most %d characters", field, maximum)
+	}
+	return nil
+}
+
+func validateProviderBaseURL(value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("provider_base_url must be an absolute URL without credentials, query, or fragment")
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return errors.New("provider_base_url must use HTTPS or loopback HTTP")
+	}
+	if parsed.Scheme == "http" {
+		host := parsed.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return errors.New("HTTP provider_base_url is allowed only for loopback hosts")
+		}
+	}
+	for _, segment := range strings.Split(parsed.EscapedPath(), "/") {
+		if segment == ".." || segment == "%2e%2e" {
+			return errors.New("provider_base_url must not contain parent traversal")
+		}
 	}
 	return nil
 }

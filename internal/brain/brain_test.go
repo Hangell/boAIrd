@@ -1,6 +1,12 @@
 package brain
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"boAIrd/internal/agent"
+	"boAIrd/internal/project"
+)
 
 func TestNewValidatesReferencesAndAutonomy(t *testing.T) {
 	for _, args := range [][4]string{
@@ -26,5 +32,31 @@ func TestNewValidatesReferencesAndAutonomy(t *testing.T) {
 	brain = brain.Deactivate()
 	if brain.Active() {
 		t.Fatal("expected Brain to deactivate through its method")
+	}
+}
+
+func TestAuthorizeActionRequiresExplicitCapabilityRegardlessOfRoleOrAutonomy(t *testing.T) {
+	p, err := project.Restore(project.Snapshot{ID: "p1", Name: "Project", Status: project.StatusConfiguring, BrainID: "b1", HumanReviewRequired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := New("b1", "p1", "a1", AutonomyAutonomous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := agent.NewConfigured("a1", agent.Configuration{Name: "Admin", Role: "administrator", Runtime: agent.RuntimeAPI, Provider: "openai", Model: "fake", CredentialID: "credential", Capabilities: []string{"task.complete"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AuthorizeAction(ActionPlan, p, a); !errors.Is(err, ErrUnauthorizedAction) {
+		t.Fatalf("plan without brain.execute: %v", err)
+	}
+	if err := b.AuthorizeAction(ActionCompleteTask, p, a); !errors.Is(err, ErrUnauthorizedAction) {
+		t.Fatalf("completion bypassed human review: %v", err)
+	}
+	for _, action := range []Action{ActionReplaceBrain, ActionGrantCapability, ActionAccessCredential, ActionBypassHumanReview} {
+		if err := b.AuthorizeAction(action, p, a); !errors.Is(err, ErrUnauthorizedAction) {
+			t.Errorf("action %s: %v", action, err)
+		}
 	}
 }

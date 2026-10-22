@@ -2002,6 +2002,8 @@ boaird agents list
 
 The local API supports `POST /api/v1/agents`, `GET /api/v1/agents`, `GET /api/v1/agents/{id}`, and `PATCH /api/v1/agents/{id}`. API-backed agents identify a provider, model, and stored credential by ID; raw provider keys are not part of agent configuration. `role` is descriptive and does not grant capabilities. Agent status is managed by the runtime and is read-only through these endpoints.
 
+Projects can attach one active API Brain with `POST /api/v1/projects/{id}/brain`; the selected agent must explicitly have the `brain.execute` capability. `GET /api/v1/projects/{id}/brain` returns its configuration. `POST /api/v1/projects/{id}/brain/runs` sends an objective to the configured provider and persists a run. The Brain returns a proposed plan as text; this runtime does not apply task or project mutations. Autonomy mode does not grant permissions, and project human review remains in force.
+
 ---
 
 # Tasks

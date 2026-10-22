@@ -8,6 +8,7 @@ import (
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/api"
+	"boAIrd/internal/brain"
 	"boAIrd/internal/config"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
@@ -56,7 +57,19 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize agent manager: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithAgents(database, projectManager, credentialManager, agentManager), logger); err != nil {
+	brainRepository, err := storage.NewBrainRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize Brain repository: %w", err)
+	}
+	runRepository, err := storage.NewRunRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize run repository: %w", err)
+	}
+	brainService, err := brain.NewService(brainRepository, projectManager, agentManager, runRepository, credentialManager)
+	if err != nil {
+		return fmt.Errorf("initialize Brain service: %w", err)
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithBrain(database, projectManager, credentialManager, agentManager, brainService), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

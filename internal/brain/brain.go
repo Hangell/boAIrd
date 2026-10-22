@@ -2,8 +2,13 @@
 package brain
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strings"
+
+	"boAIrd/internal/agent"
+	"boAIrd/internal/project"
 )
 
 type AutonomyMode string
@@ -20,6 +25,39 @@ type Brain struct {
 	agentID   string
 	autonomy  AutonomyMode
 	active    bool
+}
+
+type Action string
+
+const (
+	ActionPlan              Action = "plan"
+	ActionCreateTask        Action = "task.create"
+	ActionAssignTask        Action = "task.assign"
+	ActionReviewTask        Action = "task.review"
+	ActionCompleteTask      Action = "task.complete"
+	ActionRequestAdminHelp  Action = "admin.help.request"
+	ActionReplaceBrain      Action = "brain.replace"
+	ActionGrantCapability   Action = "capability.grant"
+	ActionAccessCredential  Action = "credential.read"
+	ActionBypassHumanReview Action = "human_review.bypass"
+)
+
+var ErrUnauthorizedAction = errors.New("Brain action is not authorized")
+var (
+	ErrNotFound           = errors.New("Brain not found")
+	ErrProjectNotFound    = errors.New("project not found")
+	ErrProjectUnavailable = errors.New("project cannot receive a Brain")
+	ErrInvalidAgent       = errors.New("agent is not eligible to be a Brain")
+	ErrInvalidInput       = errors.New("invalid Brain input")
+	ErrAlreadyExists      = errors.New("project already has a Brain")
+)
+
+func newID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value[:]), nil
 }
 
 func New(id, projectID, agentID string, autonomy AutonomyMode) (Brain, error) {
@@ -60,6 +98,44 @@ func (b Brain) Deactivate() Brain {
 func (b Brain) Activate() Brain {
 	b.active = true
 	return b
+}
+
+// AuthorizeAction checks identity, project policy, and explicit agent capabilities.
+func (b Brain) AuthorizeAction(action Action, p project.Project, a agent.Agent) error {
+	if !b.active || b.projectID != p.ID() || p.BrainID() != b.id || b.agentID != a.ID() || p.Status() == project.StatusArchived {
+		return ErrUnauthorizedAction
+	}
+	switch action {
+	case ActionReplaceBrain, ActionGrantCapability, ActionAccessCredential, ActionBypassHumanReview:
+		return ErrUnauthorizedAction
+	case ActionCompleteTask:
+		if p.HumanReviewRequired() {
+			return ErrUnauthorizedAction
+		}
+	}
+	var required string
+	switch action {
+	case ActionPlan:
+		required = "brain.execute"
+	case ActionCreateTask:
+		required = "task.create"
+	case ActionAssignTask:
+		required = "task.assign"
+	case ActionReviewTask:
+		required = "task.review"
+	case ActionCompleteTask:
+		required = "task.complete"
+	case ActionRequestAdminHelp:
+		required = "admin.help.request"
+	default:
+		return ErrUnauthorizedAction
+	}
+	for _, capability := range a.Capabilities() {
+		if string(capability) == required {
+			return nil
+		}
+	}
+	return ErrUnauthorizedAction
 }
 
 func validAutonomy(mode AutonomyMode) bool {
