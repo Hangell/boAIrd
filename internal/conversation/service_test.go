@@ -90,16 +90,43 @@ func TestConversationPersistsStructuredMessagesWithScopedActorsAndRedaction(t *t
 	if strings.Contains(string(message.Metadata()), "private") {
 		t.Fatalf("nested message metadata was not redacted: %s", message.Metadata())
 	}
+	userMessage, err := service.Append(ctx, work.ID(), conversation.SenderUser, project.LocalAdministratorID, conversation.MessageInput{Content: "human reply", ContentType: "text/plain"})
+	if err != nil {
+		t.Fatalf("authorized local administrator append: %v", err)
+	}
 
-	value, messages, err := service.Get(ctx, work.ID())
+	value, messages, nextBefore, err := service.GetPage(ctx, work.ID(), project.LocalAdministratorID, "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.TaskID() != work.ID() || value.ProjectID() != p.ID() || len(messages) != 1 || messages[0].SenderID() != worker.ID() {
+	if value.TaskID() != work.ID() || value.ProjectID() != p.ID() || len(messages) != 1 || nextBefore == "" {
 		t.Fatalf("conversation retrieval = task %q project %q messages %+v", value.TaskID(), value.ProjectID(), messages)
 	}
-	if string(messages[0].Metadata()) != string(message.Metadata()) {
-		t.Fatalf("metadata changed during persistence: %s", messages[0].Metadata())
+	older, olderMessages, olderNext, err := service.GetPage(ctx, work.ID(), project.LocalAdministratorID, nextBefore, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if older.ID() != value.ID() || len(olderMessages) != 1 || olderNext != "" {
+		t.Fatalf("older page = conversation %q messages %+v cursor %q", older.ID(), olderMessages, olderNext)
+	}
+	messageIDs := map[string]bool{messages[0].ID(): true, olderMessages[0].ID(): true}
+	if len(messageIDs) != 2 || !messageIDs[message.ID()] || !messageIDs[userMessage.ID()] {
+		t.Fatalf("cursor pages returned message IDs %v, want both messages", messageIDs)
+	}
+	var agentMessage conversation.Message
+	if messages[0].SenderID() == worker.ID() {
+		agentMessage = messages[0]
+	} else {
+		agentMessage = olderMessages[0]
+	}
+	if string(agentMessage.Metadata()) != string(message.Metadata()) {
+		t.Fatalf("metadata changed during persistence: %s", agentMessage.Metadata())
+	}
+	if _, _, _, err := service.GetPage(ctx, work.ID(), "unverified-human", "", 10); !errors.Is(err, conversation.ErrForbidden) {
+		t.Fatalf("unverified user read error = %v, want forbidden", err)
+	}
+	if _, _, _, err := service.GetPage(ctx, work.ID(), project.LocalAdministratorID, "missing-cursor", 10); !errors.Is(err, conversation.ErrInvalidCursor) {
+		t.Fatalf("invalid cursor error = %v, want invalid cursor", err)
 	}
 	if _, err := service.Append(ctx, work.ID(), conversation.SenderAgent, "another-agent", conversation.MessageInput{Content: "no", ContentType: "text/plain"}); !errors.Is(err, conversation.ErrForbidden) {
 		t.Fatalf("unassigned agent append error = %v, want forbidden", err)

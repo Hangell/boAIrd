@@ -16,10 +16,11 @@ const (
 
 // Config contains the settings required to start the local service.
 type Config struct {
-	Host         string
-	Port         int
-	DatabasePath string
-	MasterKey    MasterKey
+	Host           string
+	Port           int
+	DatabasePath   string
+	MasterKey      MasterKey
+	LocalAuthToken LocalAuthToken
 }
 
 // MasterKey is the deployment-supplied key used to encrypt provider credentials.
@@ -27,6 +28,12 @@ type MasterKey [32]byte
 
 func (MasterKey) String() string   { return "[REDACTED]" }
 func (MasterKey) GoString() string { return "[REDACTED]" }
+
+// LocalAuthToken authenticates the configured local administrator to sensitive conversation routes.
+type LocalAuthToken [32]byte
+
+func (LocalAuthToken) String() string   { return "[REDACTED]" }
+func (LocalAuthToken) GoString() string { return "[REDACTED]" }
 
 // Load reads service settings from the environment and applies local defaults.
 func Load() (Config, error) {
@@ -53,6 +60,16 @@ func Load() (Config, error) {
 	}
 	copy(cfg.MasterKey[:], key)
 	clear(key)
+	rawLocalAuthToken, ok := os.LookupEnv("BOAIRD_LOCAL_AUTH_TOKEN")
+	if !ok || len(rawLocalAuthToken) != 64 {
+		return Config{}, fmt.Errorf("BOAIRD_LOCAL_AUTH_TOKEN must be 64 hexadecimal characters (32 bytes)")
+	}
+	token, err := hex.DecodeString(rawLocalAuthToken)
+	if err != nil {
+		return Config{}, fmt.Errorf("BOAIRD_LOCAL_AUTH_TOKEN must be 64 hexadecimal characters (32 bytes)")
+	}
+	copy(cfg.LocalAuthToken[:], token)
+	clear(token)
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -64,6 +81,9 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	if c.MasterKey == (MasterKey{}) {
 		return fmt.Errorf("BOAIRD_MASTER_KEY must be configured")
+	}
+	if c.LocalAuthToken == (LocalAuthToken{}) {
+		return fmt.Errorf("BOAIRD_LOCAL_AUTH_TOKEN must be configured")
 	}
 	if c.Host == "" {
 		return fmt.Errorf("BOAIRD_HOST must not be empty")

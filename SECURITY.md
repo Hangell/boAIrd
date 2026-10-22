@@ -867,7 +867,10 @@ Example:
 
 ```bash
 BOAIRD_MASTER_KEY=...
+BOAIRD_LOCAL_AUTH_TOKEN=...
 ```
+
+`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for task conversation routes. Generate it independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`.
 
 ---
 

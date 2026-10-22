@@ -20,6 +20,7 @@ var (
 )
 
 const (
+	LocalAdministratorID   = "local-administrator"
 	defaultPageSize        = 50
 	maximumPageSize        = 100
 	maximumNameSize        = 200
@@ -32,6 +33,7 @@ type Repository interface {
 	List(context.Context, int, int) ([]Project, error)
 	Update(context.Context, Project) error
 	HasActiveBrain(context.Context, string, string) (bool, error)
+	IsMember(context.Context, string, string) (bool, error)
 }
 
 type Manager struct {
@@ -100,6 +102,15 @@ func (m *Manager) Get(ctx context.Context, id string) (Project, error) {
 		return Project{}, invalidInput(errors.New("project ID is required"))
 	}
 	return m.repository.Get(ctx, id)
+}
+
+func (m *Manager) IsMember(ctx context.Context, projectID, userID string) (bool, error) {
+	projectID = strings.TrimSpace(projectID)
+	userID = strings.TrimSpace(userID)
+	if projectID == "" || userID == "" {
+		return false, invalidInput(errors.New("project and user IDs are required"))
+	}
+	return m.repository.IsMember(ctx, projectID, userID)
 }
 
 func (m *Manager) List(ctx context.Context, limit, offset int) ([]Project, error) {

@@ -11,11 +11,10 @@ import (
 	"boAIrd/internal/task"
 )
 
-const localConversationSenderID = "local-api"
 const maximumConversationRequestSize = (1 << 20) + (64 << 10) + (4 << 10)
 
 type conversationAPIManager interface {
-	Get(context.Context, string) (conversation.Conversation, []conversation.Message, error)
+	GetPage(context.Context, string, string, string, int) (conversation.Conversation, []conversation.Message, string, error)
 	Append(context.Context, string, conversation.SenderType, string, conversation.MessageInput) (conversation.Message, error)
 }
 
@@ -37,15 +36,26 @@ type conversationMessageResponse struct {
 }
 
 type conversationResponse struct {
-	ID        string                        `json:"id"`
-	ProjectID string                        `json:"project_id"`
-	TaskID    string                        `json:"task_id"`
-	Messages  []conversationMessageResponse `json:"messages"`
+	ID         string                        `json:"id"`
+	ProjectID  string                        `json:"project_id"`
+	TaskID     string                        `json:"task_id"`
+	Messages   []conversationMessageResponse `json:"messages"`
+	NextBefore string                        `json:"next_before,omitempty"`
 }
 
-func registerConversationRoutes(mux *http.ServeMux, manager conversationAPIManager) {
+func registerConversationRoutes(mux *http.ServeMux, manager conversationAPIManager, localAuthToken []byte) {
 	mux.HandleFunc("GET /api/v1/tasks/{id}/messages", func(w http.ResponseWriter, r *http.Request) {
-		value, messages, err := manager.Get(r.Context(), r.PathValue("id"))
+		userID, ok := localConversationPrincipal(r, localAuthToken)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
+		limit, err := queryInteger(r, "limit", 0)
+		if err != nil || (r.URL.Query().Has("limit") && limit == 0) || limit > 100 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer between 1 and 100")
+			return
+		}
+		value, messages, nextBefore, err := manager.GetPage(r.Context(), r.PathValue("id"), userID, r.URL.Query().Get("before"), limit)
 		if err != nil {
 			writeConversationError(w, err)
 			return
@@ -54,16 +64,21 @@ func registerConversationRoutes(mux *http.ServeMux, manager conversationAPIManag
 		for _, message := range messages {
 			items = append(items, toConversationMessage(message))
 		}
-		writeJSON(w, http.StatusOK, conversationResponse{ID: value.ID(), ProjectID: value.ProjectID(), TaskID: value.TaskID(), Messages: items})
+		writeJSON(w, http.StatusOK, conversationResponse{ID: value.ID(), ProjectID: value.ProjectID(), TaskID: value.TaskID(), Messages: items, NextBefore: nextBefore})
 	})
 
 	mux.HandleFunc("POST /api/v1/tasks/{id}/messages", func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := localConversationPrincipal(r, localAuthToken)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
 		var request createMessageRequest
 		if err := decodeJSONWithLimit(w, r, &request, maximumConversationRequestSize); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		message, err := manager.Append(r.Context(), r.PathValue("id"), conversation.SenderUser, localConversationSenderID,
+		message, err := manager.Append(r.Context(), r.PathValue("id"), conversation.SenderUser, userID,
 			conversation.MessageInput{Content: request.Content, ContentType: request.ContentType, Metadata: request.Metadata})
 		if err != nil {
 			writeConversationError(w, err)
@@ -89,6 +104,8 @@ func writeConversationError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusForbidden, "forbidden", "sender is not authorized for this task")
 	case errors.Is(err, conversation.ErrInvalidInput):
 		writeAPIError(w, http.StatusBadRequest, "invalid_message", err.Error())
+	case errors.Is(err, conversation.ErrInvalidCursor):
+		writeAPIError(w, http.StatusBadRequest, "invalid_cursor", "message cursor does not belong to this conversation")
 	case errors.Is(err, conversation.ErrProjectArchived):
 		writeAPIError(w, http.StatusConflict, "task_unavailable", "task project is unavailable")
 	default:

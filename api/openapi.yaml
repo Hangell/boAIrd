@@ -399,19 +399,34 @@ paths:
     get:
       operationId: listTaskMessages
       summary: Retrieve the task conversation history
-      description: The conversation is created with its task. Message content and metadata are redacted before persistence and return. Sender identity is assigned by the server.
+      description: Requires the configured local administrator bearer token and project membership. Returns the newest bounded page in chronological order; use next_before as before to fetch older messages. Message content and metadata are redacted before persistence and return.
+      security:
+        - localBearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: before
+          in: query
+          description: Message ID cursor returned as next_before by the preceding page.
+          schema: { type: string }
       responses:
         '200':
-          description: Conversation and messages ordered by creation time.
+          description: Conversation and bounded messages ordered by creation time. next_before is present when older messages remain.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Conversation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: Missing or invalid local bearer token. }
+        '403': { description: Caller is not a member of the project. }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       operationId: createTaskMessage
       summary: Add a message to a task conversation
-      description: This local API identifies its caller as the fixed local-api principal. Caller-supplied sender identity is rejected; human user authentication is not implemented.
+      description: Requires the configured local administrator bearer token and project membership. The server derives sender identity from the authenticated local principal; caller-supplied sender identity is rejected.
+      security:
+        - localBearerAuth: []
       requestBody:
         required: true
         content:
@@ -424,6 +439,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ConversationMessage' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: Missing or invalid local bearer token. }
         '403': { description: Sender is not authorized for this task. }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: The project is archived and cannot accept messages. }
@@ -529,6 +545,11 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 components:
+  securitySchemes:
+    localBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: 64-character hexadecimal token from BOAIRD_LOCAL_AUTH_TOKEN
   schemas:
     CreateBrain:
       type: object
@@ -685,6 +706,7 @@ components:
         project_id: { type: string }
         task_id: { type: string }
         messages: { type: array, items: { $ref: '#/components/schemas/ConversationMessage' } }
+        next_before: { type: string, description: Cursor for fetching the next older page; omitted when there are no older messages. }
     CreateAgent:
       type: object
       additionalProperties: false

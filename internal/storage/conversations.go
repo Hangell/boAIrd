@@ -44,9 +44,24 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, value conver
 	return nil
 }
 
-func (r *ConversationRepository) ListMessages(ctx context.Context, conversationID string) ([]conversation.Message, error) {
-	rows, err := r.database.QueryContext(ctx, `SELECT id, conversation_id, sender_type, sender_id, content, content_type, metadata, created_at
-		FROM conversation_messages WHERE conversation_id=? ORDER BY created_at, id`, conversationID)
+func (r *ConversationRepository) ListMessages(ctx context.Context, conversationID, beforeID string, limit int) ([]conversation.Message, error) {
+	query := `SELECT id, conversation_id, sender_type, sender_id, content, content_type, metadata, created_at
+		FROM conversation_messages WHERE conversation_id=?`
+	args := []any{conversationID}
+	if beforeID != "" {
+		var cursorExists bool
+		if err := r.database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM conversation_messages WHERE conversation_id=? AND id=?)", conversationID, beforeID).Scan(&cursorExists); err != nil {
+			return nil, fmt.Errorf("validate conversation cursor: %w", err)
+		}
+		if !cursorExists {
+			return nil, conversation.ErrInvalidCursor
+		}
+		query += " AND (created_at, id) < (SELECT created_at, id FROM conversation_messages WHERE conversation_id=? AND id=?)"
+		args = append(args, conversationID, beforeID)
+	}
+	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := r.database.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query conversation messages: %w", err)
 	}
@@ -70,6 +85,9 @@ func (r *ConversationRepository) ListMessages(ctx context.Context, conversationI
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate conversation messages: %w", err)
+	}
+	for left, right := 0, len(values)-1; left < right; left, right = left+1, right-1 {
+		values[left], values[right] = values[right], values[left]
 	}
 	return values, nil
 }

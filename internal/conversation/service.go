@@ -19,13 +19,19 @@ var (
 	ErrNotFound        = errors.New("conversation not found")
 	ErrForbidden       = errors.New("conversation sender is not a project participant")
 	ErrInvalidInput    = errors.New("invalid conversation input")
+	ErrInvalidCursor   = errors.New("conversation cursor is invalid")
 	ErrProjectArchived = errors.New("project is archived")
+)
+
+const (
+	defaultMessagePageSize = 50
+	maximumMessagePageSize = 100
 )
 
 type Repository interface {
 	GetByTask(context.Context, string) (Conversation, error)
 	AppendMessage(context.Context, Message) error
-	ListMessages(context.Context, string) ([]Message, error)
+	ListMessages(context.Context, string, string, int) ([]Message, error)
 }
 
 type TaskReader interface {
@@ -33,6 +39,7 @@ type TaskReader interface {
 }
 type ProjectReader interface {
 	Get(context.Context, string) (project.Project, error)
+	IsMember(context.Context, string, string) (bool, error)
 }
 type AgentReader interface {
 	Get(context.Context, string) (agent.Agent, error)
@@ -62,20 +69,34 @@ func NewService(repository Repository, tasks TaskReader, projects ProjectReader,
 	return &Service{repository: repository, tasks: tasks, projects: projects, agents: agents, brains: brains}, nil
 }
 
-func (s *Service) Get(ctx context.Context, taskID string) (Conversation, []Message, error) {
+func (s *Service) GetPage(ctx context.Context, taskID, userID, before string, limit int) (Conversation, []Message, string, error) {
+	if limit == 0 {
+		limit = defaultMessagePageSize
+	}
+	if limit < 1 || limit > maximumMessagePageSize {
+		return Conversation{}, nil, "", fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalidInput, maximumMessagePageSize)
+	}
 	work, err := s.tasks.Get(ctx, strings.TrimSpace(taskID))
 	if err != nil {
-		return Conversation{}, nil, mapTaskError(err)
+		return Conversation{}, nil, "", mapTaskError(err)
+	}
+	if err := s.authorizeProjectMember(ctx, work.ProjectID(), userID); err != nil {
+		return Conversation{}, nil, "", err
 	}
 	value, err := s.repository.GetByTask(ctx, work.ID())
 	if err != nil {
-		return Conversation{}, nil, err
+		return Conversation{}, nil, "", err
 	}
-	messages, err := s.repository.ListMessages(ctx, value.ID())
+	messages, err := s.repository.ListMessages(ctx, value.ID(), strings.TrimSpace(before), limit+1)
 	if err != nil {
-		return Conversation{}, nil, err
+		return Conversation{}, nil, "", err
 	}
-	return value, messages, nil
+	nextBefore := ""
+	if len(messages) > limit {
+		messages = messages[1:]
+		nextBefore = messages[0].ID()
+	}
+	return value, messages, nextBefore, nil
 }
 
 // Append trusts sender identity only when supplied by an in-process caller; HTTP handlers never accept it from request data.
@@ -121,9 +142,7 @@ func (s *Service) authorizeSender(ctx context.Context, value task.Task, senderTy
 	}
 	switch senderType {
 	case SenderUser:
-		if senderID == "local-api" {
-			return nil
-		}
+		return s.authorizeProjectMember(ctx, value.ProjectID(), senderID)
 	case SenderAgent:
 		if senderID != value.AssignedTo() {
 			return ErrForbidden
@@ -141,6 +160,20 @@ func (s *Service) authorizeSender(ctx context.Context, value task.Task, senderTy
 		return ErrForbidden
 	}
 	return ErrForbidden
+}
+
+func (s *Service) authorizeProjectMember(ctx context.Context, projectID, userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return ErrForbidden
+	}
+	member, err := s.projects.IsMember(ctx, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if !member {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func mapTaskError(err error) error {

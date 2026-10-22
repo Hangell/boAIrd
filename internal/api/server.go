@@ -75,7 +75,7 @@ type TaskManager interface {
 }
 
 type ConversationManager interface {
-	Get(context.Context, string) (conversation.Conversation, []conversation.Message, error)
+	GetPage(context.Context, string, string, string, int) (conversation.Conversation, []conversation.Message, string, error)
 	Append(context.Context, string, conversation.SenderType, string, conversation.MessageInput) (conversation.Message, error)
 }
 
@@ -101,11 +101,11 @@ func NewHandlerWithTasks(database DatabaseHealth, projects ProjectManager, crede
 	return newHandler(database, projects, credentials, agents, brains, runs, tasks, nil)
 }
 
-func NewHandlerWithConversations(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager) http.Handler {
-	return newHandler(database, projects, credentials, agents, brains, runs, tasks, conversations)
+func NewHandlerWithConversations(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte) http.Handler {
+	return newHandler(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken)
 }
 
-func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager) http.Handler {
+func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthTokens ...[]byte) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -145,7 +145,11 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 		registerTaskRoutes(mux, tasks)
 	}
 	if conversations != nil {
-		registerConversationRoutes(mux, conversations)
+		var localAuthToken []byte
+		if len(localAuthTokens) > 0 {
+			localAuthToken = localAuthTokens[0]
+		}
+		registerConversationRoutes(mux, conversations, localAuthToken)
 	}
 	return mux
 }

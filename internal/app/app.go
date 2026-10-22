@@ -24,6 +24,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 		return fmt.Errorf("validate configuration: %w", err)
 	}
 	defer clear(cfg.MasterKey[:])
+	defer clear(cfg.LocalAuthToken[:])
 
 	database, err := storage.OpenSQLite(ctx, cfg.DatabasePath)
 	if err != nil {
@@ -92,7 +93,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize conversation service: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithConversations(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService), logger); err != nil {
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithConversations(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:]), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil
