@@ -32,7 +32,16 @@ type projectScopeRepository interface {
 	RemoveProject(context.Context, string, string, string) error
 }
 
-type Manager struct{ repository Repository }
+// ActivitySource derives server-owned runtime state and reports its history.
+type ActivitySource interface {
+	Statuses(ctx context.Context, agentIDs []string) (map[string]Observed, error)
+	Events(ctx context.Context, agentID string, limit int) ([]StatusEvent, error)
+}
+
+type Manager struct {
+	repository Repository
+	activity   ActivitySource
+}
 
 type CreateInput struct {
 	Name                string   `json:"name"`
@@ -64,11 +73,32 @@ type UpdateInput struct {
 	Capabilities        *[]string `json:"capabilities"`
 }
 
-func NewManager(repository Repository) (*Manager, error) {
+func NewManager(repository Repository, activities ...ActivitySource) (*Manager, error) {
 	if repository == nil {
 		return nil, errors.New("agent repository is required")
 	}
-	return &Manager{repository: repository}, nil
+	manager := &Manager{repository: repository}
+	if len(activities) > 0 {
+		manager.activity = activities[0]
+	}
+	return manager, nil
+}
+
+// Observe returns the observed runtime state for the given Agents. It returns
+// an empty map when no activity source is configured.
+func (m *Manager) Observe(ctx context.Context, agentIDs []string) (map[string]Observed, error) {
+	if m.activity == nil || len(agentIDs) == 0 {
+		return map[string]Observed{}, nil
+	}
+	return m.activity.Statuses(ctx, agentIDs)
+}
+
+// Events returns the recorded status transitions for one Agent.
+func (m *Manager) Events(ctx context.Context, agentID string, limit int) ([]StatusEvent, error) {
+	if m.activity == nil {
+		return []StatusEvent{}, nil
+	}
+	return m.activity.Events(ctx, agentID, limit)
 }
 
 func (m *Manager) Create(ctx context.Context, input CreateInput) (Agent, error) {

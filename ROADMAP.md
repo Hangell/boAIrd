@@ -1189,9 +1189,12 @@ States:
 
 ```text
 ONLINE
+IDLE
 BUSY
+WAITING
 STALE
 OFFLINE
+ERROR
 ```
 
 Flow:
@@ -1213,6 +1216,26 @@ STALE
 
 OFFLINE
 ```
+
+## Implementation
+
+```text
+authenticated MCP activity
+      ↓
+agent_sessions (agent_id, token_id, last_seen_at)
+      ↓
+derived status  (IDLE / ONLINE / BUSY / WAITING / ERROR / STALE / OFFLINE)
+      ↓
+agent_status_events (immutable) + persisted agents.status
+```
+
+- Status is derived on read and reconciled in the background; clients never
+  submit a status.
+- BUSY and WAITING come from assigned tasks in `WORKING` and `REVIEW`; ERROR
+  comes from a recent `FAILED` task.
+- Thresholds are configurable and the clock is injectable, so timeout
+  boundaries are covered by tests.
+- `GET /api/v1/agents/{id}/status-events` exposes the transition history.
 
 ---
 

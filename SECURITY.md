@@ -1278,6 +1278,22 @@ agent_name
 
 as an identity.
 
+Implemented controls:
+
+- **Credential-bound sessions.** A session is keyed by Agent and MCP token; the
+  identity is resolved from the verified bearer token before any state changes.
+- **Server-owned status.** Clients cannot submit `ONLINE`, `BUSY`, or any other
+  status. The server derives it from session liveness and observed work.
+- **Spoof rejection.** A heartbeat that names a different Agent is denied and
+  recorded as an authorization denial (`heartbeat_identity_mismatch`).
+- **Deterministic expiry.** Silent sessions expire on a configured schedule; the
+  transition is persisted with the session that observed it.
+- **Immutable history.** Status events reject updates and deletes at the
+  database layer.
+- **Liveness is not authorization.** A failed activity write never authorizes an
+  action and never rejects an otherwise valid credential; authorization is
+  evaluated independently on every request.
+
 ---
 
 # Session Security

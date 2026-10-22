@@ -29,7 +29,7 @@ func TestCreateRotateRevokeAndAuditLifecycle(t *testing.T) {
 	if len(raw) != 64 || issued.Status != "active" || issued.AgentID != agentID {
 		t.Fatalf("issued metadata = %+v, token length = %d", issued, len(raw))
 	}
-	if got, err := service.Verify(ctx, raw); err != nil || got != agentID {
+	if got, err := service.Verify(ctx, raw); err != nil || got.AgentID != agentID || got.TokenID != issued.ID {
 		t.Fatalf("Verify() = %q, %v", got, err)
 	}
 	decoded := mustDecode(t, raw)
@@ -53,7 +53,7 @@ func TestCreateRotateRevokeAndAuditLifecycle(t *testing.T) {
 	if _, err := service.Verify(ctx, raw); err == nil {
 		t.Fatal("old token remained valid after rotation")
 	}
-	if got, err := service.Verify(ctx, rotatedRaw); err != nil || got != agentID {
+	if got, err := service.Verify(ctx, rotatedRaw); err != nil || got.AgentID != agentID || got.TokenID != replacement.ID {
 		t.Fatalf("replacement token Verify() = %q, %v", got, err)
 	}
 	if err := service.Revoke(ctx, replacement.ID, "local-administrator"); err != nil {

@@ -110,10 +110,12 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 	if err := validateAgentCredential(ctx, tx, snapshot); err != nil {
 		return err
 	}
+	// Status is server-derived runtime state: configuration updates must not
+	// overwrite it, otherwise a concurrent reconcile would be reverted.
 	result, err := tx.ExecContext(ctx, `UPDATE agents SET name = ?, avatar = ?, description = ?, role = ?, runtime = ?,
-		provider = ?, provider_base_url = ?, model = ?, credential_id = NULLIF(?, ''), instructions = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+		provider = ?, provider_base_url = ?, model = ?, credential_id = NULLIF(?, ''), instructions = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`, snapshot.Name, snapshot.Avatar, snapshot.Description, snapshot.Role, snapshot.Runtime,
-		snapshot.Provider, snapshot.ProviderBaseURL, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.Status, snapshot.ID)
+		snapshot.Provider, snapshot.ProviderBaseURL, snapshot.Model, snapshot.CredentialID, snapshot.Instructions, snapshot.ID)
 	if err != nil {
 		return fmt.Errorf("update agent: %w", err)
 	}

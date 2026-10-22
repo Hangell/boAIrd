@@ -12,6 +12,8 @@ import (
 	"boAIrd/internal/agent"
 	"boAIrd/internal/brain"
 	"boAIrd/internal/conversation"
+	"boAIrd/internal/heartbeat"
+	"boAIrd/internal/mcptoken"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/task"
@@ -133,12 +135,12 @@ func (runStub) Get(context.Context, string) (run.Run, error) { return run.Run{},
 
 type staticVerifier map[string]string
 
-func (s staticVerifier) Verify(_ context.Context, raw string) (string, error) {
+func (s staticVerifier) Verify(_ context.Context, raw string) (mcptoken.Identity, error) {
 	value, ok := s[raw]
 	if !ok {
-		return "", errors.New("invalid token")
+		return mcptoken.Identity{}, errors.New("invalid token")
 	}
-	return value, nil
+	return mcptoken.Identity{AgentID: value, TokenID: "token-" + value}, nil
 }
 
 type denialStub struct{ records []string }
@@ -226,7 +228,7 @@ func TestHandlerAuthenticatesAndBindsSessionToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	wantTools := []string{"boaird.project.get", "boaird.agent.list", "boaird.agent.get", "boaird.agent.status", "boaird.task.list", "boaird.task.get", "boaird.task.claim", "boaird.task.update", "boaird.task.complete", "boaird.task.fail", "boaird.conversation.read", "boaird.conversation.send", "boaird.context.get", "boaird.brain.request", "boaird.run.get"}
+	wantTools := []string{"boaird.project.get", "boaird.agent.list", "boaird.agent.get", "boaird.agent.status", "boaird.agent.heartbeat", "boaird.task.list", "boaird.task.get", "boaird.task.claim", "boaird.task.update", "boaird.task.complete", "boaird.task.fail", "boaird.conversation.read", "boaird.conversation.send", "boaird.context.get", "boaird.brain.request", "boaird.run.get"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("tool count = %d, want %d", len(result.Tools), len(wantTools))
 	}
@@ -443,4 +445,102 @@ func TestToolErrorReportsTaskConflictRetryGuidance(t *testing.T) {
 	if err == nil || err.Error() != "task changed concurrently; reload and retry" {
 		t.Fatalf("toolError(ErrConflict) = %v, want safe retry guidance", err)
 	}
+}
+
+type heartbeatStub struct {
+	identities []heartbeat.Identity
+	statuses   map[string]agent.Observed
+}
+
+func (s *heartbeatStub) Heartbeat(_ context.Context, identity heartbeat.Identity) (agent.Observed, error) {
+	s.identities = append(s.identities, identity)
+	return s.statuses[identity.AgentID], nil
+}
+
+func (s *heartbeatStub) Statuses(_ context.Context, agentIDs []string) (map[string]agent.Observed, error) {
+	observed := make(map[string]agent.Observed, len(agentIDs))
+	for _, id := range agentIDs {
+		if value, ok := s.statuses[id]; ok {
+			observed[id] = value
+		}
+	}
+	return observed, nil
+}
+
+func TestHeartbeatBindsAuthenticatedIdentityAndRejectsSpoofing(t *testing.T) {
+	first := testAgent(t, "agent-one")
+	second := testAgent(t, "agent-two")
+	rawToken := strings.Repeat("01", 32)
+	denials := &denialStub{}
+	heartbeats := &heartbeatStub{statuses: map[string]agent.Observed{
+		first.ID():  {Status: agent.StatusOnline, SessionOpen: true},
+		second.ID(): {Status: agent.StatusIdle},
+	}}
+	server, err := New(Services{
+		Agents:   agentStub{map[string]agent.Agent{first.ID(): first, second.ID(): second}},
+		Projects: projectStub{}, Tasks: taskStub{}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{},
+		Denials: denials, Heartbeats: heartbeats,
+	}, staticVerifier{rawToken: first.ID()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	httpClient := &http.Client{Transport: bearerRoundTripper{token: func() string { return rawToken }, base: http.DefaultTransport}}
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL, HTTPClient: httpClient, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer session.Close()
+
+	// Connecting is authenticated MCP activity, so liveness is refreshed from
+	// the verified credential alone.
+	if len(heartbeats.identities) == 0 {
+		t.Fatal("authenticated MCP activity did not refresh Agent liveness")
+	}
+	if got := heartbeats.identities[0]; got.AgentID != first.ID() || got.TokenID != "token-"+first.ID() {
+		t.Fatalf("recorded identity = %+v, want the verified Agent and credential", got)
+	}
+
+	status, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.agent.status"})
+	if err != nil || status.IsError {
+		t.Fatalf("agent.status result = %+v, error %v", status, err)
+	}
+	observed := decodeAgentOutput(t, status)
+	if observed.Status != string(agent.StatusOnline) || !observed.SessionOpen {
+		t.Fatalf("agent.status output = %+v, want observed ONLINE session", observed)
+	}
+
+	beat, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.agent.heartbeat"})
+	if err != nil || beat.IsError || decodeAgentOutput(t, beat).Status != string(agent.StatusOnline) {
+		t.Fatalf("agent.heartbeat result = %+v, error %v", beat, err)
+	}
+
+	spoofed, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.agent.heartbeat", Arguments: map[string]any{"agent_id": second.ID()}})
+	if err != nil || spoofed == nil || !spoofed.IsError {
+		t.Fatalf("spoofed heartbeat result = %+v, error %v; want tool error", spoofed, err)
+	}
+	for _, identity := range heartbeats.identities {
+		if identity.AgentID == second.ID() {
+			t.Fatal("spoofed identity was recorded as activity for another Agent")
+		}
+	}
+	recorded := strings.Join(denials.records, ",")
+	if !strings.Contains(recorded, "heartbeat_identity_mismatch") {
+		t.Fatalf("denials = %q, want heartbeat_identity_mismatch", recorded)
+	}
+}
+
+func decodeAgentOutput(t *testing.T, result *mcp.CallToolResult) agentOutput {
+	t.Helper()
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value agentOutput
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		t.Fatalf("decode agent output %s: %v", encoded, err)
+	}
+	return value
 }

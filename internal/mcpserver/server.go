@@ -13,6 +13,8 @@ import (
 	"boAIrd/internal/brain"
 	"boAIrd/internal/capability"
 	"boAIrd/internal/conversation"
+	"boAIrd/internal/heartbeat"
+	"boAIrd/internal/mcptoken"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/task"
@@ -31,10 +33,17 @@ type Services struct {
 	Conversations ConversationService
 	Brains        BrainService
 	Runs          RunService
+	Heartbeats    HeartbeatService
 }
 
 type TokenVerifier interface {
-	Verify(context.Context, string) (string, error)
+	Verify(context.Context, string) (mcptoken.Identity, error)
+}
+
+// HeartbeatService records authenticated activity and derives Agent status.
+type HeartbeatService interface {
+	Heartbeat(context.Context, heartbeat.Identity) (agent.Observed, error)
+	Statuses(context.Context, []string) (map[string]agent.Observed, error)
 }
 type AuthorizationDenialService interface {
 	RecordAuthorizationDenial(context.Context, string, string, string, string, string) error
@@ -88,14 +97,21 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) verifyToken(ctx context.Context, raw string, _ *http.Request) (*auth.TokenInfo, error) {
-	agentID, err := s.tokens.Verify(ctx, raw)
-	if err != nil || strings.TrimSpace(agentID) == "" {
+	identity, err := s.tokens.Verify(ctx, raw)
+	if err != nil || strings.TrimSpace(identity.AgentID) == "" {
 		return nil, auth.ErrInvalidToken
 	}
-	if _, err := s.services.Agents.Get(ctx, agentID); err != nil {
+	if _, err := s.services.Agents.Get(ctx, identity.AgentID); err != nil {
 		return nil, auth.ErrInvalidToken
 	}
-	return &auth.TokenInfo{UserID: agentID}, nil
+	if s.services.Heartbeats != nil {
+		// Liveness is observability, not authorization: a failed activity write
+		// must never reject an otherwise valid credential.
+		if _, err := s.services.Heartbeats.Heartbeat(ctx, heartbeat.Identity{AgentID: identity.AgentID, TokenID: identity.TokenID}); err != nil {
+			slog.Error("record MCP agent activity", "error", err, "agent_id", identity.AgentID)
+		}
+	}
+	return &auth.TokenInfo{UserID: identity.AgentID, Extra: map[string]any{"token_id": identity.TokenID}}, nil
 }
 
 func (s *Server) registerTools(server *mcp.Server) {
@@ -103,7 +119,8 @@ func (s *Server) registerTools(server *mcp.Server) {
 	mcp.AddTool[projectInput, projectOutput](server, add("boaird.project.get", "Get a project visible to the authenticated Agent."), s.projectGet)
 	mcp.AddTool[emptyInput, []agentOutput](server, add("boaird.agent.list", "List only the authenticated Agent."), s.agentList)
 	mcp.AddTool[agentInput, agentOutput](server, add("boaird.agent.get", "Get the authenticated Agent; other Agent identities are not exposed."), s.agentGet)
-	mcp.AddTool[agentInput, agentOutput](server, add("boaird.agent.status", "Get the authenticated Agent status."), s.agentGet)
+	mcp.AddTool[agentInput, agentOutput](server, add("boaird.agent.status", "Get the server-derived status of the authenticated Agent."), s.agentGet)
+	mcp.AddTool[heartbeatInput, agentOutput](server, add("boaird.agent.heartbeat", "Report authenticated activity for the calling Agent and return its server-derived status."), s.agentHeartbeat)
 	mcp.AddTool[taskListInput, []taskOutput](server, add("boaird.task.list", "List tasks in a project, or only tasks assigned to the authenticated Agent across projects."), s.taskList)
 	mcp.AddTool[taskInput, taskOutput](server, add("boaird.task.get", "Get a task assigned to this Agent or in its explicit project scope."), s.taskGet)
 	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.claim", "Claim a READY task assigned to this Agent, or self-assign an unassigned task when task.assign is explicitly granted."), s.taskClaim)
@@ -131,12 +148,20 @@ type agentInput struct {
 	AgentID string `json:"agent_id,omitempty"`
 }
 type agentOutput struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Role         string   `json:"role"`
-	Status       string   `json:"status"`
-	Runtime      string   `json:"runtime"`
-	Capabilities []string `json:"capabilities"`
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Role         string     `json:"role"`
+	Status       string     `json:"status"`
+	Runtime      string     `json:"runtime"`
+	Capabilities []string   `json:"capabilities"`
+	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
+	SessionOpen  bool       `json:"session_open"`
+}
+
+// heartbeatInput carries no status: identity comes from the verified credential.
+// agent_id is accepted only so a mismatched identity is rejected explicitly.
+type heartbeatInput struct {
+	AgentID string `json:"agent_id,omitempty"`
 }
 type taskListInput struct {
 	ProjectID string `json:"project_id,omitempty"`
@@ -252,12 +277,17 @@ func (s *Server) hasProjectScope(ctx context.Context, a agent.Agent, projectID s
 	b, err := s.services.Brains.Get(ctx, projectID)
 	return err == nil && b.Active() && b.AgentID() == a.ID() && b.ProjectID() == projectID
 }
-func agentView(a agent.Agent) agentOutput {
+func agentView(a agent.Agent, observed agent.Observed, hasObservation bool) agentOutput {
 	caps := make([]string, 0, len(a.Capabilities()))
 	for _, c := range a.Capabilities() {
 		caps = append(caps, string(c))
 	}
-	return agentOutput{ID: a.ID(), Name: a.Name(), Role: a.Role(), Status: string(a.Status()), Runtime: string(a.Runtime()), Capabilities: caps}
+	status := a.Status()
+	if hasObservation {
+		status = observed.Status
+	}
+	return agentOutput{ID: a.ID(), Name: a.Name(), Role: a.Role(), Status: string(status), Runtime: string(a.Runtime()),
+		Capabilities: caps, LastSeenAt: observed.LastSeenAt, SessionOpen: observed.SessionOpen}
 }
 func taskView(t task.Task) taskOutput {
 	return taskOutput{ID: t.ID(), ProjectID: t.ProjectID(), Title: t.Title(), Description: t.Description(), Status: string(t.Status()), Priority: t.Priority(), AssignedTo: t.AssignedTo(), HumanReview: t.HumanReview(), Version: t.Version()}
@@ -373,7 +403,8 @@ func (s *Server) agentList(ctx context.Context, _ *mcp.CallToolRequest, _ emptyI
 	if s.authorize(ctx, a, "agent.read", "") != nil {
 		return nil, nil, toolError(task.ErrForbidden)
 	}
-	return nil, []agentOutput{agentView(a)}, nil
+	observed, hasObservation := s.observe(ctx, a.ID())
+	return nil, []agentOutput{agentView(a, observed, hasObservation)}, nil
 }
 func (s *Server) agentGet(ctx context.Context, _ *mcp.CallToolRequest, in agentInput) (*mcp.CallToolResult, agentOutput, error) {
 	a, e := s.actor(ctx)
@@ -383,7 +414,50 @@ func (s *Server) agentGet(ctx context.Context, _ *mcp.CallToolRequest, in agentI
 	if in.AgentID != "" && in.AgentID != a.ID() || s.authorize(ctx, a, "agent.read", "") != nil {
 		return nil, agentOutput{}, toolError(task.ErrForbidden)
 	}
-	return nil, agentView(a), nil
+	observed, hasObservation := s.observe(ctx, a.ID())
+	return nil, agentView(a, observed, hasObservation), nil
+}
+func (s *Server) agentHeartbeat(ctx context.Context, _ *mcp.CallToolRequest, in heartbeatInput) (*mcp.CallToolResult, agentOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, agentOutput{}, toolError(err)
+	}
+	if in.AgentID != "" && in.AgentID != a.ID() {
+		s.recordDenial(ctx, a, "", "agent.status", "heartbeat_identity_mismatch")
+		return nil, agentOutput{}, toolError(task.ErrForbidden)
+	}
+	if s.authorize(ctx, a, "agent.read", "") != nil {
+		return nil, agentOutput{}, toolError(task.ErrForbidden)
+	}
+	if s.services.Heartbeats == nil {
+		return nil, agentView(a, agent.Observed{}, false), nil
+	}
+	observed, err := s.services.Heartbeats.Heartbeat(ctx, heartbeat.Identity{AgentID: a.ID(), TokenID: credentialTokenID(ctx)})
+	if err != nil {
+		slog.Error("record agent heartbeat", "error", err, "agent_id", a.ID())
+		return nil, agentOutput{}, toolError(err)
+	}
+	return nil, agentView(a, observed, true), nil
+}
+func (s *Server) observe(ctx context.Context, agentID string) (agent.Observed, bool) {
+	if s.services.Heartbeats == nil {
+		return agent.Observed{}, false
+	}
+	observed, err := s.services.Heartbeats.Statuses(ctx, []string{agentID})
+	if err != nil {
+		slog.Error("derive agent status", "error", err, "agent_id", agentID)
+		return agent.Observed{}, false
+	}
+	value, ok := observed[agentID]
+	return value, ok
+}
+func credentialTokenID(ctx context.Context) string {
+	info := auth.TokenInfoFromContext(ctx)
+	if info == nil {
+		return ""
+	}
+	value, _ := info.Extra["token_id"].(string)
+	return value
 }
 func (s *Server) taskList(ctx context.Context, _ *mcp.CallToolRequest, in taskListInput) (*mcp.CallToolResult, []taskOutput, error) {
 	a, e := s.actor(ctx)
