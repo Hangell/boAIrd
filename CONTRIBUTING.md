@@ -924,15 +924,35 @@ final final
 
 # Go Contribution Guidelines
 
-Follow standard Go conventions.
+Follow standard Go conventions. The repository pins `golangci-lint` in
+`.golangci-lint-version` and uses its standard linter set, including
+`errcheck`, `govet`, `staticcheck`, `ineffassign`, and `unused`. CI checks
+findings on changed lines; the pre-commit hook analyzes staged Go changes since
+`HEAD`. Existing findings outside changed lines remain a baseline for separate
+cleanup tasks.
 
-Always format Go code with:
+Install the pinned linter binary using the official installer:
 
 ```bash
-gofmt
+curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "$(go env GOPATH)/bin" "$(cat .golangci-lint-version)"
 ```
 
-Before submitting:
+Lefthook is pinned as a Go tool in `go.mod`. Install the Git hooks after cloning
+or switching to this repository:
+
+```bash
+go tool lefthook install
+```
+
+Before committing, Lefthook formats staged Go files with `gofmt`, stages the
+formatted files, and runs the incremental linter. If the linter reports an
+issue, fix it before committing. To check changed lines manually:
+
+```bash
+golangci-lint run --new-from-rev=HEAD
+```
+
+Always format Go code with `gofmt`. Before submitting, run:
 
 ```bash
 gofmt -w .
@@ -970,13 +990,14 @@ go test -race ./...
 
 # Continuous Integration
 
-Pull requests targeting `main` run the Go checks, Angular tests/builds, OpenAPI
-YAML parsing, and a changed-line whitespace check in GitHub Actions. The
-workflow uses the versions from `go.mod` and `web/package-lock.json` and does
-not require repository secrets.
+Pull requests targeting `main` run the Go checks, `golangci-lint` analysis for
+changed lines, Angular tests/builds, OpenAPI YAML parsing, and a changed-line
+whitespace check in GitHub Actions. The workflow uses the versions from
+`go.mod` and `web/package-lock.json` and does not require repository secrets.
 
-The job checks are named `CI / Go`, `CI / Angular`, `CI / OpenAPI`, and
-`CI / Diff whitespace`. Repository branch protection or a ruleset must require
+The job checks are named `CI / golangci-lint`, `CI / Go`, `CI / Angular`,
+`CI / OpenAPI`, and `CI / Diff whitespace`. Repository branch protection or a
+ruleset must require
 these checks to block merges when a job fails; the workflow itself cannot turn
 on repository protection settings.
 
@@ -984,6 +1005,7 @@ Run the same checks locally with:
 
 ```bash
 gofmt -w .
+golangci-lint run --new-from-rev=HEAD
 go vet ./...
 go test ./...
 go test -race ./...
