@@ -1221,9 +1221,8 @@ AUTONOMOUS
 
 # 44. Manual Mode
 
-The user controls most important decisions.
-
-The Brain may recommend actions but requires more frequent human intervention.
+The Brain may produce plans and request administrator help. Task creation,
+assignment, review, and completion require human intervention.
 
 ---
 
@@ -1235,9 +1234,9 @@ The Brain may:
 - guide agents;
 - review work;
 - request corrections;
-- update task states.
+- update task states except completion.
 
-Critical operations may still require approval.
+Task completion always requires human approval in this mode.
 
 ---
 
@@ -1254,7 +1253,16 @@ The Brain may:
 - retry;
 - finish tasks.
 
-But only within granted capabilities and project policies.
+Completion is allowed only when the Brain has `task.complete` and project human
+review is disabled. The Brain cannot exceed its capabilities or bypass project
+policy.
+
+The Brain applies the mode gate before task operations: `MANUAL` is plan-only,
+`SEMI_AUTO` permits capable task creation, assignment, transitions, and review
+but requires human approval for completion, and `AUTONOMOUS` may complete a
+task only when project human review is disabled. All modes use the same
+capability and project-scope checks. An administrator changes the Brain mode,
+and the change is recorded in immutable audit as `brain.autonomy.changed`.
 
 ---
 

@@ -88,7 +88,7 @@ func (s *Service) Create(ctx context.Context, projectID string, input CreateInpu
 		return Task{}, ErrProjectArchived
 	}
 	if err := s.authorizeCapability(ctx, projectID, actor, "task.create"); err != nil {
-		s.recordAuthorizationDenial(ctx, actor, projectID, "task.create", "project:"+projectID, "capability_denied")
+		s.recordAuthorizationDenial(ctx, actor, projectID, "task.create", "project:"+projectID, authorizationDenialReason(err))
 		return Task{}, err
 	}
 	if strings.TrimSpace(input.Reason) == "" {
@@ -166,7 +166,7 @@ func (s *Service) Assign(ctx context.Context, id, agentID, reason string, actor 
 		return Task{}, err
 	}
 	if err := s.authorizeCapability(ctx, value.ProjectID(), actor, "task.assign"); err != nil {
-		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.assign", "task:"+value.ID(), "capability_denied")
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.assign", "task:"+value.ID(), authorizationDenialReason(err))
 		return Task{}, err
 	}
 	if strings.TrimSpace(agentID) == "" {
@@ -209,7 +209,7 @@ func (s *Service) Transition(ctx context.Context, id string, to Status, reason s
 		return Task{}, ErrForbidden
 	}
 	if err := s.authorizeTransition(ctx, value, to, actor); err != nil {
-		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), transitionCapability(to), "task:"+value.ID(), "capability_denied")
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), transitionCapability(to), "task:"+value.ID(), authorizationDenialReason(err))
 		return Task{}, err
 	}
 	value, err = value.Transition(to)
@@ -234,6 +234,13 @@ func (s *Service) recordAuthorizationDenial(ctx context.Context, actor Actor, pr
 	if err := recorder.RecordAuthorizationDenial(ctx, actor.ID, projectID, required, resource, reason); err != nil {
 		slog.ErrorContext(ctx, "record task authorization denial", "error", err)
 	}
+}
+
+func authorizationDenialReason(err error) string {
+	if errors.Is(err, brain.ErrHumanApprovalRequired) {
+		return "human_approval_required"
+	}
+	return "capability_denied"
 }
 
 func transitionCapability(to Status) string {
@@ -290,7 +297,36 @@ func (s *Service) authorizeCapability(ctx context.Context, projectID string, act
 		if err != nil || configured.AgentID() != actor.ID {
 			return ErrForbidden
 		}
-		return s.agentHasCapability(ctx, projectID, actor.ID, required, true)
+		projectValue, err := s.projects.Get(ctx, projectID)
+		if err != nil {
+			return ErrForbidden
+		}
+		agentValue, err := s.agents.Get(ctx, actor.ID)
+		if err != nil {
+			return ErrForbidden
+		}
+		var action brain.Action
+		switch required {
+		case "task.create":
+			action = brain.ActionCreateTask
+		case "task.assign":
+			action = brain.ActionAssignTask
+		case "task.review":
+			action = brain.ActionReviewTask
+		case "task.complete":
+			action = brain.ActionCompleteTask
+		case "task.transition":
+			action = brain.ActionTransitionTask
+		default:
+			return ErrForbidden
+		}
+		if err := configured.AuthorizeAction(action, projectValue, agentValue); err != nil {
+			if errors.Is(err, brain.ErrHumanApprovalRequired) {
+				return fmt.Errorf("%w: %w", ErrForbidden, err)
+			}
+			return ErrForbidden
+		}
+		return nil
 	case ActorAgent:
 		return s.agentHasCapability(ctx, projectID, actor.ID, required, false)
 	}

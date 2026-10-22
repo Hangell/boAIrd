@@ -116,6 +116,15 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	if auditCount != 1 {
 		t.Fatalf("Brain replacement audit events = %d, want 1", auditCount)
 	}
+	var autonomyAuditCount int
+	var autonomyFrom, autonomyTo string
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*), MAX(from_status), MAX(to_status) FROM audit_events WHERE project_id=? AND resource_type='brain' AND resource_id=? AND event_type='brain.autonomy.changed' AND actor_id=?`,
+		projects.ID(), created.ID(), project.LocalAdministratorID).Scan(&autonomyAuditCount, &autonomyFrom, &autonomyTo); err != nil {
+		t.Fatal(err)
+	}
+	if autonomyAuditCount != 1 || autonomyFrom != string(brain.AutonomyAutonomous) || autonomyTo != string(brain.AutonomyManual) {
+		t.Fatalf("autonomy audit = count:%d from:%s to:%s", autonomyAuditCount, autonomyFrom, autonomyTo)
+	}
 	if strings.Contains(auditReason, "must-not-persist") {
 		t.Fatalf("Brain replacement audit reason leaked a secret: %q", auditReason)
 	}

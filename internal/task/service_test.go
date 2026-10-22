@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/brain"
+	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
 	"boAIrd/internal/storage"
 	"boAIrd/internal/task"
@@ -154,3 +156,85 @@ func TestServiceEnforcesWorkflowAndRecordsAudit(t *testing.T) {
 }
 
 var _ task.BrainReader = (*storage.BrainRepository)(nil)
+
+func TestBrainTaskActionsFollowAutonomyAndHumanReviewPolicy(t *testing.T) {
+	ctx := context.Background()
+	database, err := storage.OpenSQLite(ctx, filepath.Join(t.TempDir(), "autonomy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	projectRepository, _ := storage.NewProjectRepository(database)
+	projects, _ := project.NewManager(projectRepository)
+	humanReview := false
+	p, err := projects.Create(ctx, project.CreateInput{Name: "Autonomy", HumanReviewRequired: &humanReview})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialRepository, _ := storage.NewCredentialRepository(database)
+	credentials, err := credential.NewManager(credentialRepository, []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := credentials.Create(ctx, "test", "openai-compatible", "provider-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRepository, _ := storage.NewAgentRepository(database)
+	agents, _ := agent.NewManager(agentRepository)
+	configuredAgent, err := agents.Create(ctx, agent.CreateInput{
+		Name: "Brain", Role: "coordinator", Runtime: agent.RuntimeAPI, Provider: "openai-compatible", Model: "test-model", CredentialID: secret.ID,
+		Capabilities: []string{"brain.execute", "task.create", "task.assign", "task.review", "task.complete", "task.transition"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brainRepository, _ := storage.NewBrainRepository(database)
+	runRepository, _ := storage.NewRunRepository(database)
+	brainService, err := brain.NewService(brainRepository, projects, agents, runRepository, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := brainService.Create(ctx, p.ID(), brain.CreateInput{AgentID: configuredAgent.ID(), Autonomy: brain.AutonomyManual}); err != nil {
+		t.Fatal(err)
+	}
+	taskRepository, _ := storage.NewTaskRepository(database)
+	tasks, err := task.NewService(taskRepository, projects, agents, brainRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	brainActor := task.Actor{Type: task.ActorBrain, ID: configuredAgent.ID()}
+	if _, err := tasks.Create(ctx, p.ID(), task.CreateInput{Title: "Manual task", Reason: "manual mode"}, brainActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("manual mode task creation error = %v, want forbidden", err)
+	}
+	if _, err := brainService.Replace(ctx, p.ID(), brain.CreateInput{AgentID: configuredAgent.ID(), Autonomy: brain.AutonomySemiAuto}, project.LocalAdministratorID, "enable semi-auto"); err != nil {
+		t.Fatal(err)
+	}
+	value, err := tasks.Create(ctx, p.ID(), task.CreateInput{Title: "Semi-auto task", Reason: "semi-auto mode"}, brainActor)
+	if err != nil {
+		t.Fatalf("semi-auto task creation: %v", err)
+	}
+	for _, status := range []task.Status{task.StatusReady, task.StatusWorking, task.StatusReview} {
+		value, err = tasks.Transition(ctx, value.ID(), status, "advance task", brainActor)
+		if err != nil {
+			t.Fatalf("semi-auto transition to %s: %v", status, err)
+		}
+	}
+	if _, err := tasks.Transition(ctx, value.ID(), task.StatusDone, "semi-auto completion", brainActor); !errors.Is(err, task.ErrForbidden) {
+		t.Fatalf("semi-auto completion error = %v, want forbidden", err)
+	}
+	var denialReason string
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM authorization_denials WHERE resource='task:' || ? ORDER BY created_at DESC LIMIT 1`, value.ID()).Scan(&denialReason); err != nil {
+		t.Fatal(err)
+	}
+	if denialReason != "human_approval_required" {
+		t.Fatalf("semi-auto completion denial reason = %q", denialReason)
+	}
+	if _, err := brainService.Replace(ctx, p.ID(), brain.CreateInput{AgentID: configuredAgent.ID(), Autonomy: brain.AutonomyAutonomous}, project.LocalAdministratorID, "enable autonomous mode"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.Transition(ctx, value.ID(), task.StatusDone, "autonomous completion", brainActor); err != nil {
+		t.Fatalf("autonomous completion without human-review policy: %v", err)
+	}
+}

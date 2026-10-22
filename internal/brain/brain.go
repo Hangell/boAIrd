@@ -36,6 +36,7 @@ const (
 	ActionAssignTask        Action = "task.assign"
 	ActionReviewTask        Action = "task.review"
 	ActionCompleteTask      Action = "task.complete"
+	ActionTransitionTask    Action = "task.transition"
 	ActionRequestAdminHelp  Action = "admin.help.request"
 	ActionReplaceBrain      Action = "brain.replace"
 	ActionGrantCapability   Action = "capability.grant"
@@ -44,6 +45,7 @@ const (
 )
 
 var ErrUnauthorizedAction = errors.New("Brain action is not authorized")
+var ErrHumanApprovalRequired = errors.New("Brain action requires human approval")
 var (
 	ErrNotFound             = errors.New("Brain not found")
 	ErrProjectNotFound      = errors.New("project not found")
@@ -110,10 +112,6 @@ func (b Brain) AuthorizeAction(action Action, p project.Project, a agent.Agent) 
 	switch action {
 	case ActionReplaceBrain, ActionGrantCapability, ActionAccessCredential, ActionBypassHumanReview:
 		return ErrUnauthorizedAction
-	case ActionCompleteTask:
-		if p.HumanReviewRequired() {
-			return ErrUnauthorizedAction
-		}
 	}
 	var required string
 	switch action {
@@ -127,6 +125,8 @@ func (b Brain) AuthorizeAction(action Action, p project.Project, a agent.Agent) 
 		required = "task.review"
 	case ActionCompleteTask:
 		required = "task.complete"
+	case ActionTransitionTask:
+		required = "task.transition"
 	case ActionRequestAdminHelp:
 		required = "admin.help.request"
 	default:
@@ -139,6 +139,31 @@ func (b Brain) AuthorizeAction(action Action, p project.Project, a agent.Agent) 
 	if err := (capability.Authorizer{}).Authorize(capability.Principal{
 		ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: []string{p.ID()},
 	}, value, p.ID()); err != nil {
+		return ErrUnauthorizedAction
+	}
+	if err := b.authorizeAutonomy(action, p); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (b Brain) authorizeAutonomy(action Action, p project.Project) error {
+	switch action {
+	case ActionPlan, ActionRequestAdminHelp:
+		return nil
+	}
+	switch b.autonomy {
+	case AutonomyManual:
+		return ErrHumanApprovalRequired
+	case AutonomySemiAuto:
+		if action == ActionCompleteTask {
+			return ErrHumanApprovalRequired
+		}
+	case AutonomyAutonomous:
+		if action == ActionCompleteTask && p.HumanReviewRequired() {
+			return ErrHumanApprovalRequired
+		}
+	default:
 		return ErrUnauthorizedAction
 	}
 	return nil

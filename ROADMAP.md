@@ -981,9 +981,15 @@ git.push
 
 # Phase 17 — Autonomy Modes
 
+Autonomy is enforced by the Brain domain before its actions reach task services.
+Every action still needs its declared capability, active project scope, and
+project policy. Changing a mode requires the local administrator and emits an
+immutable `brain.autonomy.changed` audit event.
+
 ## Manual Mode
 
-The Brain provides guidance, while important actions depend on the user.
+The Brain may produce plans and request administrator help. Task creation,
+assignment, review, and completion require human intervention.
 
 ```text
 MANUAL
@@ -993,13 +999,12 @@ MANUAL
 
 ## Semi-Auto Mode
 
-The Brain distributes and tracks work.
+The Brain may create and assign tasks, track work, and review results when it
+has the matching capabilities. Task completion always requires human approval.
 
 ```text
 SEMI_AUTO
 ```
-
-Critical actions may still require approval.
 
 ---
 
@@ -1020,7 +1025,10 @@ reprioritize
 finish tasks
 ```
 
-It must never exceed its capabilities.
+Completion is allowed only when the Brain has `task.complete` and the project
+does not require human review. It must never exceed its capabilities or bypass
+project review policy. This phase gates Brain actions; provider output remains
+proposed text and does not itself execute tools.
 
 ---
 

@@ -214,7 +214,7 @@ paths:
       operationId: configureProjectBrain
       x-required-capability: brain.attach
       summary: Attach the project's only Brain
-      description: Requires an API agent with the explicit brain.execute capability. A project Brain cannot replace itself.
+      description: Requires an API agent with the explicit brain.execute capability. The autonomy value controls Brain decision behavior but never adds capabilities. A project Brain cannot replace itself.
       requestBody:
         required: true
         content:
@@ -247,7 +247,7 @@ paths:
       operationId: replaceProjectBrain
       x-required-capability: brain.replace
       summary: Replace the project's active Brain configuration
-      description: Requires an authenticated local administrator bearer token or browser session. The replacement must use an API agent with the explicit brain.execute capability and include an audit reason.
+      description: Requires an authenticated local administrator bearer token or browser session. The replacement must use an API agent with the explicit brain.execute capability and include an audit reason. Autonomy changes are recorded as brain.autonomy.changed.
       security:
         - localBearerAuth: []
         - localSessionCookie: []
@@ -646,14 +646,20 @@ components:
       required: [agent_id, autonomy]
       properties:
         agent_id: { type: string }
-        autonomy: { type: string, enum: [MANUAL, SEMI_AUTO, AUTONOMOUS] }
+        autonomy:
+          type: string
+          enum: [MANUAL, SEMI_AUTO, AUTONOMOUS]
+          description: MANUAL is plan-only; SEMI_AUTO requires human approval for task completion; AUTONOMOUS completion still requires task.complete and project policy to allow it.
     ReplaceBrain:
       type: object
       additionalProperties: false
       required: [agent_id, autonomy, reason]
       properties:
         agent_id: { type: string }
-        autonomy: { type: string, enum: [MANUAL, SEMI_AUTO, AUTONOMOUS] }
+        autonomy:
+          type: string
+          enum: [MANUAL, SEMI_AUTO, AUTONOMOUS]
+          description: MANUAL is plan-only; SEMI_AUTO requires human approval for task completion; AUTONOMOUS completion still requires task.complete and project policy to allow it.
         reason: { type: string, minLength: 1, maxLength: 1000 }
     Brain:
       type: object
@@ -662,7 +668,10 @@ components:
         id: { type: string }
         project_id: { type: string }
         agent_id: { type: string }
-        autonomy: { type: string, enum: [MANUAL, SEMI_AUTO, AUTONOMOUS] }
+        autonomy:
+          type: string
+          enum: [MANUAL, SEMI_AUTO, AUTONOMOUS]
+          description: Effective decision mode. It never grants capabilities or bypasses project human-review policy.
         active: { type: boolean, readOnly: true }
     ExecuteBrain:
       type: object
