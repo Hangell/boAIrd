@@ -116,12 +116,13 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 	if count == 0 {
 		return agent.ErrNotFound
 	}
-	for _, table := range []string{"agent_languages", "agent_capabilities"} {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE agent_id = ?", snapshot.ID); err != nil {
-			return fmt.Errorf("replace agent relations: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM agent_languages WHERE agent_id = ?", snapshot.ID); err != nil {
+		return fmt.Errorf("replace agent languages: %w", err)
 	}
-	if err := insertAgentRelations(ctx, tx, snapshot); err != nil {
+	if err := syncAgentCapabilities(ctx, tx, snapshot); err != nil {
+		return err
+	}
+	if err := insertAgentLanguages(ctx, tx, snapshot); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -157,14 +158,66 @@ func insertAgent(ctx context.Context, executor sqlExecutor, snapshot agent.Snaps
 }
 
 func insertAgentRelations(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+	if err := insertAgentLanguages(ctx, tx, snapshot); err != nil {
+		return err
+	}
+	for _, capability := range snapshot.Capabilities {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_capabilities(agent_id, capability) VALUES (?, ?)", snapshot.ID, capability); err != nil {
+			return fmt.Errorf("insert agent capability: %w", err)
+		}
+	}
+	return nil
+}
+
+func insertAgentLanguages(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
 	for position, language := range snapshot.LanguagePreferences {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_languages(agent_id, position, language) VALUES (?, ?, ?)", snapshot.ID, position, language); err != nil {
 			return fmt.Errorf("insert agent language: %w", err)
 		}
 	}
+	return nil
+}
+
+func syncAgentCapabilities(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+	rows, err := tx.QueryContext(ctx, "SELECT capability FROM agent_capabilities WHERE agent_id = ?", snapshot.ID)
+	if err != nil {
+		return fmt.Errorf("query current agent capabilities: %w", err)
+	}
+	current := make(map[string]struct{})
+	for rows.Next() {
+		var capability string
+		if err := rows.Scan(&capability); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan current agent capability: %w", err)
+		}
+		current[capability] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate current agent capabilities: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close current agent capabilities: %w", err)
+	}
+
+	desired := make(map[string]struct{}, len(snapshot.Capabilities))
 	for _, capability := range snapshot.Capabilities {
+		desired[capability] = struct{}{}
+	}
+	for capability := range current {
+		if _, keep := desired[capability]; keep {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM agent_capabilities WHERE agent_id = ? AND capability = ?", snapshot.ID, capability); err != nil {
+			return fmt.Errorf("remove agent capability: %w", err)
+		}
+	}
+	for capability := range desired {
+		if _, exists := current[capability]; exists {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_capabilities(agent_id, capability) VALUES (?, ?)", snapshot.ID, capability); err != nil {
-			return fmt.Errorf("insert agent capability: %w", err)
+			return fmt.Errorf("add agent capability: %w", err)
 		}
 	}
 	return nil

@@ -87,3 +87,65 @@ func TestAgentRepositoryEnforcesCredentialReferences(t *testing.T) {
 		t.Fatalf("create with mismatched provider credential error = %v", err)
 	}
 }
+
+func TestActiveBrainAgentCapabilitiesAreUpdatedDifferentially(t *testing.T) {
+	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(`INSERT INTO credentials(id, name, provider, secret_ciphertext) VALUES ('cred-1', 'OpenAI', 'openai', ?)`, make([]byte, 28)); err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := agent.NewManager(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := manager.Create(context.Background(), agent.CreateInput{
+		Name: "Brain agent", Role: "coordinator", Runtime: agent.RuntimeAPI, Provider: "openai", Model: "gpt-test",
+		CredentialID: "cred-1", Capabilities: []string{"brain.execute", "task.read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO projects(id, name, status, human_review_required) VALUES ('p1', 'Project', 'CREATED', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO brains(id, project_id, active) VALUES ('b1', 'p1', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO brain_configuration(brain_id, agent_id, autonomy) VALUES ('b1', ?, 'MANUAL')`, value.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE projects SET brain_id = 'b1' WHERE id = 'p1'`); err != nil {
+		t.Fatal(err)
+	}
+
+	newName := "Principal Brain"
+	updated, err := manager.Update(context.Background(), value.ID(), agent.UpdateInput{Name: &newName})
+	if err != nil {
+		t.Fatalf("update active Brain agent name: %v", err)
+	}
+	if updated.Name() != newName {
+		t.Fatalf("agent name = %q, want %q", updated.Name(), newName)
+	}
+	if got := updated.Capabilities(); len(got) != 2 || got[0] != "brain.execute" || got[1] != "task.read" {
+		t.Fatalf("capabilities after unrelated update = %#v", got)
+	}
+
+	capabilities := []string{"task.read"}
+	if _, err := manager.Update(context.Background(), value.ID(), agent.UpdateInput{Capabilities: &capabilities}); err == nil {
+		t.Fatal("expected explicit removal of brain.execute from active Brain to fail")
+	}
+	unchanged, err := manager.Get(context.Background(), value.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unchanged.Capabilities(); len(got) != 2 || got[0] != "brain.execute" || got[1] != "task.read" {
+		t.Fatalf("capabilities after rejected removal = %#v", got)
+	}
+}
