@@ -2908,14 +2908,7 @@ When this workflow works end to end through the dashboard, we will have the firs
 
 # License
 
-To be determined.
-
-Possible options:
-
-```text
-MIT
-Apache-2.0
-```
+boAIrd is distributed under the MIT License. See [LICENSE](LICENSE) for the full terms.
 
 ---
 
