@@ -2504,13 +2504,16 @@ The implemented task workflow persists BACKLOG, READY, WORKING, REVIEW,
 HUMAN_REVIEW, BLOCKED, FAILED, DONE, and CANCELLED states. The service validates
 transitions and project/agent references, applies project human-review policy,
 and requires an actor and reason for each mutation. SQLite writes immutable
-audit rows for task creation, assignment, and status changes. The local HTTP API
-uses a fixed local API actor for task management because those routes do not
-authenticate callers; it does not accept actor identity from request data.
-Conversation routes and active Brain replacement separately authenticate the
-configured local administrator. Brain replacement records an immutable audit
-event with a required reason; the dashboard sends the bearer token only for that
-request and does not persist it in browser storage.
+audit rows for task creation, assignment, and status changes. Every `/api/v1` operation except status requires the configured local
+administrator bearer token or its HttpOnly session cookie. The Go API evaluates
+an explicit capability per operation and verifies project membership before
+accessing project-scoped resources. Task mutations receive a server-derived
+administrator actor with explicit capability grants; caller JSON cannot set an
+actor. Authorization denials are written to an immutable SQLite audit table.
+The browser exchanges the token at `/api/v1/session`, keeps it out of persistent
+application storage, and uses a SameSite=Strict HttpOnly cookie. The cookie
+mutation path checks a fixed dashboard-origin allowlist. Brain replacement also
+records its required reason in the existing immutable project audit stream.
 
 ---
 
@@ -2537,16 +2540,15 @@ conversation history
 ```
 
 The implementation stores one Conversation per Task in SQLite. Messages preserve
-opaque content with a content type and JSON metadata. Human `GET` and `POST`
-requests authenticate the single local administrator with
-`BOAIRD_LOCAL_AUTH_TOKEN`; the service checks that principal against
-`project_members` before granting access. Existing projects are backfilled and
-new projects receive local administrator membership. Message history is bounded
-and cursor-paginated. The service checks Agent senders against task assignment
-and Brain senders against the active project Brain. Secret-pattern redaction
-runs before message content and metadata are stored. Multi-user identity and
-membership management remain future work. Other HTTP API routes, including task
-management, still have no caller authentication.
+opaque content with a content type and JSON metadata. All REST routes authenticate
+the single local administrator; the service checks project-scoped requests against
+`project_members`. Existing projects are backfilled and new projects receive local
+administrator membership. Message history is bounded and cursor-paginated. The
+service checks Agent senders against task assignment and Brain senders against the
+active project Brain. Secret-pattern redaction runs before message content and
+metadata are stored. Multi-user identity and membership management remain future
+work. No executable MCP server or tool executor is currently connected; future
+adapters must use the same capability authorizer and project scope checks.
 
 ---
 

@@ -870,7 +870,7 @@ BOAIRD_MASTER_KEY=...
 BOAIRD_LOCAL_AUTH_TOKEN=...
 ```
 
-`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for task conversation routes and active Brain replacement. Brain replacement also requires an audit reason, recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`.
+`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for all versioned REST routes except status. `POST /api/v1/session` exchanges the bearer token for an HttpOnly, SameSite=Strict cookie used by the browser; unsafe cookie-authenticated requests require a configured dashboard Origin. Project-scoped routes also require `project_members` membership, and each operation is checked against an explicit capability in Go. Authorization denials are written to immutable SQLite records. Brain replacement requires an audit reason recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`. MCP and tool adapters are not wired yet and must use the same authorizer before they are exposed.
 
 ---
 
@@ -1061,6 +1061,8 @@ by default.
 ---
 
 # Local Mode
+
+Loopback binding controls network exposure; it does not replace authentication. Every versioned REST route other than status requires the local administrator token or its browser session cookie. Capabilities are evaluated in the Go API and are independent of role labels and frontend controls. Project-scoped operations require membership. Denials fail closed and are recorded in the immutable authorization denial table. The current deployment has a single administrator identity; multi-user policy management remains future work.
 
 Default:
 

@@ -69,6 +69,17 @@ describe('ApiClient', () => {
     request.flush({ id: 'brain-1' });
   });
 
+  it('exchanges the administrator token for an HttpOnly browser session without storing it', () => {
+    client.createLocalSession('admin-token').subscribe();
+
+    const request = http.expectOne('http://127.0.0.1:3110/session');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('Authorization')).toBe('Bearer admin-token');
+    expect(request.request.withCredentials).toBe(true);
+    expect(request.request.body).toEqual({});
+    request.flush(null, { status: 204, statusText: 'No Content' });
+  });
+
   it('appends pagination parameters after existing filters', () => {
     client.getAllPages<{ id: string }>('projects/p1/tasks?status=HUMAN_REVIEW').subscribe();
 

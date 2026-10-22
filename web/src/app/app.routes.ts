@@ -1,10 +1,17 @@
 import type {} from '@angular/localize';
 import { Routes } from '@angular/router';
+import { localSessionGuard } from './core/auth/local-session.guard';
 
 export const routes: Routes = [
+  {
+    path: 'login',
+    loadComponent: () => import('./features/auth/local-login.component').then((module) => module.LocalLoginComponent),
+    title: 'Local administrator session',
+  },
   { path: '', pathMatch: 'full', redirectTo: 'overview' },
   {
     path: 'overview',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/projects/project-list.component').then((module) => module.ProjectListComponent),
     title: $localize`:@@page.overview.title:Overview`,
     data: {
@@ -14,6 +21,7 @@ export const routes: Routes = [
   },
   {
     path: 'projects',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/projects/project-list.component').then((module) => module.ProjectListComponent),
     title: $localize`:@@page.projects.title:Projects`,
     data: {
@@ -23,6 +31,7 @@ export const routes: Routes = [
   },
   {
     path: 'projects/:projectId',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/projects/project-dashboard.component').then((module) => module.ProjectDashboardComponent),
     title: $localize`:@@page.project.title:Project details`,
     data: {
@@ -32,6 +41,7 @@ export const routes: Routes = [
   },
   {
     path: 'tasks',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/tasks/task-board.component').then((module) => module.TaskBoardComponent),
     title: $localize`:@@page.tasks.title:Kanban`,
     data: {
@@ -41,6 +51,7 @@ export const routes: Routes = [
   },
   {
     path: 'conversations',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.conversations.title:Conversations`,
     data: {
@@ -50,16 +61,19 @@ export const routes: Routes = [
   },
   {
     path: 'agents/new',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/agents/agent-editor.component').then((module) => module.AgentEditorComponent),
     title: $localize`:@@page.agentCreate.title:Create agent`,
   },
   {
     path: 'agents/:agentId',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/agents/agent-editor.component').then((module) => module.AgentEditorComponent),
     title: $localize`:@@page.agent.title:Agent details`,
   },
   {
     path: 'agents',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/agents/agent-list.component').then((module) => module.AgentListComponent),
     title: $localize`:@@page.agents.title:Agents`,
     data: {
@@ -69,6 +83,7 @@ export const routes: Routes = [
   },
   {
     path: 'providers',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.providers.title:Providers`,
     data: {
@@ -78,6 +93,7 @@ export const routes: Routes = [
   },
   {
     path: 'runs',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.runs.title:Runs`,
     data: {
@@ -87,6 +103,7 @@ export const routes: Routes = [
   },
   {
     path: 'logs',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.logs.title:Logs`,
     data: {
@@ -96,6 +113,7 @@ export const routes: Routes = [
   },
   {
     path: 'brain',
+    canActivate: [localSessionGuard],
     loadComponent: () => import('./features/brain/brain-dashboard.component').then((module) => module.BrainDashboardComponent),
     title: $localize`:@@page.brain.title:Brain`,
     data: {
@@ -105,7 +123,8 @@ export const routes: Routes = [
   },
   {
     path: 'settings',
-    loadComponent: () => import('./features/settings/local-auth-settings.component').then((module) => module.LocalAuthSettingsComponent),
+    canActivate: [localSessionGuard],
+    loadComponent: () => import('./shared/feature-page.component').then((module) => module.FeaturePageComponent),
     title: $localize`:@@page.settings.title:Settings`,
     data: {
       title: $localize`:@@page.settings.heading:Settings`,

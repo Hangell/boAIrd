@@ -137,6 +137,7 @@ func request(t *testing.T, handler http.Handler, method, target string) *httptes
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
+	request.Header.Set("Authorization", "Bearer "+testLocalAuthToken)
 	handler.ServeHTTP(recorder, request)
 	return recorder
 }

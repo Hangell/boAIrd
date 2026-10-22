@@ -17,7 +17,7 @@ import (
 func TestProjectLifecycleEndpoints(t *testing.T) {
 	handler, _ := newProjectHandler(t)
 
-	create := httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":" Alpha "}`))
+	create := authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":" Alpha "}`))
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, create)
 	if created.Code != http.StatusCreated {
@@ -39,7 +39,7 @@ func TestProjectLifecycleEndpoints(t *testing.T) {
 		t.Fatalf("list status = %d, body = %s", list.Code, list.Body.String())
 	}
 
-	patch := httptest.NewRequest(http.MethodPatch, "/api/v1/projects/"+projectBody.ID, strings.NewReader(`{"description":"managed","human_review_required":false}`))
+	patch := authorizedTestRequest(http.MethodPatch, "/api/v1/projects/"+projectBody.ID, strings.NewReader(`{"description":"managed","human_review_required":false}`))
 	updated := httptest.NewRecorder()
 	handler.ServeHTTP(updated, patch)
 	if updated.Code != http.StatusOK || strings.Contains(updated.Body.String(), `"autonomy_mode"`) || !strings.Contains(updated.Body.String(), `"human_review_required":false`) {
@@ -66,7 +66,7 @@ func TestProjectEndpointsValidateWorkspaceAndUnknownFields(t *testing.T) {
 	workspace := t.TempDir()
 	body := `{"name":"Workspace project","workspace_path":"` + workspace + `"}`
 	created := httptest.NewRecorder()
-	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(body)))
+	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(body)))
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), workspace) {
 		t.Fatalf("valid workspace create status = %d, body = %s", created.Code, created.Body.String())
 	}
@@ -77,13 +77,13 @@ func TestProjectEndpointsValidateWorkspaceAndUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.ServeHTTP(invalidPath, httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(string(badPathJSON))))
+	handler.ServeHTTP(invalidPath, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(string(badPathJSON))))
 	if invalidPath.Code != http.StatusBadRequest {
 		t.Fatalf("invalid workspace status = %d, body = %s", invalidPath.Code, invalidPath.Body.String())
 	}
 
 	unknownField := httptest.NewRecorder()
-	handler.ServeHTTP(unknownField, httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Unknown","status":"RUNNING"}`)))
+	handler.ServeHTTP(unknownField, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Unknown","status":"RUNNING"}`)))
 	if unknownField.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field status = %d, body = %s", unknownField.Code, unknownField.Body.String())
 	}
@@ -97,12 +97,12 @@ func TestProjectEndpointsValidateWorkspaceAndUnknownFields(t *testing.T) {
 func TestProjectEndpointsReturnNotFoundAndRejectInvalidSettings(t *testing.T) {
 	handler, _ := newProjectHandler(t)
 	missing := request(t, handler, http.MethodGet, "/api/v1/projects/missing")
-	if missing.Code != http.StatusNotFound {
-		t.Fatalf("missing project status = %d, body = %s", missing.Code, missing.Body.String())
+	if missing.Code != http.StatusForbidden {
+		t.Fatalf("unassociated project status = %d, body = %s", missing.Code, missing.Body.String())
 	}
 
 	removedAutonomy := httptest.NewRecorder()
-	handler.ServeHTTP(removedAutonomy, httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Invalid","autonomy_mode":"MANUAL"}`)))
+	handler.ServeHTTP(removedAutonomy, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Invalid","autonomy_mode":"MANUAL"}`)))
 	if removedAutonomy.Code != http.StatusBadRequest {
 		t.Fatalf("project autonomy field should be rejected: status = %d, body = %s", removedAutonomy.Code, removedAutonomy.Body.String())
 	}
@@ -111,7 +111,7 @@ func TestProjectEndpointsReturnNotFoundAndRejectInvalidSettings(t *testing.T) {
 func TestProjectBrainAssociationRequiresAnActiveBrain(t *testing.T) {
 	handler, database := newProjectHandler(t)
 	created := httptest.NewRecorder()
-	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Brain project"}`)))
+	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Brain project"}`)))
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
 	}
@@ -127,14 +127,14 @@ func TestProjectBrainAssociationRequiresAnActiveBrain(t *testing.T) {
 			t.Fatal(err)
 		}
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/api/v1/projects/"+value.ID, strings.NewReader(string(body))))
+		handler.ServeHTTP(recorder, authorizedTestRequest(http.MethodPatch, "/api/v1/projects/"+value.ID, strings.NewReader(string(body))))
 		return recorder
 	}
 	if response := patch("brain-1"); response.Code != http.StatusBadRequest {
 		t.Fatalf("inactive Brain status = %d, body = %s", response.Code, response.Body.String())
 	}
 	secondProject := httptest.NewRecorder()
-	handler.ServeHTTP(secondProject, httptest.NewRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Other project"}`)))
+	handler.ServeHTTP(secondProject, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Other project"}`)))
 	var other projectResponse
 	if err := json.Unmarshal(secondProject.Body.Bytes(), &other); err != nil {
 		t.Fatal(err)
@@ -172,5 +172,5 @@ func newProjectHandler(t *testing.T) (http.Handler, *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewHandler(fakeDatabase{}, manager), database
+	return newHandler(database, manager, nil, nil, nil, nil, nil, nil, testLocalAuthTokenBytes()), database
 }

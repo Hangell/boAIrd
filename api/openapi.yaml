@@ -4,13 +4,47 @@ info:
   version: 1.0.0
   description: >-
     Versioned local-first API for managing boAIrd projects. Until authenticated
-    remote mode exists, the server binds only to a loopback IP address.
+    remote mode exists, the server binds only to a loopback IP address. Every
+    operation requires the local administrator bearer token unless an endpoint
+    explicitly documents otherwise. After POST /api/v1/session, same-origin
+    browser clients may use the HttpOnly session cookie instead of retaining
+    the token in application storage. The server evaluates a required
+    capability and project membership for each operation.
 servers:
   - url: http://127.0.0.1:3110
+security:
+  - localBearerAuth: []
+  - localSessionCookie: []
 paths:
+  /api/v1/session:
+    post:
+      operationId: createLocalSession
+      summary: Exchange the local administrator token for a browser session cookie
+      description: Accepts the configured token in the Authorization header and sets an HttpOnly, SameSite=Strict cookie. The token is not returned or persisted by the server.
+      security:
+        - localBearerAuth: []
+      responses:
+        '204': { description: Session cookie created. }
+        '401': { description: Missing or invalid local administrator bearer token. }
+    get:
+      operationId: getLocalSession
+      summary: Validate the current local administrator session
+      security:
+        - localBearerAuth: []
+        - localSessionCookie: []
+      responses:
+        '204': { description: The bearer token or session cookie is valid. }
+        '401': { description: Missing or invalid local administrator credentials. }
+    delete:
+      operationId: deleteLocalSession
+      summary: Clear the browser session cookie
+      security: []
+      responses:
+        '204': { description: Session cookie cleared. }
   /api/v1/projects:
     post:
       operationId: createProject
+      x-required-capability: project.create
       summary: Create a project
       requestBody:
         required: true
@@ -36,6 +70,7 @@ paths:
           $ref: '#/components/responses/InternalError'
     get:
       operationId: listProjects
+      x-required-capability: project.read
       summary: List projects
       parameters:
         - name: limit
@@ -71,6 +106,7 @@ paths:
           type: string
     get:
       operationId: getProject
+      x-required-capability: project.read
       summary: Get a project
       responses:
         '200':
@@ -85,6 +121,7 @@ paths:
           $ref: '#/components/responses/InternalError'
     patch:
       operationId: updateProject
+      x-required-capability: project.update
       summary: Update project configuration
       description: Archived projects are immutable. Omitted fields are unchanged. An empty brain_id unsets the Brain association.
       requestBody:
@@ -108,6 +145,7 @@ paths:
           $ref: '#/components/responses/InternalError'
     delete:
       operationId: archiveProject
+      x-required-capability: project.archive
       summary: Archive a project
       description: Archives the project instead of deleting its stored data. Repeated requests are safe and return the archived project.
       responses:
@@ -124,6 +162,7 @@ paths:
   /api/v1/credentials:
     post:
       operationId: createCredential
+      x-required-capability: credential.create
       summary: Store an encrypted provider credential
       description: The submitted secret is encrypted at rest and is never included in the response.
       requestBody:
@@ -148,6 +187,7 @@ paths:
           $ref: '#/components/responses/InternalError'
     get:
       operationId: listCredentials
+      x-required-capability: credential.read
       summary: List stored credential metadata
       description: Secret values and ciphertext are never returned.
       responses:
@@ -172,6 +212,7 @@ paths:
         schema: { type: string }
     post:
       operationId: configureProjectBrain
+      x-required-capability: brain.attach
       summary: Attach the project's only Brain
       description: Requires an API agent with the explicit brain.execute capability. A project Brain cannot replace itself.
       requestBody:
@@ -192,6 +233,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
     get:
       operationId: getProjectBrain
+      x-required-capability: brain.read
       summary: Get the project's active Brain
       responses:
         '200':
@@ -203,10 +245,12 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
     put:
       operationId: replaceProjectBrain
+      x-required-capability: brain.replace
       summary: Replace the project's active Brain configuration
-      description: Requires the local administrator bearer token. The replacement must use an API agent with the explicit brain.execute capability and include an audit reason.
+      description: Requires an authenticated local administrator bearer token or browser session. The replacement must use an API agent with the explicit brain.execute capability and include an audit reason.
       security:
         - localBearerAuth: []
+        - localSessionCookie: []
       requestBody:
         required: true
         content:
@@ -232,6 +276,7 @@ paths:
         schema: { type: string }
     post:
       operationId: executeProjectBrain
+      x-required-capability: brain.execute
       summary: Ask the Brain to propose a plan
       description: Persists a run and returns text from the configured provider. This endpoint does not apply task or project mutations.
       requestBody:
@@ -258,6 +303,7 @@ paths:
         schema: { type: string }
     get:
       operationId: listProjectRuns
+      x-required-capability: run.read
       summary: List project runs
       description: Filters by optional task_id and agent_id. Stored and returned text has common credential forms redacted.
       parameters:
@@ -290,6 +336,7 @@ paths:
         schema: { type: string }
     get:
       operationId: getRun
+      x-required-capability: run.read
       summary: Get a run and its audit events
       responses:
         '200':
@@ -307,6 +354,7 @@ paths:
         schema: { type: string }
     post:
       operationId: createTask
+      x-required-capability: task.create
       summary: Create a task in a project
       description: The local API records a fixed local API actor; callers cannot provide or override actor identity. A reason is required for audit.
       requestBody:
@@ -325,6 +373,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
     get:
       operationId: listProjectTasks
+      x-required-capability: task.read
       summary: List tasks in a project
       parameters:
         - name: status
@@ -356,6 +405,7 @@ paths:
         schema: { type: string }
     get:
       operationId: getTask
+      x-required-capability: task.read
       summary: Get a task and immutable audit events
       responses:
         '200':
@@ -368,6 +418,7 @@ paths:
   /api/v1/tasks/{id}/assignment:
     put:
       operationId: assignTask
+      x-required-capability: task.assign
       summary: Assign a task to an agent
       parameters:
         - name: id
@@ -392,7 +443,9 @@ paths:
   /api/v1/tasks/{id}/transitions:
     post:
       operationId: transitionTask
+      x-required-capability: task.transition
       summary: Move a task through a validated workflow transition
+      description: An Agent may use task.transition only for a task currently assigned to that Agent; that assignment grants scope only to the task's project.
       parameters:
         - name: id
           in: path
@@ -421,10 +474,12 @@ paths:
         schema: { type: string }
     get:
       operationId: listTaskMessages
+      x-required-capability: conversation.read
       summary: Retrieve the task conversation history
-      description: Requires the configured local administrator bearer token and project membership. Returns the newest bounded page in chronological order; use next_before as before to fetch older messages. Message content and metadata are redacted before persistence and return.
+      description: Requires the authenticated local administrator session and project membership. Returns the newest bounded page in chronological order; use next_before as before to fetch older messages. Message content and metadata are redacted before persistence and return.
       security:
         - localBearerAuth: []
+        - localSessionCookie: []
       parameters:
         - name: limit
           in: query
@@ -446,10 +501,12 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       operationId: createTaskMessage
+      x-required-capability: conversation.write
       summary: Add a message to a task conversation
-      description: Requires the configured local administrator bearer token and project membership. The server derives sender identity from the authenticated local principal; caller-supplied sender identity is rejected.
+      description: Requires the authenticated local administrator session and project membership. The server derives sender identity from the authenticated local principal; caller-supplied sender identity is rejected.
       security:
         - localBearerAuth: []
+        - localSessionCookie: []
       requestBody:
         required: true
         content:
@@ -475,6 +532,7 @@ paths:
         schema: { type: string }
     delete:
       operationId: deleteCredential
+      x-required-capability: credential.delete
       summary: Delete a stored credential
       responses:
         '204':
@@ -486,6 +544,7 @@ paths:
   /api/v1/agents:
     post:
       operationId: createAgent
+      x-required-capability: agent.create
       summary: Create a specialized agent
       description: Role is descriptive and never grants capabilities. API runtimes require provider, model, and an existing credential reference.
       requestBody:
@@ -509,6 +568,7 @@ paths:
           $ref: '#/components/responses/InternalError'
     get:
       operationId: listAgents
+      x-required-capability: agent.read
       summary: List agents
       parameters:
         - name: limit
@@ -535,6 +595,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getAgent
+      x-required-capability: agent.read
       summary: Get an agent
       responses:
         '200':
@@ -548,6 +609,7 @@ paths:
           $ref: '#/components/responses/InternalError'
     patch:
       operationId: updateAgent
+      x-required-capability: agent.update
       summary: Update agent configuration
       description: Status is read-only; role labels do not grant capabilities. Switching away from API clears provider configuration.
       requestBody:
@@ -572,7 +634,11 @@ components:
     localBearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: 64-character hexadecimal token from BOAIRD_LOCAL_AUTH_TOKEN
+      bearerFormat: Hex-encoded 32-byte BOAIRD_LOCAL_AUTH_TOKEN
+    localSessionCookie:
+      type: apiKey
+      in: cookie
+      name: boaird_local_auth
   schemas:
     CreateBrain:
       type: object

@@ -447,7 +447,7 @@ Each response must also have a persisted Run.
 ## Current implementation
 
 - Projects can attach one active Brain to an API agent with the explicit `brain.execute` capability.
-- Active Brain configuration can be replaced only with the local administrator bearer token and a required reason; the replacement is recorded as an immutable audit event.
+- Active Brain configuration can be replaced only with an authenticated administrator session and a required reason; the replacement is recorded as an immutable audit event.
 - The Brain can request a provider response through the configured provider adapter and credential reference.
 - Each execution persists its project, agent, provider, model, objective, status, and response in `runs`.
 - The current runtime returns a proposed plan as text. It does not apply task mutations or grant capabilities.
@@ -458,7 +458,7 @@ Each response must also have a persisted Run.
 ```text
 POST /api/v1/projects/{id}/brain
 GET  /api/v1/projects/{id}/brain
-PUT  /api/v1/projects/{id}/brain (local administrator bearer token + audit reason)
+PUT  /api/v1/projects/{id}/brain (administrator session + audit reason)
 POST /api/v1/projects/{id}/brain/runs
 ```
 
@@ -587,7 +587,7 @@ Create a card and move it through the entire workflow.
 - The task service checks allowed transitions, active project state, agent capabilities for creation/assignment, and the mandatory human-review gate before completion.
 - The local HTTP API supports task create/list/get, assignment, and status transitions. Each mutation requires an audit reason; callers cannot supply actor identity through request JSON.
 - SQLite records immutable task creation, assignment, and status-change audit events. Integration tests cover capability denial, the complete review workflow, invalid terminal transitions, and audit attribution.
-- Most loopback API routes remain unauthenticated; task mutations record a fixed local API actor, while task conversation routes require the local administrator bearer token and project membership. Same-host process isolation and multi-user authorization remain future security work.
+- REST routes require the local administrator bearer token or HttpOnly session cookie (health/status remain public). Each route declares a capability; project-scoped operations check `project_members`. Task services reject the legacy local actor and require explicit grants. Authorization denials are stored immutably. MCP and tool entry points are not yet executable and must use this authorizer when introduced.
 
 ---
 
@@ -625,7 +625,7 @@ metadata
 - Messages retain opaque content, content type, JSON metadata, sender type/ID, and timestamp; sensitive text and metadata are redacted before persistence.
 - `GET` and `POST /api/v1/tasks/{id}/messages` require `BOAIRD_LOCAL_AUTH_TOKEN` and a project membership for the single `local-administrator` principal. The sender identity is set by the server, and callers cannot provide it in JSON.
 - Existing projects are backfilled with local administrator membership, and new projects receive that membership automatically. Trusted service calls may add messages from the agent assigned to the task or the active Brain for its project.
-- Multi-user identity and membership management remain future work. Other HTTP API routes remain unauthenticated and use the fixed local API actor, except active Brain replacement, which requires the local administrator bearer token.
+- The one configured administrator is the only HTTP principal. Multi-user identity and membership administration remain future work. The dashboard exchanges the token for a transient HttpOnly cookie session; same-origin writes are protected by SameSite and a dashboard-origin allowlist.
 
 ## Formats
 
@@ -905,7 +905,7 @@ failures
 notifications
 ```
 
-The first dashboard iteration uses project selection, the active Brain and agent status, recent Brain Runs as proposals, and tasks waiting in `HUMAN_REVIEW`. Replacing an active Brain requires the local administrator bearer token and records a reasoned audit event.
+The first dashboard iteration uses project selection, the active Brain and agent status, recent Brain Runs as proposals, and tasks waiting in `HUMAN_REVIEW`. Replacing an active Brain requires an authenticated administrator session and records a reasoned audit event.
 
 ---
 
@@ -950,6 +950,20 @@ Role != Permission
 ```
 
 ## Criteria
+
+- Sensitive REST operations declare required capabilities and are checked in Go.
+- Authorization denies by default, independent of role labels or UI state.
+- Project-scoped reads and writes require local administrator project membership.
+- Denials fail closed and create immutable audit records.
+- The capability package is reusable by future MCP and tool adapters; neither adapter is currently executable.
+- Tests cover explicit grants, missing grants, anonymous REST access, and cross-project denial.
+
+## Current implementation
+
+- The local bearer token authenticates every `/api/v1` route except status; the browser exchanges it for a SameSite=Strict HttpOnly cookie.
+- Route policies map project, credential, agent, Brain, run, task, and conversation operations to explicit capabilities. Project-scoped routes validate the single administrator's membership before invoking managers.
+- Task services independently require explicit capabilities and project scope for administrator actors, check active Brain/agent grants, reject the legacy unprivileged local actor, and audit denied operations.
+- The API records denied requests in an immutable SQLite table. No MCP server or tool executor is wired yet.
 
 A Backend agent may have:
 
