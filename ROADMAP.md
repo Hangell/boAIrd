@@ -1385,6 +1385,22 @@ However, it does not need to be sent to models on every run.
 
 ---
 
+## Implemented
+
+- `internal/memory` — provider-independent `Summary` domain and `Service`
+  (`Record`, `List`, `Decisions`, `Select`, `Prune`).
+- `internal/storage/memory.go` + migration `0019_project_memory.sql` — versioned
+  summaries keyed by `(project_id, category, version)`, with source provenance.
+- Secrets are redacted before persistence; redaction is fail-closed.
+- `Architecture Decision` and `Project Decision` summaries are canonical and are
+  never pruned. Ephemeral categories retain the newest
+  `MaxSummariesPerCategory` summaries per category.
+- `Select` returns a bounded, reproducible selection and reports omitted items,
+  so raw history is never sent to a model in full.
+- Raw conversations and runs are never deleted; only summaries are pruned.
+
+---
+
 # Phase 26 — Tools
 
 ## Objective

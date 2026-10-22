@@ -1587,6 +1587,12 @@ Brain summary
 
 The original history may remain stored separately.
 
+The implemented engine (`internal/memory`) persists versioned, sanitized summaries
+in `project_memory`. Architecture and project decisions are canonical and survive
+retention pruning; ephemeral categories keep only the newest
+`MaxSummariesPerCategory` summaries. `Select` composes a bounded context view and
+reports what was omitted, and raw history is never pruned.
+
 ---
 
 # 63. Event System
