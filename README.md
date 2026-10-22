@@ -1973,8 +1973,9 @@ The service reads these optional environment variables:
 | `BOAIRD_PORT` | `3110` | HTTP listen port |
 | `BOAIRD_DATABASE_PATH` | `./data/boaird.db` | SQLite database file |
 | `BOAIRD_MASTER_KEY` | Required | 32-byte encryption key encoded as 64 hexadecimal characters; never store it in SQLite or commit it. |
+| `BOAIRD_LOCAL_AUTH_TOKEN` | Required | 32-byte bearer token encoded as 64 hexadecimal characters; required to read or write task conversations. |
 
-Generate a key with `openssl rand -hex 32` and provide it through the deployment environment. Losing the key makes stored provider credentials unrecoverable. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
+Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 
 ---
 
@@ -2007,6 +2008,8 @@ Projects can attach one active API Brain with `POST /api/v1/projects/{id}/brain`
 Runs can be listed with `GET /api/v1/projects/{id}/runs`, filtered by `task_id` or `agent_id`, or fetched individually with `GET /api/v1/runs/{id}`. Responses include immutable audit events for run creation and status transitions. Common credential patterns are redacted from run input, output, tool names, and errors before persistence and display.
 
 Tasks can be created and listed with `POST` and `GET /api/v1/projects/{id}/tasks`, retrieved with `GET /api/v1/tasks/{id}`, assigned with `PUT /api/v1/tasks/{id}/assignment`, and moved through validated workflow transitions with `POST /api/v1/tasks/{id}/transitions`. Mutations require a reason and create immutable audit events. Project human-review policy requires a human-controlled transition through `HUMAN_REVIEW` before `DONE`. The API has no caller authentication: requests are attributed to a fixed local API actor and the service binds only to loopback, so other same-host processes share that authority.
+
+Each task has a persisted conversation. `GET` and `POST /api/v1/tasks/{id}/messages` require `Authorization: Bearer <BOAIRD_LOCAL_AUTH_TOKEN>` and verify project membership. The server derives human sender identity as `local-administrator`; caller-supplied sender identity is rejected. New and existing projects receive membership for this single local principal. Message history is paginated with `limit` (default 50, maximum 100) and the `before` cursor returned as `next_before`. Agent messages are accepted only from the agent assigned to that task, and Brain messages only from the project's active Brain. Common secret patterns and sensitive metadata fields are redacted before storage and return. This initial identity model has one local administrator; multi-user accounts and membership management are future work.
 
 ---
 

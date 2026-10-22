@@ -98,6 +98,15 @@ func (r *ProjectRepository) HasActiveBrain(ctx context.Context, projectID, brain
 	return active, nil
 }
 
+func (r *ProjectRepository) IsMember(ctx context.Context, projectID, userID string) (bool, error) {
+	var member bool
+	err := r.database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?)", projectID, userID).Scan(&member)
+	if err != nil {
+		return false, fmt.Errorf("check project membership: %w", err)
+	}
+	return member, nil
+}
+
 const projectSelect = `SELECT id, name, description, status, COALESCE(brain_id, ''),
 	workspace_path, repository_url, human_review_required FROM projects`
 

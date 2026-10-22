@@ -119,8 +119,12 @@ func registerProjectRoutes(mux *http.ServeMux, manager ProjectManager) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	return decodeJSONWithLimit(w, r, target, maximumProjectRequestSize)
+}
+
+func decodeJSONWithLimit(w http.ResponseWriter, r *http.Request, target any, maximumSize int64) error {
 	defer r.Body.Close()
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maximumProjectRequestSize))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maximumSize))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("decode request body: %w", err)

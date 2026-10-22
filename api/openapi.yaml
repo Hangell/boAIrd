@@ -390,6 +390,60 @@ paths:
         '403': { description: Actor lacks the required task capability or human review is required. }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/tasks/{id}/messages:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listTaskMessages
+      summary: Retrieve the task conversation history
+      description: Requires the configured local administrator bearer token and project membership. Returns the newest bounded page in chronological order; use next_before as before to fetch older messages. Message content and metadata are redacted before persistence and return.
+      security:
+        - localBearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: before
+          in: query
+          description: Message ID cursor returned as next_before by the preceding page.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Conversation and bounded messages ordered by creation time. next_before is present when older messages remain.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: Missing or invalid local bearer token. }
+        '403': { description: Caller is not a member of the project. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createTaskMessage
+      summary: Add a message to a task conversation
+      description: Requires the configured local administrator bearer token and project membership. The server derives sender identity from the authenticated local principal; caller-supplied sender identity is rejected.
+      security:
+        - localBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConversationMessage' }
+      responses:
+        '201':
+          description: Message created with redacted content and metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: Missing or invalid local bearer token. }
+        '403': { description: Sender is not authorized for this task. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The project is archived and cannot accept messages. }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/credentials/{id}:
     parameters:
       - name: id
@@ -491,6 +545,11 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 components:
+  securitySchemes:
+    localBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: 64-character hexadecimal token from BOAIRD_LOCAL_AUTH_TOKEN
   schemas:
     CreateBrain:
       type: object
@@ -619,6 +678,35 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/Task' } }
         limit: { type: integer }
         offset: { type: integer }
+    CreateConversationMessage:
+      type: object
+      additionalProperties: false
+      required: [content, content_type]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 1048576, description: Opaque message payload; its interpretation follows content_type. }
+        content_type: { type: string, minLength: 1, maxLength: 128, example: application/json }
+        metadata: { type: object, additionalProperties: true, description: Sensitive keys and common secret patterns are redacted before storage. }
+    ConversationMessage:
+      type: object
+      required: [id, conversation_id, sender_type, sender_id, content, content_type, metadata, created_at]
+      properties:
+        id: { type: string }
+        conversation_id: { type: string }
+        sender_type: { type: string, enum: [USER, AGENT, BRAIN, SYSTEM] }
+        sender_id: { type: string, description: Server-derived sender identity. }
+        content: { type: string, description: Opaque payload with sensitive patterns redacted. }
+        content_type: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    Conversation:
+      type: object
+      required: [id, project_id, task_id, messages]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        task_id: { type: string }
+        messages: { type: array, items: { $ref: '#/components/schemas/ConversationMessage' } }
+        next_before: { type: string, description: Cursor for fetching the next older page; omitted when there are no older messages. }
     CreateAgent:
       type: object
       additionalProperties: false

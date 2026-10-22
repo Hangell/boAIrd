@@ -10,6 +10,7 @@ import (
 	"boAIrd/internal/api"
 	"boAIrd/internal/brain"
 	"boAIrd/internal/config"
+	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
@@ -23,6 +24,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 		return fmt.Errorf("validate configuration: %w", err)
 	}
 	defer clear(cfg.MasterKey[:])
+	defer clear(cfg.LocalAuthToken[:])
 
 	database, err := storage.OpenSQLite(ctx, cfg.DatabasePath)
 	if err != nil {
@@ -83,7 +85,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize task service: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithTasks(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService), logger); err != nil {
+	conversationRepository, err := storage.NewConversationRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize conversation repository: %w", err)
+	}
+	conversationService, err := conversation.NewService(conversationRepository, taskService, projectManager, agentManager, brainRepository)
+	if err != nil {
+		return fmt.Errorf("initialize conversation service: %w", err)
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithConversations(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:]), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil
