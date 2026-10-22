@@ -8,6 +8,7 @@ import (
 
 	"boAIrd/internal/api"
 	"boAIrd/internal/config"
+	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
 	"boAIrd/internal/storage"
 )
@@ -17,6 +18,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("validate configuration: %w", err)
 	}
+	defer clear(cfg.MasterKey[:])
 
 	database, err := storage.OpenSQLite(ctx, cfg.DatabasePath)
 	if err != nil {
@@ -37,7 +39,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize project manager: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandler(database, projectManager), logger); err != nil {
+	credentialRepository, err := storage.NewCredentialRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize credential repository: %w", err)
+	}
+	credentialManager, err := credential.NewManager(credentialRepository, cfg.MasterKey[:])
+	if err != nil {
+		return fmt.Errorf("initialize credential manager: %w", err)
+	}
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandler(database, projectManager, credentialManager), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

@@ -121,8 +121,86 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/credentials:
+    post:
+      operationId: createCredential
+      summary: Store an encrypted provider credential
+      description: The submitted secret is encrypted at rest and is never included in the response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCredential'
+      responses:
+        '201':
+          description: Credential metadata only.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Credential'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      operationId: listCredentials
+      summary: List stored credential metadata
+      description: Secret values and ciphertext are never returned.
+      responses:
+        '200':
+          description: Credential metadata only.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Credential' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/credentials/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: deleteCredential
+      summary: Delete a stored credential
+      responses:
+        '204':
+          description: Credential deleted.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   schemas:
+    CreateCredential:
+      type: object
+      additionalProperties: false
+      required: [name, provider, secret]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        provider: { type: string, minLength: 1, maxLength: 100 }
+        secret:
+          type: string
+          minLength: 1
+          maxLength: 16384
+          writeOnly: true
+    Credential:
+      type: object
+      required: [id, name, provider]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        provider: { type: string }
     CreateProject:
       type: object
       additionalProperties: false

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -18,7 +19,14 @@ type Config struct {
 	Host         string
 	Port         int
 	DatabasePath string
+	MasterKey    MasterKey
 }
+
+// MasterKey is the deployment-supplied key used to encrypt provider credentials.
+type MasterKey [32]byte
+
+func (MasterKey) String() string   { return "[REDACTED]" }
+func (MasterKey) GoString() string { return "[REDACTED]" }
 
 // Load reads service settings from the environment and applies local defaults.
 func Load() (Config, error) {
@@ -35,6 +43,16 @@ func Load() (Config, error) {
 		}
 		cfg.Port = port
 	}
+	rawMasterKey, ok := os.LookupEnv("BOAIRD_MASTER_KEY")
+	if !ok || len(rawMasterKey) != 64 {
+		return Config{}, fmt.Errorf("BOAIRD_MASTER_KEY must be 64 hexadecimal characters (32 bytes)")
+	}
+	key, err := hex.DecodeString(rawMasterKey)
+	if err != nil {
+		return Config{}, fmt.Errorf("BOAIRD_MASTER_KEY must be 64 hexadecimal characters (32 bytes)")
+	}
+	copy(cfg.MasterKey[:], key)
+	clear(key)
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -44,6 +62,9 @@ func Load() (Config, error) {
 
 // Validate checks settings that affect the listener and database path.
 func (c Config) Validate() error {
+	if c.MasterKey == (MasterKey{}) {
+		return fmt.Errorf("BOAIRD_MASTER_KEY must be configured")
+	}
 	if c.Host == "" {
 		return fmt.Errorf("BOAIRD_HOST must not be empty")
 	}

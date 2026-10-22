@@ -9,10 +9,11 @@ import (
 
 	"boAIrd/internal/app"
 	"boAIrd/internal/config"
+	"boAIrd/internal/logging"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	logger := slog.New(logging.NewRedactingHandler(slog.NewJSONHandler(os.Stderr, nil)))
 	slog.SetDefault(logger)
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
 		logger.Error("invalid command", "usage", "boaird serve")
@@ -24,6 +25,7 @@ func main() {
 		logger.Error("load configuration", "error", err)
 		os.Exit(1)
 	}
+	defer clear(cfg.MasterKey[:])
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

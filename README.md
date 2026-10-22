@@ -1972,6 +1972,9 @@ The service reads these optional environment variables:
 | `BOAIRD_HOST` | `127.0.0.1` | HTTP listen address |
 | `BOAIRD_PORT` | `3110` | HTTP listen port |
 | `BOAIRD_DATABASE_PATH` | `./data/boaird.db` | SQLite database file |
+| `BOAIRD_MASTER_KEY` | Required | 32-byte encryption key encoded as 64 hexadecimal characters; never store it in SQLite or commit it. |
+
+Generate a key with `openssl rand -hex 32` and provide it through the deployment environment. Losing the key makes stored provider credentials unrecoverable. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 
 ---
 
