@@ -85,6 +85,9 @@ func (c Config) Validate() error {
 	if c.LocalAuthToken == (LocalAuthToken{}) {
 		return fmt.Errorf("BOAIRD_LOCAL_AUTH_TOKEN must be configured")
 	}
+	if c.MasterKey == MasterKey(c.LocalAuthToken) {
+		return fmt.Errorf("BOAIRD_LOCAL_AUTH_TOKEN must be different from BOAIRD_MASTER_KEY")
+	}
 	if c.Host == "" {
 		return fmt.Errorf("BOAIRD_HOST must not be empty")
 	}

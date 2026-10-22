@@ -68,6 +68,19 @@ func TestValidateRejectsOutOfRangePort(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsReusedMasterKeyForLocalAuthToken(t *testing.T) {
+	cfg := Config{
+		Host:           defaultHost,
+		Port:           defaultPort,
+		DatabasePath:   defaultDatabasePath,
+		MasterKey:      MasterKey{1},
+		LocalAuthToken: LocalAuthToken{1},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted the master key as the local auth token")
+	}
+}
+
 func TestValidateRejectsNonLoopbackHosts(t *testing.T) {
 	for _, host := range []string{"0.0.0.0", "192.0.2.1", "localhost"} {
 		t.Run(host, func(t *testing.T) {

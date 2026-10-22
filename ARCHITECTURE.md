@@ -2496,8 +2496,9 @@ HUMAN_REVIEW, BLOCKED, FAILED, DONE, and CANCELLED states. The service validates
 transitions and project/agent references, applies project human-review policy,
 and requires an actor and reason for each mutation. SQLite writes immutable
 audit rows for task creation, assignment, and status changes. The local HTTP API
-uses a fixed local API actor because caller authentication is not implemented;
-it does not accept actor identity from request data.
+uses a fixed local API actor for task management because those routes do not
+authenticate callers; it does not accept actor identity from request data.
+Conversation routes separately authenticate the configured local administrator.
 
 ---
 
@@ -2524,12 +2525,16 @@ conversation history
 ```
 
 The implementation stores one Conversation per Task in SQLite. Messages preserve
-opaque content with a content type and JSON metadata. The service attributes
-local HTTP messages to the server-owned `local-api` principal, checks Agent
-senders against task assignment, and checks Brain senders against the active
-project Brain. Secret-pattern redaction runs before message content and metadata
-are stored. User authentication and per-user project membership remain future
-work; `local-api` is not a verified human identity.
+opaque content with a content type and JSON metadata. Human `GET` and `POST`
+requests authenticate the single local administrator with
+`BOAIRD_LOCAL_AUTH_TOKEN`; the service checks that principal against
+`project_members` before granting access. Existing projects are backfilled and
+new projects receive local administrator membership. Message history is bounded
+and cursor-paginated. The service checks Agent senders against task assignment
+and Brain senders against the active project Brain. Secret-pattern redaction
+runs before message content and metadata are stored. Multi-user identity and
+membership management remain future work. Other HTTP API routes, including task
+management, still have no caller authentication.
 
 ---
 

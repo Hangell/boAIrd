@@ -585,7 +585,7 @@ Create a card and move it through the entire workflow.
 - The task service checks allowed transitions, active project state, agent capabilities for creation/assignment, and the mandatory human-review gate before completion.
 - The local HTTP API supports task create/list/get, assignment, and status transitions. Each mutation requires an audit reason; callers cannot supply actor identity through request JSON.
 - SQLite records immutable task creation, assignment, and status-change audit events. Integration tests cover capability denial, the complete review workflow, invalid terminal transitions, and audit attribution.
-- The unauthenticated loopback API currently represents its caller as a fixed local API actor. Same-host process isolation and per-user authorization remain future security work.
+- Most loopback API routes remain unauthenticated; task mutations record a fixed local API actor, while task conversation routes require the local administrator bearer token and project membership. Same-host process isolation and multi-user authorization remain future security work.
 
 ---
 
@@ -621,8 +621,9 @@ metadata
 
 - SQLite creates one conversation for each task, including tasks that existed when the migration is applied.
 - Messages retain opaque content, content type, JSON metadata, sender type/ID, and timestamp; sensitive text and metadata are redacted before persistence.
-- `GET` and `POST /api/v1/tasks/{id}/messages` retrieve task history and add local API messages. The sender identity is set by the server, and callers cannot provide it in JSON.
-- Trusted service calls may add messages from the agent assigned to the task or the active Brain for its project. Human authentication and per-user project membership are not implemented, so the fixed `local-api` identity is a local management principal rather than an authenticated human user.
+- `GET` and `POST /api/v1/tasks/{id}/messages` require `BOAIRD_LOCAL_AUTH_TOKEN` and a project membership for the single `local-administrator` principal. The sender identity is set by the server, and callers cannot provide it in JSON.
+- Existing projects are backfilled with local administrator membership, and new projects receive that membership automatically. Trusted service calls may add messages from the agent assigned to the task or the active Brain for its project.
+- Multi-user identity and membership management remain future work. Other HTTP API routes remain unauthenticated and use the fixed local API actor.
 
 ## Formats
 
