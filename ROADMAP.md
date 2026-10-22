@@ -2,11 +2,11 @@
 
 > **Local-first AI Agent Control Plane built with Go + Angular**
 
-O desenvolvimento do boAIrd será incremental.
+boAIrd will be developed incrementally.
 
-A prioridade inicial é construir um MVP funcional, local-first e altamente controlável antes de adicionar recursos distribuídos, multiusuário ou infraestrutura complexa.
+The initial priority is to build a functional, local-first, highly controllable MVP before adding distributed features, multi-user support, or complex infrastructure.
 
-Stack principal:
+Primary stack:
 
 ```text
 Backend:
@@ -28,7 +28,7 @@ MCP
 
 ---
 
-# Visão Geral
+# Overview
 
 ```text
 Phase 0   Bootstrap
@@ -58,17 +58,17 @@ Phase 20  Advanced Runtime
 
 # Phase 0 — Bootstrap
 
-## Objetivo
+## Objective
 
-Criar a base mínima do projeto Go.
+Create the minimum Go project foundation.
 
-Resultado esperado:
+Expected result:
 
 ```bash
 boaird serve
 ```
 
-Subindo:
+Serving at:
 
 ```text
 http://localhost:3110
@@ -76,20 +76,20 @@ http://localhost:3110
 
 ## Backend
 
-Implementar:
+Implement:
 
 - Go module;
-- estrutura inicial de pastas;
+- initial directory structure;
 - CLI;
-- servidor HTTP;
-- configuração;
-- logs estruturados;
+- HTTP server;
+- configuration;
+- structured logging;
 - graceful shutdown;
 - healthcheck;
 - SQLite;
 - migrations.
 
-Estrutura inicial:
+Initial structure:
 
 ```text
 cmd/
@@ -106,7 +106,7 @@ GET /health
 GET /api/v1/status
 ```
 
-## Critério de conclusão
+## Completion Criteria
 
 ```text
 boaird serve
@@ -122,11 +122,11 @@ health = OK
 
 # Phase 1 — Core Domain
 
-## Objetivo
+## Objective
 
-Definir o domínio principal antes de integrar qualquer IA.
+Define the core domain before integrating any AI.
 
-Entidades iniciais:
+Initial entities:
 
 ```text
 Project
@@ -174,19 +174,19 @@ SEMI_AUTO
 AUTONOMOUS
 ```
 
-## Critério
+## Criteria
 
-Modelos definidos sem dependência direta de OpenAI, Claude ou outro provider.
+Models are defined without a direct dependency on OpenAI, Claude, or another provider.
 
 ---
 
 # Phase 2 — Projects
 
-## Objetivo
+## Objective
 
-Permitir criar e gerenciar projetos.
+Allow users to create and manage projects.
 
-Implementar:
+Implement:
 
 ```text
 Create Project
@@ -196,7 +196,7 @@ Update Project
 Archive Project
 ```
 
-Projeto deverá possuir:
+A project should have:
 
 ```text
 name
@@ -218,21 +218,21 @@ PATCH  /api/v1/projects/:id
 DELETE /api/v1/projects/:id
 ```
 
-## Regra
+## Rule
 
-Um projeto ainda pode existir sem configuração completa.
+A project may exist without complete configuration.
 
-Porém:
+However:
 
-> um projeto não poderá executar agentes até possuir um Brain ativo.
+> A project cannot run agents until it has an active Brain.
 
 ---
 
 # Phase 3 — Providers
 
-## Objetivo
+## Objective
 
-Criar abstração independente de providers.
+Create a provider-independent abstraction.
 
 Interface:
 
@@ -244,7 +244,7 @@ type Provider interface {
 }
 ```
 
-Providers iniciais:
+Initial providers:
 
 ```text
 OpenAI
@@ -254,7 +254,7 @@ Google Gemini
 OpenAI-compatible
 ```
 
-## Implementar
+## Implementation
 
 ```text
 Provider Registry
@@ -272,19 +272,19 @@ POST /api/v1/providers
 GET  /api/v1/providers/:id/models
 ```
 
-## Critério
+## Criteria
 
-Uma chamada deve funcionar sem que o restante do sistema saiba qual SDK está sendo utilizado.
+A call must work without the rest of the system knowing which SDK is being used.
 
 ---
 
 # Phase 4 — Credentials
 
-## Objetivo
+## Objective
 
-Gerenciar chaves de API com segurança.
+Manage API keys securely.
 
-Implementar:
+Implement:
 
 ```text
 Provider
@@ -294,15 +294,15 @@ Credential
 Model
 ```
 
-Nunca:
+Never:
 
 ```text
 Agent → raw API key
 ```
 
-## Segurança
+## Security
 
-Utilizar:
+Use:
 
 ```text
 encrypted secret
@@ -310,9 +310,9 @@ encrypted secret
 BOAIRD_MASTER_KEY
 ```
 
-## Critério
+## Criteria
 
-API keys nunca devem aparecer em:
+API keys must never appear in:
 
 ```text
 logs
@@ -325,11 +325,11 @@ frontend payloads
 
 # Phase 5 — Agents
 
-## Objetivo
+## Objective
 
-Permitir criação de agentes especializados.
+Allow specialized agents to be created.
 
-Campos:
+Fields:
 
 ```text
 name
@@ -345,7 +345,7 @@ capabilities
 status
 ```
 
-Exemplos:
+Examples:
 
 ```text
 Backend Go
@@ -367,11 +367,11 @@ GET   /api/v1/agents/:id
 PATCH /api/v1/agents/:id
 ```
 
-## Critério
+## Criteria
 
-Deve ser possível criar dois agentes utilizando providers diferentes.
+It must be possible to create two agents using different providers.
 
-Exemplo:
+Example:
 
 ```text
 Backend → DeepSeek
@@ -383,41 +383,41 @@ QA → Claude
 
 # Phase 6 — Brain
 
-## Objetivo
+## Objective
 
-Implementar o conceito central do projeto.
+Implement the project's central concept.
 
-Regra:
+Rule:
 
 ```text
 Every Project Requires One Active Brain
 ```
 
-O Brain será um Agent com responsabilidades especiais.
+The Brain will be an Agent with special responsibilities.
 
-## Funções
+## Responsibilities
 
-Brain poderá:
+The Brain may:
 
-- analisar objetivo;
-- orientar agentes;
-- criar tarefas;
-- atribuir tarefas;
-- revisar entregas;
-- analisar erros;
-- solicitar nova tentativa;
-- substituir QA quando necessário;
-- notificar administrador.
+- analyze goals;
+- guide agents;
+- create tasks;
+- assign tasks;
+- review deliverables;
+- analyze errors;
+- request retries;
+- act as QA when needed;
+- notify the administrator.
 
-## Primeira implementação
+## Initial Implementation
 
-Inicialmente:
+Initially:
 
 ```text
 Brain via API
 ```
 
-Exemplo:
+Example:
 
 ```text
 OpenAI
@@ -426,9 +426,9 @@ Gemini
 DeepSeek
 ```
 
-MCP Brain virá posteriormente.
+An MCP-based Brain will come later.
 
-## Critério
+## Criteria
 
 ```text
 Project
@@ -440,17 +440,17 @@ Prompt
 Response
 ```
 
-com Run persistido.
+Each response must also have a persisted Run.
 
 ---
 
 # Phase 7 — Runs
 
-## Objetivo
+## Objective
 
-Toda execução de IA deverá gerar um registro.
+Every AI execution must produce a record.
 
-Estrutura:
+Structure:
 
 ```text
 Run
@@ -478,17 +478,17 @@ FAILED
 CANCELLED
 ```
 
-## Critério
+## Criteria
 
-Toda interação com modelo deve ser auditável.
+Every model interaction must be auditable.
 
 ---
 
 # Phase 8 — Kanban
 
-## Objetivo
+## Objective
 
-Implementar o principal fluxo operacional do boAIrd.
+Implement boAIrd's primary operational workflow.
 
 Board:
 
@@ -510,7 +510,7 @@ DONE
 
 ## Task
 
-Cada Task possuirá:
+Each Task will have:
 
 ```text
 title
@@ -524,9 +524,9 @@ parent_task
 context
 ```
 
-## Permissões
+## Permissions
 
-Por padrão:
+By default:
 
 ```text
 Brain:
@@ -536,7 +536,7 @@ Worker:
 task.create = false
 ```
 
-Agentes como:
+Agents such as:
 
 ```text
 PO
@@ -544,25 +544,25 @@ SDM
 Project Manager
 ```
 
-podem receber:
+may be granted:
 
 ```text
 task.create
 ```
 
-## Critério
+## Criteria
 
-Criar card e movê-lo por todo o fluxo.
+Create a card and move it through the entire workflow.
 
 ---
 
 # Phase 9 — Conversations
 
-## Objetivo
+## Objective
 
-Permitir comunicação entre agentes e humanos.
+Allow communication between agents and humans.
 
-Cada Task deverá possuir uma Conversation.
+Each Task must have a Conversation.
 
 ```text
 Task
@@ -574,7 +574,7 @@ Conversation
    └── Human
 ```
 
-Mensagem deverá registrar:
+A message must record:
 
 ```text
 sender
@@ -584,11 +584,11 @@ format
 metadata
 ```
 
-## Formatos
+## Formats
 
-Não limitar comunicação a texto humano.
+Do not limit communication to human-readable text.
 
-Suportar futuramente:
+Future formats to support:
 
 ```text
 text
@@ -599,19 +599,19 @@ binary reference
 machine protocol
 ```
 
-## Critério
+## Criteria
 
-Histórico completo deve poder ser aberto através do card.
+The full history must be accessible from the card.
 
 ---
 
 # Phase 10 — Orchestrator
 
-## Objetivo
+## Objective
 
-Criar o mecanismo que coordena Brain, agentes e Tasks.
+Create the mechanism that coordinates the Brain, agents, and Tasks.
 
-Fluxo:
+Flow:
 
 ```text
 Brain
@@ -627,7 +627,7 @@ Review
 Brain
 ```
 
-## Responsabilidades
+## Responsibilities
 
 ```text
 task assignment
@@ -638,11 +638,11 @@ review flow
 failure routing
 ```
 
-## Falha
+## Failure Handling
 
-Não realizar apenas retry automático.
+Do not rely on automatic retries alone.
 
-Fluxo:
+Flow:
 
 ```text
 Worker fails
@@ -654,7 +654,7 @@ Brain adds instructions
 Worker retries
 ```
 
-Caso o Brain tenha dúvida:
+If the Brain is uncertain:
 
 ```text
 Brain
@@ -666,9 +666,9 @@ Administrator Notification
 
 # Phase 11 — Angular Bootstrap
 
-## Objetivo
+## Objective
 
-Criar o dashboard web.
+Create the web dashboard.
 
 Stack:
 
@@ -678,7 +678,7 @@ Angular Material
 SCSS
 ```
 
-## Estrutura
+## Structure
 
 ```text
 Overview
@@ -702,7 +702,7 @@ Header
 Main Workspace
 ```
 
-## Implementar
+## Implementation
 
 ```text
 routing
@@ -717,11 +717,11 @@ i18n foundation
 
 # Phase 12 — Project Dashboard
 
-## Objetivo
+## Objective
 
-Criar visão operacional por projeto.
+Create an operational view for each project.
 
-Tela:
+Screen:
 
 ```text
 Project
@@ -738,7 +738,7 @@ Project
 
 ## Overview
 
-Mostrar:
+Show:
 
 ```text
 Brain status
@@ -758,9 +758,9 @@ Recent activity
 
 # Phase 13 — Kanban Angular
 
-## Objetivo
+## Objective
 
-Transformar Tasks em experiência visual.
+Turn Tasks into a visual experience.
 
 Interface:
 
@@ -768,7 +768,7 @@ Interface:
 BACKLOG   READY   WORKING   REVIEW   DONE
 ```
 
-Suportar:
+Support:
 
 ```text
 drag & drop
@@ -779,13 +779,13 @@ status
 human review
 ```
 
-Ao clicar:
+On click:
 
 ```text
 Task Modal
 ```
 
-com:
+Show:
 
 ```text
 Description
@@ -801,11 +801,11 @@ Review
 
 # Phase 14 — Agent Dashboard
 
-## Objetivo
+## Objective
 
-Permitir configuração completa de agentes.
+Allow agents to be fully configured.
 
-Tela:
+Screen:
 
 ```text
 Avatar
@@ -827,11 +827,11 @@ Logs
 
 # Phase 15 — Brain Dashboard
 
-## Objetivo
+## Objective
 
-Permitir configurar e observar o Brain.
+Allow the Brain to be configured and monitored.
 
-Configurações:
+Configuration:
 
 ```text
 Brain Agent
@@ -842,7 +842,7 @@ Capabilities
 Autonomy Mode
 ```
 
-Mostrar:
+Show:
 
 ```text
 status
@@ -857,11 +857,11 @@ notifications
 
 # Phase 16 — Capabilities
 
-## Objetivo
+## Objective
 
-Criar camada de segurança independente de role.
+Create a security layer independent of role.
 
-Exemplos:
+Examples:
 
 ```text
 filesystem.read
@@ -889,21 +889,21 @@ github.pr.review
 github.pr.merge
 ```
 
-Regra:
+Rule:
 
 ```text
 Role != Permission
 ```
 
-## Critério
+## Criteria
 
-Backend pode ter:
+A Backend agent may have:
 
 ```text
 filesystem.write
 ```
 
-sem possuir:
+while lacking:
 
 ```text
 git.push
@@ -913,9 +913,9 @@ git.push
 
 # Phase 17 — Autonomy Modes
 
-## Manual
+## Manual Mode
 
-Brain orienta, mas ações importantes dependem do usuário.
+The Brain provides guidance, while important actions depend on the user.
 
 ```text
 MANUAL
@@ -923,25 +923,25 @@ MANUAL
 
 ---
 
-## Semi-Auto
+## Semi-Auto Mode
 
-Brain distribui e acompanha trabalho.
+The Brain distributes and tracks work.
 
 ```text
 SEMI_AUTO
 ```
 
-Ações críticas ainda podem exigir aprovação.
+Critical actions may still require approval.
 
 ---
 
-## Autonomous
+## Autonomous Mode
 
 ```text
 AUTONOMOUS
 ```
 
-Brain pode:
+The Brain may:
 
 ```text
 create tasks
@@ -952,23 +952,23 @@ reprioritize
 finish tasks
 ```
 
-Mas nunca ultrapassar capabilities.
+It must never exceed its capabilities.
 
 ---
 
 # Phase 18 — Human Review
 
-## Objetivo
+## Objective
 
-Implementar aprovação humana opcional.
+Implement optional human approval.
 
-Quando:
+When:
 
 ```text
 human_review = false
 ```
 
-Fluxo:
+Flow:
 
 ```text
 Worker
@@ -978,13 +978,13 @@ QA / Brain
 DONE
 ```
 
-Quando:
+When:
 
 ```text
 human_review = true
 ```
 
-Fluxo:
+Flow:
 
 ```text
 Worker
@@ -1002,11 +1002,11 @@ DONE
 
 # Phase 19 — MCP Server
 
-## Objetivo
+## Objective
 
-Transformar boAIrd em servidor MCP.
+Turn boAIrd into an MCP server.
 
-Primeiras ferramentas:
+Initial tools:
 
 ```text
 boaird.project.get
@@ -1027,9 +1027,9 @@ boaird.conversation.send
 boaird.context.get
 ```
 
-## Critério
+## Criteria
 
-Um MCP Client deve conseguir:
+An MCP client must be able to:
 
 ```text
 connect
@@ -1047,11 +1047,11 @@ complete task
 
 # Phase 20 — External Agents
 
-## Objetivo
+## Objective
 
-Permitir agentes fora do processo principal.
+Allow agents to run outside the main process.
 
-Exemplos:
+Examples:
 
 ```text
 Codex
@@ -1062,13 +1062,13 @@ custom agent
 local CLI
 ```
 
-Primeiro modelo:
+Initial model:
 
 ```text
 Pull
 ```
 
-Fluxo:
+Flow:
 
 ```text
 Agent
@@ -1084,11 +1084,11 @@ boAIrd
 
 # Phase 21 — Heartbeat
 
-## Objetivo
+## Objective
 
-Monitorar agentes externos.
+Monitor external agents.
 
-Estados:
+States:
 
 ```text
 ONLINE
@@ -1097,7 +1097,7 @@ STALE
 OFFLINE
 ```
 
-Fluxo:
+Flow:
 
 ```text
 heartbeat
@@ -1121,11 +1121,11 @@ OFFLINE
 
 # Phase 22 — External Brain
 
-## Objetivo
+## Objective
 
-Permitir que o Brain também seja externo.
+Allow the Brain to run externally as well.
 
-Exemplos:
+Examples:
 
 ```text
 Codex in VS Code
@@ -1139,19 +1139,19 @@ Gemini
 local AI
 ```
 
-boAIrd deve tratar da mesma forma:
+boAIrd must handle the following in the same way:
 
 ```text
 BrainRuntime
 ```
 
-independentemente de onde ele está sendo executado.
+regardless of where it runs.
 
 ---
 
 # Phase 23 — Agent Runtime Abstraction
 
-Implementar:
+Implement:
 
 ```go
 type AgentRuntime interface {
@@ -1167,7 +1167,7 @@ type AgentRuntime interface {
 }
 ```
 
-Implementações:
+Implementations:
 
 ```text
 API Runtime
@@ -1180,11 +1180,11 @@ Remote Runtime
 
 # Phase 24 — Context Engine
 
-## Objetivo
+## Objective
 
-Selecionar contexto de forma inteligente.
+Select context intelligently.
 
-Contexto final:
+Final context:
 
 ```text
 Brain selection
@@ -1194,7 +1194,7 @@ Agent request
 boAIrd Context Engine
 ```
 
-Fontes:
+Sources:
 
 ```text
 Project
@@ -1213,11 +1213,11 @@ Documentation
 
 # Phase 25 — Memory Engine
 
-## Objetivo
+## Objective
 
-Reduzir custo e excesso de contexto.
+Reduce cost and excess context.
 
-Fluxo:
+Flow:
 
 ```text
 Raw History
@@ -1227,7 +1227,7 @@ Brain Summary
 Optimized Memory
 ```
 
-Categorias:
+Categories:
 
 ```text
 Architecture Decisions
@@ -1243,27 +1243,27 @@ Current State
 Task History
 ```
 
-## Regra
+## Rule
 
-Histórico bruto continua disponível.
+Raw history remains available.
 
-Mas não precisa ser enviado para modelos em toda execução.
+However, it does not need to be sent to models on every run.
 
 ---
 
 # Phase 26 — Tools
 
-## Objetivo
+## Objective
 
-Criar sistema genérico de ferramentas.
+Create a generic tool system.
 
-Estrutura:
+Structure:
 
 ```text
 Tool Registry
 ```
 
-Primeiras tools:
+Initial tools:
 
 ```text
 Filesystem
@@ -1272,7 +1272,7 @@ Git
 GitHub
 ```
 
-Futuras:
+Future tools:
 
 ```text
 Mermaid
@@ -1288,11 +1288,11 @@ Kubernetes
 
 # Phase 27 — Shell
 
-## Objetivo
+## Objective
 
-Execução controlada de comandos.
+Controlled command execution.
 
-Não conceder shell irrestrito por padrão.
+Do not grant unrestricted shell access by default.
 
 Capabilities:
 
@@ -1304,7 +1304,7 @@ shell.angular
 shell.nest
 ```
 
-Exemplo:
+Example:
 
 Backend Go:
 
@@ -1327,9 +1327,9 @@ npx
 
 # Phase 28 — Git
 
-## Objetivo
+## Objective
 
-Permitir operações Git controladas.
+Allow controlled Git operations.
 
 ```text
 git.read
@@ -1340,7 +1340,7 @@ git.push
 git.merge
 ```
 
-Também suportar:
+Also support:
 
 ```text
 Git Manager Agent
@@ -1350,7 +1350,7 @@ Git Manager Agent
 
 # Phase 29 — GitHub
 
-Implementar:
+Implement:
 
 ```text
 repositories
@@ -1373,9 +1373,9 @@ github.pr.merge
 
 # Phase 30 — Specialized Agents
 
-Criar suporte para perfis mais avançados.
+Add support for more advanced profiles.
 
-Exemplos:
+Examples:
 
 ```text
 Software Architect
@@ -1393,9 +1393,9 @@ PO
 SDM
 ```
 
-Cada um podendo possuir ferramentas exclusivas.
+Each profile may have exclusive tools.
 
-Exemplo:
+Example:
 
 ```text
 Software Architect
@@ -1409,9 +1409,9 @@ Software Architect
 
 # Phase 31 — Observability
 
-## Objetivo
+## Objective
 
-Entender tudo que acontece.
+Understand everything that happens.
 
 Dashboard:
 
@@ -1423,7 +1423,7 @@ Agent activity
 Task history
 ```
 
-Categorias:
+Categories:
 
 ```text
 system
@@ -1442,7 +1442,7 @@ api
 
 # Phase 32 — Audit
 
-Registrar ações críticas.
+Record critical actions.
 
 ```text
 Actor
@@ -1456,7 +1456,7 @@ Timestamp
 Result
 ```
 
-Especialmente:
+Especially:
 
 ```text
 shell
@@ -1472,9 +1472,9 @@ credentials
 
 # Phase 33 — Notifications
 
-Criar sistema interno de notificações.
+Create an internal notification system.
 
-Exemplos:
+Examples:
 
 ```text
 Brain needs help
@@ -1492,26 +1492,26 @@ Provider unavailable
 
 # Phase 34 — Internationalization
 
-Dashboard inicialmente:
+Initial dashboard languages:
 
 ```text
 pt-BR
 en-US
 ```
 
-Preparado para novos idiomas.
+Designed to support additional languages.
 
-Agentes também podem possuir idioma preferencial.
+Agents may also have a preferred language.
 
 ---
 
 # Phase 35 — Remote Mode
 
-## Objetivo
+## Objective
 
-Permitir execução segura fora de localhost.
+Allow secure operation outside localhost.
 
-Implementar:
+Implement:
 
 ```text
 authentication
@@ -1525,9 +1525,9 @@ remote MCP
 
 # Phase 36 — PostgreSQL
 
-SQLite permanece padrão local.
+SQLite remains the default for local use.
 
-PostgreSQL entra para ambientes maiores.
+PostgreSQL can be added for larger environments.
 
 ```text
 SQLite
@@ -1535,15 +1535,15 @@ SQLite
 PostgreSQL
 ```
 
-Repositories devem impedir dependência forte do banco desde o início.
+Repositories should prevent a strong dependency on the database from the start.
 
 ---
 
 # Phase 37 — Distributed Workers
 
-Somente quando realmente necessário.
+Only when truly necessary.
 
-Possíveis tecnologias:
+Possible technologies:
 
 ```text
 NATS
@@ -1552,15 +1552,15 @@ Redis Streams
 RabbitMQ
 ```
 
-Não implementar antes de existir necessidade real.
+Do not implement this until there is a real need.
 
 ---
 
 # Phase 38 — Multi-User
 
-Futuro.
+Future.
 
-Implementar:
+Implement:
 
 ```text
 Users
@@ -1574,7 +1574,7 @@ Project membership
 
 # Phase 39 — Agent Templates
 
-Permitir agentes reutilizáveis.
+Allow reusable agents.
 
 ```text
 Global Agent Template
@@ -1582,7 +1582,7 @@ Global Agent Template
 Project Agent
 ```
 
-Exemplos:
+Examples:
 
 ```text
 Go Senior
@@ -1598,15 +1598,15 @@ Git Manager
 
 # Phase 40 — Tool Marketplace / Extensions
 
-Futuro.
+Future.
 
-Permitir adicionar ferramentas sem alterar o core.
+Allow tools to be added without changing the core.
 
 ```text
 boAIrd Tool SDK
 ```
 
-Possíveis integrações:
+Possible integrations:
 
 ```text
 GitHub
@@ -1625,7 +1625,7 @@ Cloud providers
 
 # MVP Definition
 
-O MVP será considerado funcional quando este fluxo existir:
+The MVP will be considered functional when this workflow is in place:
 
 ```text
 User starts boAIrd
@@ -1655,7 +1655,7 @@ Brain reviews
 Task → DONE
 ```
 
-Com histórico disponível no dashboard.
+The dashboard must provide access to the full history.
 
 ---
 
@@ -1685,7 +1685,7 @@ OpenAI
 DeepSeek
 ```
 
-Primeiro fluxo:
+Initial workflow:
 
 ```text
 Brain API
@@ -1697,7 +1697,7 @@ Worker API
 
 # MVP 2
 
-Adicionar:
+Add:
 
 ```text
 Claude
@@ -1716,7 +1716,7 @@ Human Review
 
 # MVP 3
 
-Adicionar:
+Add:
 
 ```text
 MCP Server
@@ -1732,7 +1732,7 @@ heartbeat
 
 # MVP 4
 
-Adicionar:
+Add:
 
 ```text
 External Brain
@@ -1746,7 +1746,7 @@ Memory optimization
 
 # Beta
 
-O projeto poderá entrar em Beta quando possuir:
+The project may enter Beta once it has:
 
 ```text
 Projects
@@ -1788,7 +1788,7 @@ Git integration
 
 ---
 
-# Pós-Beta
+# Post-Beta
 
 ```text
 GitHub advanced integration
@@ -1808,9 +1808,9 @@ tool extensions
 
 ---
 
-# Prioridades
+# Priorities
 
-## P0 — Obrigatório
+## P0 — Required
 
 ```text
 Go Core
@@ -1826,7 +1826,7 @@ Angular Dashboard
 
 ---
 
-## P1 — Muito importante
+## P1 — High Priority
 
 ```text
 Conversations
@@ -1839,7 +1839,7 @@ External Agents
 
 ---
 
-## P2 — Evolução
+## P2 — Further Development
 
 ```text
 Context Engine
@@ -1852,7 +1852,7 @@ Observability
 
 ---
 
-## P3 — Escala
+## P3 — Scale
 
 ```text
 Remote Mode
@@ -1864,11 +1864,11 @@ Extensions
 
 ---
 
-# Regras Arquiteturais
+# Architectural Rules
 
-## Regra 1
+## Rule 1
 
-O core não depende de um modelo específico.
+The core does not depend on a specific model.
 
 ```text
 Model Agnostic
@@ -1876,9 +1876,9 @@ Model Agnostic
 
 ---
 
-## Regra 2
+## Rule 2
 
-Agent não significa API.
+An Agent is not an API.
 
 ```text
 Agent
@@ -1886,7 +1886,7 @@ Agent
 Runtime
 ```
 
-Runtime pode ser:
+A Runtime can be:
 
 ```text
 API
@@ -1897,9 +1897,9 @@ Remote
 
 ---
 
-## Regra 3
+## Rule 3
 
-Brain sempre existe.
+A Brain must always exist.
 
 ```text
 Project
@@ -1909,9 +1909,9 @@ Brain
 
 ---
 
-## Regra 4
+## Rule 4
 
-Administrador possui autoridade máxima.
+The administrator has the highest authority.
 
 ```text
 Administrator
@@ -1925,9 +1925,9 @@ Agents
 
 ---
 
-## Regra 5
+## Rule 5
 
-Autonomia não concede permissão.
+Autonomy does not grant permission.
 
 ```text
 Autonomy != Capability
@@ -1935,23 +1935,23 @@ Autonomy != Capability
 
 ---
 
-## Regra 6
+## Rule 6
 
-Kanban pertence ao domínio.
+Kanban belongs to the domain.
 
-Não apenas ao Angular.
-
----
-
-## Regra 7
-
-Toda execução relevante deve ser auditável.
+Not just to Angular.
 
 ---
 
-## Regra 8
+## Rule 7
 
-Segurança deve utilizar:
+Every relevant execution must be auditable.
+
+---
+
+## Rule 8
+
+Security must use:
 
 ```text
 deny by default
@@ -1961,11 +1961,11 @@ least privilege
 
 ---
 
-## Regra 9
+## Rule 9
 
-Não adicionar infraestrutura distribuída cedo demais.
+Do not add distributed infrastructure too early.
 
-O MVP será:
+The MVP will be:
 
 ```text
 Modular Monolith
@@ -1973,7 +1973,7 @@ Modular Monolith
 
 ---
 
-# Arquitetura Inicial
+# Initial Architecture
 
 ```text
                    Angular Dashboard
@@ -2010,15 +2010,15 @@ Modular Monolith
 
 ---
 
-# Primeiro marco técnico
+# First Technical Milestone
 
-O primeiro marco de desenvolvimento deverá ser:
+The first development milestone should be:
 
 ```bash
 go run ./cmd/boaird serve
 ```
 
-Resultado:
+Result:
 
 ```text
 boAIrd v0.0.1-dev
@@ -2033,9 +2033,9 @@ http://localhost:3110
 
 ---
 
-# Primeiro marco funcional
+# First Functional Milestone
 
-Depois:
+Next:
 
 ```text
 Create Project
@@ -2055,13 +2055,13 @@ Brain reviews
 DONE
 ```
 
-Esse será o primeiro momento em que o boAIrd poderá ser considerado um **AI Agent Control Plane funcional**.
+This is the point at which boAIrd can be considered a functional **AI Agent Control Plane**.
 
 ---
 
-# Desenvolvimento recomendado
+# Recommended Development Order
 
-A ordem recomendada é:
+Recommended order:
 
 ```text
 Go Core
@@ -2127,11 +2127,11 @@ Memory
 Tools
 ```
 
-Evitar começar simultaneamente pelo MCP, Angular e integração com vários agentes.
+Avoid starting MCP, Angular, and multiple agent integrations at the same time.
 
-Primeiro construir um fluxo pequeno que funcione completamente.
+First, build a small workflow that works end to end.
 
-Depois expandir.
+Expand after that.
 
 ---
 

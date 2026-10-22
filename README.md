@@ -128,7 +128,7 @@ Example:
 boaird serve
 ```
 
-E disponibilizar:
+The server should be available at:
 
 ```text
 http://localhost:3110
@@ -142,9 +142,9 @@ The same application may later run on:
 
 - a home server;
 - VPS;
-- servidor corporativo;
+- corporate server;
 - homelab;
-- cloud privada.
+- private cloud.
 
 Example:
 
@@ -167,9 +167,9 @@ The Brain can be:
 - Gemini;
 - Qwen;
 - a VS Code agent;
-- aplicativo local;
+- a local application;
 - an MCP agent;
-- modelo local;
+- a local model;
 - a remote service.
 
 ---
@@ -305,7 +305,7 @@ brain:
   runtime: mcp
 ```
 
-Ou:
+Or:
 
 ```yaml
 brain:
@@ -431,10 +431,10 @@ Agents can use:
 
 - Portuguese;
 - English;
-- estruturas JSON;
+- JSON structures;
 - YAML;
 - custom protocols;
-- dados compactados;
+- compressed data;
 - binary representations;
 - formats optimized for machine-to-machine communication.
 
@@ -484,7 +484,7 @@ REVIEW
 DONE
 ```
 
-Estados adicionais:
+Additional states:
 
 ```text
 BLOCKED
@@ -566,7 +566,7 @@ task.create
 
 # Task
 
-Modelo conceitual:
+Conceptual model:
 
 ```go
 type Task struct {
@@ -710,7 +710,7 @@ Permissions will be implemented through capabilities.
 
 Do not create separate flags for every feature.
 
-Evitar:
+Avoid:
 
 ```text
 can_git
@@ -720,7 +720,7 @@ can_pr
 can_mermaid
 ```
 
-Preferir:
+Prefer:
 
 ```go
 type Capability string
@@ -872,8 +872,8 @@ Responsible for:
 - installing tools;
 - validating dependencies;
 - configuring the environment;
-- preparar CLI;
-- instalar SDKs;
+- prepare the CLI;
+- install SDKs;
 - configuring the required tools.
 
 ---
@@ -940,9 +940,9 @@ github.pr.merge
 
 The Brain may have the capability to:
 
-- analisar PR;
+- analyze PRs;
 - review changes;
-- comentar;
+- comment on PRs;
 - validate implementations;
 - request corrections.
 
@@ -954,7 +954,7 @@ github.pr.merge
 
 ---
 
-# Falhas
+# Failures
 
 When an agent fails, responsibility returns to the Brain.
 
@@ -990,12 +990,12 @@ Administrator Notification
 
 The administrator can:
 
-- responder;
+- reply;
 - add context;
 - change the task;
 - change the agent;
-- trocar provider;
-- assumir controle.
+- switch provider;
+- take control.
 
 ---
 
@@ -1105,7 +1105,7 @@ boAIrd
 
 MCP will be one of boAIrd’s main external interfaces.
 
-Arquitetura:
+Architecture:
 
 ```text
                   boAIrd Core
@@ -1121,7 +1121,7 @@ Arquitetura:
 
 # MCP Tools
 
-Exemplos iniciais:
+Initial examples:
 
 ```text
 boaird.project.get
@@ -1216,7 +1216,7 @@ internal/provider/
 
 Credentials must not belong directly to agents.
 
-Relacionamento:
+Relationship:
 
 ```text
 Provider
@@ -1589,8 +1589,8 @@ The user can choose:
 
 - upload;
 - icon;
-- imagem;
-- avatar gerado posteriormente.
+- image;
+- generate an avatar later.
 
 ---
 
@@ -1737,7 +1737,7 @@ Duration:
 
 Logs will be essential for auditing.
 
-Categorias:
+Categories:
 
 ```text
 system
@@ -1818,13 +1818,13 @@ RabbitMQ
 
 # Backend
 
-Backend principal:
+Primary backend:
 
 ```text
 Go
 ```
 
-Responsabilidades:
+Responsibilities:
 
 ```text
 MCP
