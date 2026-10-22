@@ -14,6 +14,7 @@ import (
 	"boAIrd/internal/brain"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
+	"boAIrd/internal/run"
 )
 
 const statusCheckTimeout = 2 * time.Second
@@ -55,25 +56,32 @@ type BrainManager interface {
 	Execute(context.Context, string, string, int) (brain.Execution, error)
 }
 
+type RunManager interface {
+	Get(context.Context, string) (run.Run, error)
+	List(context.Context, string, string, string, int, int) ([]run.Run, error)
+	ListAuditEvents(context.Context, string) ([]run.AuditEvent, error)
+	ListAuditEventsForRuns(context.Context, []string) (map[string][]run.AuditEvent, error)
+}
+
 // NewHandler returns the HTTP handler for the configured service endpoints.
 func NewHandler(database DatabaseHealth, projects ProjectManager, credentials ...CredentialManager) http.Handler {
 	var credentialManager CredentialManager
 	if len(credentials) > 0 {
 		credentialManager = credentials[0]
 	}
-	return newHandler(database, projects, credentialManager, nil)
+	return newHandler(database, projects, credentialManager, nil, nil, nil)
 }
 
 // NewHandlerWithAgents returns a handler with project, credential, and agent routes.
 func NewHandlerWithAgents(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager) http.Handler {
-	return newHandler(database, projects, credentials, agents, nil)
+	return newHandler(database, projects, credentials, agents, nil, nil)
 }
 
-func NewHandlerWithBrain(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager) http.Handler {
-	return newHandler(database, projects, credentials, agents, brains)
+func NewHandlerWithBrain(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager) http.Handler {
+	return newHandler(database, projects, credentials, agents, brains, runs)
 }
 
-func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains ...BrainManager) http.Handler {
+func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -103,8 +111,11 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 	if agents != nil {
 		registerAgentRoutes(mux, agents)
 	}
-	if len(brains) > 0 && brains[0] != nil {
-		registerBrainRoutes(mux, brains[0])
+	if brains != nil {
+		registerBrainRoutes(mux, brains)
+	}
+	if runs != nil {
+		registerRunRoutes(mux, runs)
 	}
 	return mux
 }

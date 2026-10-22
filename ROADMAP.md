@@ -500,6 +500,13 @@ CANCELLED
 
 Every model interaction must be auditable.
 
+## Current implementation
+
+- Runs persist actor agent, project/task references, runtime, provider, model, redacted input/output, tool names, status, timing, and sanitized error text.
+- `GET /api/v1/projects/{id}/runs` filters by task or agent; `GET /api/v1/runs/{id}` retrieves a run.
+- SQLite creates immutable audit events for Run creation and every status transition. Run responses include those linked events.
+- Provider failure and cancellation are stored as terminal states without persisting provider error bodies.
+
 ---
 
 # Phase 8 — Kanban

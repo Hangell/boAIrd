@@ -1102,14 +1102,16 @@ task
 runtime
 provider
 model
-input reference
-output reference
+redacted input
+redacted output
 status
 started_at
 finished_at
 error
 tools used
 ```
+
+Run status transitions are recorded as immutable application-level audit events. Run input, output, tool names, and error text pass through common secret-pattern redaction before persistence and display. This pattern-based protection does not replace encryption or filesystem protection for SQLite.
 
 ---
 

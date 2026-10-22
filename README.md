@@ -2004,6 +2004,8 @@ The local API supports `POST /api/v1/agents`, `GET /api/v1/agents`, `GET /api/v1
 
 Projects can attach one active API Brain with `POST /api/v1/projects/{id}/brain`; the selected agent must explicitly have the `brain.execute` capability. `GET /api/v1/projects/{id}/brain` returns its configuration. `POST /api/v1/projects/{id}/brain/runs` sends an objective to the configured provider and persists a run. The Brain returns a proposed plan as text; this runtime does not apply task or project mutations. Autonomy mode does not grant permissions, and project human review remains in force.
 
+Runs can be listed with `GET /api/v1/projects/{id}/runs`, filtered by `task_id` or `agent_id`, or fetched individually with `GET /api/v1/runs/{id}`. Responses include immutable audit events for run creation and status transitions. Common credential patterns are redacted from run input, output, tool names, and errors before persistence and display.
+
 ---
 
 # Tasks

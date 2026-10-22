@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"boAIrd/internal/logging"
 )
 
 type Status string
@@ -55,6 +57,20 @@ type Snapshot struct {
 	Output     string
 	Error      string
 	ToolsUsed  []string
+}
+
+type AuditEvent struct {
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	TaskID       string    `json:"task_id,omitempty"`
+	ActorType    string    `json:"actor_type"`
+	ActorID      string    `json:"actor_id"`
+	EventType    string    `json:"event_type"`
+	ResourceType string    `json:"resource_type"`
+	ResourceID   string    `json:"resource_id"`
+	FromStatus   string    `json:"from_status,omitempty"`
+	ToStatus     string    `json:"to_status,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 func New(id, projectID, taskID, agentID string) (Run, error) {
@@ -122,8 +138,11 @@ func Restore(snapshot Snapshot) (Run, error) {
 	}
 	value.status, value.startedAt, value.finishedAt = snapshot.Status, snapshot.StartedAt, snapshot.FinishedAt
 	value.runtime, value.provider, value.model = snapshot.Runtime, snapshot.Provider, snapshot.Model
-	value.input, value.output, value.errorText = snapshot.Input, snapshot.Output, snapshot.Error
-	value.toolsUsed = append([]string(nil), snapshot.ToolsUsed...)
+	value.input, value.output, value.errorText = logging.RedactSensitiveText(snapshot.Input), logging.RedactSensitiveText(snapshot.Output), logging.RedactSensitiveText(snapshot.Error)
+	value.toolsUsed = make([]string, len(snapshot.ToolsUsed))
+	for i, tool := range snapshot.ToolsUsed {
+		value.toolsUsed[i] = logging.RedactSensitiveText(tool)
+	}
 	return value, nil
 }
 
@@ -134,7 +153,7 @@ func (r Run) ConfigureExecution(runtime, provider, model, input string) (Run, er
 	if strings.TrimSpace(runtime) == "" || strings.TrimSpace(provider) == "" || strings.TrimSpace(model) == "" || strings.TrimSpace(input) == "" {
 		return Run{}, errors.New("run runtime, provider, model, and input are required")
 	}
-	r.runtime, r.provider, r.model, r.input = strings.TrimSpace(runtime), strings.TrimSpace(provider), strings.TrimSpace(model), input
+	r.runtime, r.provider, r.model, r.input = strings.TrimSpace(runtime), strings.TrimSpace(provider), strings.TrimSpace(model), logging.RedactSensitiveText(input)
 	return r, nil
 }
 
@@ -145,7 +164,7 @@ func (r Run) SetOutput(output string) (Run, error) {
 	if strings.TrimSpace(output) == "" {
 		return Run{}, errors.New("run output is required")
 	}
-	r.output = output
+	r.output = logging.RedactSensitiveText(output)
 	return r, nil
 }
 
@@ -156,7 +175,7 @@ func (r Run) SetError(message string) (Run, error) {
 	if strings.TrimSpace(message) == "" {
 		return Run{}, errors.New("run error message is required")
 	}
-	r.errorText = strings.TrimSpace(message)
+	r.errorText = logging.RedactSensitiveText(strings.TrimSpace(message))
 	return r, nil
 }
 
@@ -167,7 +186,7 @@ func (r Run) RecordToolUse(name string) (Run, error) {
 	if r.status != StatusRunning {
 		return Run{}, fmt.Errorf("tools can only be recorded while a run is %s", StatusRunning)
 	}
-	r.toolsUsed = append(append([]string(nil), r.toolsUsed...), name)
+	r.toolsUsed = append(append([]string(nil), r.toolsUsed...), logging.RedactSensitiveText(name))
 	return r, nil
 }
 

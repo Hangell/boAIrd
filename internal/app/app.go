@@ -12,6 +12,7 @@ import (
 	"boAIrd/internal/config"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/project"
+	"boAIrd/internal/run"
 	"boAIrd/internal/storage"
 )
 
@@ -65,11 +66,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize run repository: %w", err)
 	}
+	runManager, err := run.NewManager(runRepository)
+	if err != nil {
+		return fmt.Errorf("initialize run manager: %w", err)
+	}
 	brainService, err := brain.NewService(brainRepository, projectManager, agentManager, runRepository, credentialManager)
 	if err != nil {
 		return fmt.Errorf("initialize Brain service: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithBrain(database, projectManager, credentialManager, agentManager, brainService), logger); err != nil {
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithBrain(database, projectManager, credentialManager, agentManager, brainService, runManager), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

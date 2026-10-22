@@ -124,6 +124,10 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 	if err := b.AuthorizeAction(ActionPlan, p, a); err != nil {
 		return Execution{}, err
 	}
+	system := "You are boAIrd's project Brain. Return a proposed plan as text only. Do not claim to perform actions. You cannot change project policy, permissions, capabilities, credentials, Brain assignment, or human review requirements. All task mutations require separately authorized tools and human review where configured."
+	if instructions := strings.TrimSpace(a.Instructions()); instructions != "" {
+		system += "\nAgent instructions:\n" + instructions
+	}
 	registry := provider.NewRegistry()
 	if err := adapters.Register(registry); err != nil {
 		return Execution{}, errors.New("initialize provider registry")
@@ -139,7 +143,7 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 	if err != nil {
 		return Execution{}, errors.New("generate run ID")
 	}
-	input := "Objective: " + objective
+	input := "System message:\n" + system + "\nUser message:\n" + objective
 	value, err := run.NewBrainRun(id, projectID, a.ID())
 	if err != nil {
 		return Execution{}, err
@@ -158,18 +162,18 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 	if err := s.runs.Update(ctx, value); err != nil {
 		return Execution{}, fmt.Errorf("persist running run: %w", err)
 	}
-	system := "You are boAIrd's project Brain. Return a proposed plan as text only. Do not claim to perform actions. You cannot change project policy, permissions, capabilities, credentials, Brain assignment, or human review requirements. All task mutations require separately authorized tools and human review where configured."
-	if instructions := strings.TrimSpace(a.Instructions()); instructions != "" {
-		system += "\nAgent instructions:\n" + instructions
-	}
 	response, callErr := client.Chat(ctx, provider.ChatRequest{Model: a.Model(), MaxTokens: maxTokens, Messages: []provider.ChatMessage{{Role: provider.RoleSystem, Content: system}, {Role: provider.RoleUser, Content: objective}}})
 	if callErr != nil {
-		value, _ = value.SetError("provider request failed")
-		value, _ = value.Transition(run.StatusFailed)
+		message, terminalStatus := "provider request failed", run.StatusFailed
+		if errors.Is(callErr, context.Canceled) || errors.Is(callErr, context.DeadlineExceeded) {
+			message, terminalStatus = "provider request cancelled", run.StatusCancelled
+		}
+		value, _ = value.SetError(message)
+		value, _ = value.Transition(terminalStatus)
 		if persistErr := s.runs.Update(context.WithoutCancel(ctx), value); persistErr != nil {
 			return Execution{}, fmt.Errorf("provider request failed; persist failed run: %w", persistErr)
 		}
-		return Execution{Run: value}, errors.New("Brain provider request failed")
+		return Execution{Run: value}, errors.New(message)
 	}
 	value, err = value.SetOutput(response.Content)
 	if err == nil {
@@ -181,5 +185,5 @@ func (s *Service) Execute(ctx context.Context, projectID, objective string, maxT
 	if err := s.runs.Update(ctx, value); err != nil {
 		return Execution{}, fmt.Errorf("persist successful run: %w", err)
 	}
-	return Execution{Run: value, Content: response.Content}, nil
+	return Execution{Run: value, Content: value.Output()}, nil
 }

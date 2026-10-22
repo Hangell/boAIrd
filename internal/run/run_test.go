@@ -2,6 +2,7 @@ package run
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -36,6 +37,47 @@ func TestRunTransitions(t *testing.T) {
 	}
 	if _, err := r.Transition(StatusRunning); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("expected successful run to be terminal, got %v", err)
+	}
+}
+
+func TestRunTerminalFailureAndCancellationAreTimestampedAndSanitized(t *testing.T) {
+	r, err := New("r-failed", "p1", "t1", "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = r.ConfigureExecution("API", "provider", "model", "api_key=raw-input-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.Input(), "raw-input-secret") {
+		t.Fatalf("run input leaked a secret: %q", r.Input())
+	}
+	r, err = r.Transition(StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = r.SetError("authorization: Bearer raw-error-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = r.Transition(StatusFailed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.FinishedAt().IsZero() || strings.Contains(r.Error(), "raw-error-secret") {
+		t.Fatalf("failure wasn't timestamped or sanitized: %+v", r.Snapshot())
+	}
+
+	cancelled, err := NewBrainRun("r-cancelled", "p1", "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err = cancelled.Transition(StatusCancelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.FinishedAt().IsZero() || cancelled.Status() != StatusCancelled {
+		t.Fatalf("cancellation state = %+v", cancelled.Snapshot())
 	}
 }
 

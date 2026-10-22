@@ -24,7 +24,7 @@ type brainResponse struct {
 	Autonomy  brain.AutonomyMode `json:"autonomy"`
 	Active    bool               `json:"active"`
 }
-type runResponse struct {
+type brainExecutionResponse struct {
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 	Provider string `json:"provider"`
@@ -66,7 +66,7 @@ func registerBrainRoutes(mux *http.ServeMux, manager BrainManager) {
 			writeBrainError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, runResponse{ID: result.Run.ID(), Status: string(result.Run.Status()), Provider: result.Run.Provider(), Model: result.Run.Model(), Content: result.Content})
+		writeJSON(w, http.StatusCreated, brainExecutionResponse{ID: result.Run.ID(), Status: string(result.Run.Status()), Provider: result.Run.Provider(), Model: result.Run.Model(), Content: result.Content})
 	})
 }
 

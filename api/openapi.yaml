@@ -227,6 +227,55 @@ paths:
           description: Brain action is not allowed by project policy or explicit capabilities.
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{id}/runs:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listProjectRuns
+      summary: List project runs
+      description: Filters by optional task_id and agent_id. Stored and returned text has common credential forms redacted.
+      parameters:
+        - name: task_id
+          in: query
+          schema: { type: string }
+        - name: agent_id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Project runs with linked immutable audit events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/runs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getRun
+      summary: Get a run and its audit events
+      responses:
+        '200':
+          description: Run details with text redaction and linked immutable audit events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/credentials/{id}:
     parameters:
       - name: id
@@ -361,6 +410,51 @@ components:
         provider: { type: string }
         model: { type: string }
         content: { type: string }
+    Run:
+      type: object
+      required: [id, project_id, agent_id, runtime, provider, model, status, input, output, tools_used, audit_events]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        task_id: { type: string }
+        agent_id: { type: string }
+        runtime: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        status: { type: string, enum: [PENDING, RUNNING, SUCCESS, FAILED, CANCELLED] }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        input: { type: string, description: Sensitive text is redacted before persistence and display. }
+        output: { type: string, description: Sensitive text is redacted before persistence and display. }
+        error: { type: string, description: Provider error bodies and common secret forms are omitted. }
+        tools_used: { type: array, items: { type: string } }
+        audit_events:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEvent' }
+    RunPage:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Run' }
+        limit: { type: integer }
+        offset: { type: integer }
+    AuditEvent:
+      type: object
+      required: [id, project_id, actor_type, actor_id, event_type, resource_type, resource_id, created_at]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        task_id: { type: string }
+        actor_type: { type: string }
+        actor_id: { type: string }
+        event_type: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        from_status: { type: string }
+        to_status: { type: string }
+        created_at: { type: string, format: date-time }
     CreateAgent:
       type: object
       additionalProperties: false
