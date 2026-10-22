@@ -47,6 +47,10 @@ func (c Config) Validate() error {
 	if c.Host == "" {
 		return fmt.Errorf("BOAIRD_HOST must not be empty")
 	}
+	address := net.ParseIP(c.Host)
+	if address == nil || !address.IsLoopback() {
+		return fmt.Errorf("BOAIRD_HOST must be a loopback IP address until authenticated remote mode is implemented")
+	}
 	if c.Port < 1 || c.Port > 65535 {
 		return fmt.Errorf("BOAIRD_PORT must be between 1 and 65535")
 	}

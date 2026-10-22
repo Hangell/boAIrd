@@ -61,3 +61,25 @@ func TestValidateRejectsOutOfRangePort(t *testing.T) {
 		t.Fatal("Validate() accepted an out-of-range port")
 	}
 }
+
+func TestValidateRejectsNonLoopbackHosts(t *testing.T) {
+	for _, host := range []string{"0.0.0.0", "192.0.2.1", "localhost"} {
+		t.Run(host, func(t *testing.T) {
+			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath}
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("Validate() accepted non-loopback host %q", host)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsLoopbackHosts(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		t.Run(host, func(t *testing.T) {
+			cfg := Config{Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath}
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() rejected loopback host %q: %v", host, err)
+			}
+		})
+	}
+}
