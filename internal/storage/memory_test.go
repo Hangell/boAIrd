@@ -39,7 +39,7 @@ func TestMemoryRepositoryCRUDAndPrune(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := repository.Create(ctx, value); err != nil {
+		if _, err := repository.CreateNext(ctx, value); err != nil {
 			t.Fatal(err)
 		}
 	}

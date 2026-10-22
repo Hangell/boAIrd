@@ -19,18 +19,24 @@ func NewMemoryRepository(database *sql.DB) (*MemoryRepository, error) {
 	return &MemoryRepository{database: database}, nil
 }
 
-func (r *MemoryRepository) Create(ctx context.Context, value memory.Summary) error {
+func (r *MemoryRepository) CreateNext(ctx context.Context, value memory.Summary) (memory.Summary, error) {
 	snapshot := value.Snapshot()
 	sources, err := json.Marshal(snapshot.SourceIDs)
 	if err != nil {
-		return fmt.Errorf("encode memory source IDs: %w", err)
+		return memory.Summary{}, fmt.Errorf("encode memory source IDs: %w", err)
 	}
-	if _, err := r.database.ExecContext(ctx, `INSERT INTO project_memory(id, project_id, category, version, content, source_ids, created_by_type, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshot.ID, snapshot.ProjectID, snapshot.Category, snapshot.Version,
-		snapshot.Content, string(sources), snapshot.CreatedByType, snapshot.CreatedBy, formatDatabaseTime(snapshot.CreatedAt)); err != nil {
-		return fmt.Errorf("insert project memory: %w", err)
+	if err := r.database.QueryRowContext(ctx, `INSERT INTO project_memory(id, project_id, category, version, content, source_ids, created_by_type, created_by, created_at)
+		SELECT ?, ?, ?, COALESCE(MAX(version), 0) + 1, ?, ?, ?, ?, ?
+		FROM project_memory WHERE project_id = ? AND category = ?
+		RETURNING version`, snapshot.ID, snapshot.ProjectID, snapshot.Category, snapshot.Content, string(sources),
+		snapshot.CreatedByType, snapshot.CreatedBy, formatDatabaseTime(snapshot.CreatedAt), snapshot.ProjectID, snapshot.Category).Scan(&snapshot.Version); err != nil {
+		return memory.Summary{}, fmt.Errorf("insert versioned project memory: %w", err)
 	}
-	return nil
+	value, err = memory.Restore(snapshot)
+	if err != nil {
+		return memory.Summary{}, fmt.Errorf("restore inserted project memory: %w", err)
+	}
+	return value, nil
 }
 
 func (r *MemoryRepository) List(ctx context.Context, projectID string) ([]memory.Summary, error) {

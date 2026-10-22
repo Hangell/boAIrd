@@ -1318,7 +1318,7 @@ Remote Runtime
 
 Select context intelligently.
 
-Initial implementation: bounded project/task context composition for API Agent Runs with source/trust provenance, deterministic selection, conversation and same-task Run history, and explicit omission reporting. Files, memory, Git, issues, PRs, and documentation require scoped readers and remain unavailable until those are implemented.
+Initial implementation: bounded project/task context composition for API Agent Runs with source/trust provenance, deterministic selection, project memory, authorized conversation and same-task Run history, and explicit omission reporting. Files, Git, issues, PRs, and documentation require scoped readers and remain unavailable until those are implemented.
 
 Final context:
 
@@ -1393,6 +1393,10 @@ However, it does not need to be sent to models on every run.
   (`Record`, `List`, `Decisions`, `Select`, `Prune`).
 - `internal/storage/memory.go` + migration `0019_project_memory.sql` — versioned
   summaries keyed by `(project_id, category, version)`, with source provenance.
+- App wiring connects the Memory Service to task context selection; Brain-approved
+  work is summarized from task, successful Run, and authorized conversation data.
+- Version numbers are allocated atomically by SQLite; archived projects reject
+  both recording and pruning.
 - Secrets are redacted before persistence; redaction is fail-closed.
 - `Architecture Decision` and `Project Decision` summaries are canonical and are
   never pruned. Ephemeral categories retain the newest

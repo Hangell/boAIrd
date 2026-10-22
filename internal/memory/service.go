@@ -14,9 +14,8 @@ import (
 )
 
 type Repository interface {
-	Create(context.Context, Summary) error
+	CreateNext(context.Context, Summary) (Summary, error)
 	List(context.Context, string) ([]Summary, error)
-	MaxVersion(context.Context, string, Category) (int, error)
 	DeleteOlderThanVersion(context.Context, string, Category, int) (int, error)
 }
 
@@ -93,22 +92,15 @@ func (s *Service) Record(ctx context.Context, projectID string, input RecordInpu
 	if content == "" {
 		return Summary{}, fmt.Errorf("%w: content is required", ErrInvalidInput)
 	}
-	version, err := s.repository.MaxVersion(ctx, projectID, input.Category)
-	if err != nil {
-		return Summary{}, err
-	}
 	id, err := newID()
 	if err != nil {
 		return Summary{}, fmt.Errorf("generate memory ID: %w", err)
 	}
-	value, err := New(id, projectID, input.Category, version+1, content, input.CreatedByType, input.CreatedBy, input.SourceIDs, time.Now().UTC())
+	value, err := New(id, projectID, input.Category, 1, content, input.CreatedByType, input.CreatedBy, input.SourceIDs, time.Now().UTC())
 	if err != nil {
 		return Summary{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
-	if err := s.repository.Create(ctx, value); err != nil {
-		return Summary{}, err
-	}
-	return value, nil
+	return s.repository.CreateNext(ctx, value)
 }
 
 // List returns every summary for a project, ordered by category then version.
@@ -181,6 +173,9 @@ func (s *Service) Select(ctx context.Context, projectID, query string, maxBytes 
 // non-canonical category beyond the configured limit. Canonical decisions are
 // never pruned, and raw source history is never touched.
 func (s *Service) Prune(ctx context.Context, projectID string) (int, error) {
+	if _, err := s.ensureProjectActive(ctx, projectID); err != nil {
+		return 0, err
+	}
 	values, err := s.repository.List(ctx, projectID)
 	if err != nil {
 		return 0, err

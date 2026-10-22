@@ -21,6 +21,7 @@ import (
 
 func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	cancelRequestStarted := make(chan struct{}, 1)
+	providerRequests := make(chan string, 16)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("provider path = %q", r.URL.Path)
@@ -36,6 +37,7 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 		if err := json.Unmarshal(body, &request); err != nil {
 			t.Errorf("decode provider JSON: %v", err)
 		}
+		providerRequests <- string(body)
 		if strings.Contains(string(body), "trigger-provider-error") {
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte("provider diagnostic includes provider-secret and api_key=upstream-secret"))
@@ -172,6 +174,16 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("list runs = %d, %v", len(listed), err)
 	}
+	for len(providerRequests) > 0 {
+		<-providerRequests
+	}
+	if _, err := service.Summarize(ctx, projects.ID(), "Relevant decision; password=hunter2", 64); err != nil {
+		t.Fatalf("summarize memory: %v", err)
+	}
+	summaryRequest := <-providerRequests
+	if strings.Contains(summaryRequest, "hunter2") || !strings.Contains(summaryRequest, "[REDACTED]") || !strings.Contains(summaryRequest, "durable project memory") {
+		t.Fatalf("memory provider request was not sanitized or used summary instructions: %s", summaryRequest)
+	}
 	auditEvents, err := runRepository.ListAuditEvents(ctx, result.Run.ID())
 	if err != nil || len(auditEvents) != 3 {
 		t.Fatalf("successful run audit events = %d, %v", len(auditEvents), err)
@@ -269,7 +281,7 @@ func TestServiceCreatesAndExecutesBrainWithPersistedRun(t *testing.T) {
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM runs WHERE project_id = ?", projects.ID()).Scan(&totalRuns); err != nil {
 		t.Fatal(err)
 	}
-	if totalRuns != 3 {
-		t.Fatalf("runs after external Brain request = %d, want only the three API runs", totalRuns)
+	if totalRuns != 4 {
+		t.Fatalf("runs after external Brain request = %d, want only the four API runs", totalRuns)
 	}
 }

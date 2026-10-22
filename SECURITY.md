@@ -1363,7 +1363,7 @@ SYSTEM INSTRUCTION
 
 # Context Trust Levels
 
-The worker Context Engine assigns trust levels to selected entries and serializes them as data with source provenance. It enforces project scope for every candidate and task scope for task-bound entries, then applies configurable byte and estimated-token budgets. Conversation access uses the existing assigned-Agent check; Run history is limited to the same project, task, and Agent. File, memory, and repository readers are not implemented, so stored paths and URLs are not accessed. Omitted sources are reported instead of silently fetched. Context entries cannot grant capabilities or override system, administrator, or project policy.
+The worker Context Engine assigns trust levels to selected entries and serializes them as data with source provenance. It enforces project scope for every candidate and task scope for task-bound entries, then applies configurable byte and estimated-token budgets. Conversation access uses the existing assigned-Agent check; Run history is limited to the same project, task, and Agent. Project memory is read through the scoped Memory Service, retains creator trust/provenance, and is selected under the same context limits. File and repository readers are not implemented, so stored paths and URLs are not accessed. Omitted sources are reported instead of silently fetched. Context entries cannot grant capabilities or override system, administrator, or project policy.
 
 Limits are configurable with `BOAIRD_CONTEXT_MAX_BYTES` (512 bytes–1 MiB) and `BOAIRD_CONTEXT_MAX_TOKENS` (128–100,000). Secret-like content is redacted before serialization. Selection failures block execution and are escalated rather than falling back to an unbounded prompt.
 
@@ -1496,6 +1496,26 @@ content_type
 # Memory Security
 
 Project memory may contain sensitive data.
+
+Memory summaries are stored in the local SQLite database as plaintext. Protect the
+database file and host with the same controls as conversation and Run history;
+database-file access is inside the trusted local-host boundary. Each summary is
+scoped to a project and records category, version, source IDs, creator type/ID,
+and creation time. Source IDs are references, not copies of source content.
+
+The Brain summary flow sends sanitized task descriptions, successful Run output,
+and authorized task conversation to the configured Brain provider. The configured
+provider's data handling therefore applies. Pattern-based sanitization is defense
+in depth and cannot guarantee detection of every secret or sensitive value. The
+Brain is instructed to treat source excerpts as untrusted data; summaries are
+still untrusted context and do not grant authority. The Context Engine selects
+memory only for the matching project and applies configured byte/token budgets.
+
+Recording and pruning are rejected for archived projects. Retention pruning
+deletes older ephemeral summaries only; architecture and project decisions remain
+canonical. Raw conversation and Run history are not pruned by Memory. Database
+administrators with direct filesystem access can still alter or remove stored
+summaries and provenance.
 
 Do not automatically include:
 

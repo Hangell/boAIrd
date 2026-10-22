@@ -1512,7 +1512,7 @@ EXTERNAL
 UNTRUSTED
 ```
 
-Context entries are data, not authority. Selection does not grant capabilities or change policy. The current worker context includes project/task metadata, Brain/Agent instructions, authorized task conversation, and same-task/same-Agent Run output. File, memory, and repository readers are not implemented; they are reported as unavailable and no workspace or repository access is inferred from project metadata. Byte and estimated-token budgets default to 16 KiB and 4096.
+Context entries are data, not authority. Selection does not grant capabilities or change policy. The current worker context includes project/task metadata, Brain/Agent instructions, authorized task conversation, same-task/same-Agent Run output, and selected project memory. File and repository readers are not implemented; they are reported as unavailable and no workspace or repository access is inferred from project metadata. Memory candidates retain creator trust and provenance, remain project-scoped, and are bounded with the rest of the context. Byte and estimated-token budgets default to 16 KiB and 4096.
 
 This helps defend against prompt injection.
 
@@ -1589,11 +1589,16 @@ Brain summary
 
 The original history may remain stored separately.
 
-The implemented engine (`internal/memory`) persists versioned, sanitized summaries
-in `project_memory`. Architecture and project decisions are canonical and survive
-retention pruning; ephemeral categories keep only the newest
-`MaxSummariesPerCategory` summaries. `Select` composes a bounded context view and
-reports what was omitted, and raw history is never pruned.
+The implemented engine (`internal/memory`) is wired into app startup, task context
+selection, and Brain review. After Brain approval, the orchestrator summarizes
+the task, successful Run output, and authorized task conversation through the
+configured project Brain, then records source IDs and Brain provenance. Input is
+sanitized before provider submission and output before persistence. Summaries are
+versioned in `project_memory`; version allocation is a single SQLite statement.
+Architecture and project decisions are canonical and survive retention pruning;
+ephemeral categories keep only the newest `MaxSummariesPerCategory` summaries.
+`Select` composes a bounded context view and reports what was omitted, and raw
+history is never pruned. Archived projects reject recording and pruning.
 
 ---
 

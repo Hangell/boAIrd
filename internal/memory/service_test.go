@@ -2,9 +2,12 @@ package memory_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"boAIrd/internal/memory"
 	"boAIrd/internal/storage"
@@ -99,6 +102,53 @@ func TestRecordProvenanceAndVersioning(t *testing.T) {
 	}
 }
 
+func TestRecordAllocatesVersionsForConcurrentSQLiteWrites(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	const writers = 24
+	start := make(chan struct{})
+	versions := make(chan int, writers)
+	errors := make(chan error, writers)
+	var wait sync.WaitGroup
+	for range writers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			value, err := service.Record(ctx, "p1", memory.RecordInput{
+				Category: memory.CategoryKnownProblem, Content: "concurrent note", CreatedByType: "brain", CreatedBy: "brain-1",
+			})
+			if err != nil {
+				errors <- err
+				return
+			}
+			versions <- value.Version()
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(versions)
+	close(errors)
+	for err := range errors {
+		t.Errorf("concurrent Record() failed: %v", err)
+	}
+	seen := make(map[int]bool, writers)
+	for version := range versions {
+		if seen[version] {
+			t.Errorf("duplicate version allocated: %d", version)
+		}
+		seen[version] = true
+	}
+	if len(seen) != writers {
+		t.Fatalf("allocated %d distinct versions, want %d", len(seen), writers)
+	}
+	for version := 1; version <= writers; version++ {
+		if !seen[version] {
+			t.Errorf("version %d was not allocated", version)
+		}
+	}
+}
+
 func TestDecisionsReturnsCanonicalNewestFirst(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
@@ -161,6 +211,28 @@ func TestPruneKeepsCanonicalAndLimitsEphemeral(t *testing.T) {
 	}
 	if decisions != 3 {
 		t.Fatalf("canonical decisions = %d, want 3", decisions)
+	}
+}
+
+func TestPruneRejectsArchivedProjectWithoutDeletingSummaries(t *testing.T) {
+	ctx := context.Background()
+	service, repository := newTestService(t)
+	value, err := memory.New("archived-summary", "p3", memory.CategoryKnownProblem, 1, "preserve this summary", "brain", "brain-1", nil, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateNext(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Prune(ctx, "p3"); !errors.Is(err, memory.ErrProjectArchived) {
+		t.Fatalf("Prune() error = %v, want ErrProjectArchived", err)
+	}
+	values, err := repository.List(ctx, "p3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].Content() != "preserve this summary" {
+		t.Fatalf("archived project summaries after Prune() = %+v", values)
 	}
 }
 
