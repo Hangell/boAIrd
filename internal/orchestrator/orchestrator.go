@@ -36,6 +36,7 @@ const (
 	defaultExecutionTimeout = 5 * time.Minute
 	maximumExecutionTimeout = time.Hour
 	defaultAdvisorTimeout   = 45 * time.Second
+	finalizeTimeout         = 15 * time.Second
 	workerMaxTokens         = 2048
 	maximumInputBytes       = 16 << 10
 )
@@ -58,7 +59,7 @@ type TaskManager interface {
 type RunRepository interface {
 	Create(context.Context, run.Run) error
 	Update(context.Context, run.Run) error
-	List(context.Context, string, string, string, int, int) ([]run.Run, error)
+	CountWorkerAttempts(context.Context, string, string) (int, error)
 }
 
 type AgentReader interface {
@@ -185,6 +186,9 @@ func (s *Service) Dispatch(ctx context.Context, projectID string) (DispatchRepor
 	if err != nil {
 		return DispatchReport{}, err
 	}
+	if _, err := s.authorizeBrain(ctx, b, p); err != nil {
+		return DispatchReport{}, err
+	}
 	brainActor := task.Actor{Type: task.ActorBrain, ID: b.AgentID()}
 	values, err := s.tasks.List(ctx, projectID, task.StatusReady, "", s.config.MaxTasksPerDispatch, 0)
 	if err != nil {
@@ -269,6 +273,9 @@ func (s *Service) Review(ctx context.Context, taskID string, decision ReviewDeci
 	if err != nil {
 		return task.Task{}, err
 	}
+	if _, err := s.authorizeBrain(ctx, b, p); err != nil {
+		return task.Task{}, err
+	}
 	brainActor := task.Actor{Type: task.ActorBrain, ID: b.AgentID()}
 	reason = truncate(logging.RedactSensitiveText(strings.TrimSpace(reason)), 1500)
 	switch decision {
@@ -334,14 +341,16 @@ func (s *Service) execute(ctx context.Context, p project.Project, b brain.Brain,
 	if err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be configured"}, err
 	}
-	if err := s.runs.Create(ctx, value); err != nil {
+	persistCtx, cancelPersist := detached(ctx)
+	defer cancelPersist()
+	if err := s.runs.Create(persistCtx, value); err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be persisted"}, err
 	}
 	value, err = value.Transition(run.StatusRunning)
 	if err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be started"}, err
 	}
-	if err := s.runs.Update(ctx, value); err != nil {
+	if err := s.runs.Update(persistCtx, value); err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "run could not be started"}, err
 	}
 
@@ -360,12 +369,12 @@ func (s *Service) execute(ctx context.Context, p project.Project, b brain.Brain,
 	if err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "worker output could not be recorded"}, err
 	}
-	if err := s.runs.Update(context.WithoutCancel(ctx), value); err != nil {
+	if err := s.runs.Update(persistCtx, value); err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeEscalated, Reason: "worker output could not be recorded"}, err
 	}
 	workerActor := task.Actor{Type: task.ActorAgent, ID: a.ID()}
-	if _, err := s.tasks.Transition(ctx, work.ID(), task.StatusReview, fmt.Sprintf("worker completed run %s", value.ID()), workerActor); err != nil {
-		escalateErr := s.escalate(ctx, p, work, value.ID(), a.ID(), attempt, task.StatusWorking, "worker output could not be submitted for review")
+	if _, err := s.tasks.Transition(persistCtx, work.ID(), task.StatusReview, fmt.Sprintf("worker completed run %s", value.ID()), workerActor); err != nil {
+		escalateErr := s.escalate(persistCtx, p, work, value.ID(), a.ID(), attempt, task.StatusWorking, "worker output could not be submitted for review")
 		return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeEscalated, Reason: "worker output could not be submitted for review"}, errors.Join(err, escalateErr)
 	}
 	return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeSucceeded}, nil
@@ -381,31 +390,33 @@ func (s *Service) failExecution(ctx context.Context, p project.Project, b brain.
 	}
 	value, _ = value.SetError(summary)
 	value, _ = value.Transition(status)
-	if err := s.runs.Update(context.WithoutCancel(ctx), value); err != nil {
+	persistCtx, cancelPersist := detached(ctx)
+	defer cancelPersist()
+	if err := s.runs.Update(persistCtx, value); err != nil {
 		return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeEscalated, Reason: summary}, err
 	}
 	brainActor := task.Actor{Type: task.ActorBrain, ID: b.AgentID()}
 	reason := fmt.Sprintf("%s on attempt %d of %d", summary, attempt, s.config.MaxAttempts)
-	if _, err := s.tasks.Transition(ctx, work.ID(), task.StatusBlocked, reason, brainActor); err != nil {
-		escalateErr := s.escalate(ctx, p, work, value.ID(), a.ID(), attempt, work.Status(), "failure could not be recorded as BLOCKED")
+	if _, err := s.tasks.Transition(persistCtx, work.ID(), task.StatusBlocked, reason, brainActor); err != nil {
+		escalateErr := s.escalate(persistCtx, p, work, value.ID(), a.ID(), attempt, work.Status(), "failure could not be recorded as BLOCKED")
 		return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeEscalated, Reason: "failure could not be recorded"}, errors.Join(err, escalateErr)
 	}
 	if attempt >= s.config.MaxAttempts {
-		escalateErr := s.escalate(ctx, p, work, value.ID(), a.ID(), attempt, task.StatusBlocked, summary)
+		escalateErr := s.escalate(persistCtx, p, work, value.ID(), a.ID(), attempt, task.StatusBlocked, summary)
 		return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeEscalated, Reason: summary}, escalateErr
 	}
-	instructions := s.advise(ctx, work, attempt, summary)
+	instructions := s.advise(persistCtx, work, attempt, summary)
 	if s.conversations != nil {
 		content := fmt.Sprintf("Attempt %d of %d failed: %s\n\nRetry instructions:\n%s", attempt, s.config.MaxAttempts, summary, instructions)
-		if _, err := s.conversations.Append(ctx, work.ID(), conversation.SenderBrain, b.AgentID(), conversation.MessageInput{
+		if _, err := s.conversations.Append(persistCtx, work.ID(), conversation.SenderBrain, b.AgentID(), conversation.MessageInput{
 			Content: content, ContentType: "text/plain", Metadata: []byte(`{}`),
 		}); err != nil {
-			slog.ErrorContext(ctx, "record Brain retry instructions", "task_id", work.ID(), "error", err)
+			slog.ErrorContext(persistCtx, "record Brain retry instructions", "task_id", work.ID(), "error", err)
 		}
 	}
-	if _, err := s.tasks.Transition(ctx, work.ID(), task.StatusReady,
+	if _, err := s.tasks.Transition(persistCtx, work.ID(), task.StatusReady,
 		fmt.Sprintf("Brain scheduled retry %d of %d: %s", attempt+1, s.config.MaxAttempts, truncate(instructions, 1200)), brainActor); err != nil {
-		escalateErr := s.escalate(ctx, p, work, value.ID(), a.ID(), attempt, task.StatusBlocked, "retry could not be scheduled")
+		escalateErr := s.escalate(persistCtx, p, work, value.ID(), a.ID(), attempt, task.StatusBlocked, "retry could not be scheduled")
 		return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeEscalated, Reason: "retry could not be scheduled"}, errors.Join(err, escalateErr)
 	}
 	return ExecutionOutcome{TaskID: work.ID(), RunID: value.ID(), Status: OutcomeRetryScheduled, Reason: summary}, nil
@@ -433,11 +444,7 @@ func (s *Service) advise(ctx context.Context, work task.Task, attempt int, failu
 }
 
 func (s *Service) attempts(ctx context.Context, projectID, taskID string) (int, error) {
-	values, err := s.runs.List(ctx, projectID, taskID, "", maximumMaxTasksDispatch, 0)
-	if err != nil {
-		return 0, err
-	}
-	return len(values), nil
+	return s.runs.CountWorkerAttempts(ctx, projectID, taskID)
 }
 
 func (s *Service) escalate(ctx context.Context, p project.Project, work task.Task, runID, agentID string, attempts int, status task.Status, reason string) error {
@@ -453,6 +460,24 @@ func (s *Service) escalate(ctx context.Context, p project.Project, work task.Tas
 
 func skipped(work task.Task, reason string) ExecutionOutcome {
 	return ExecutionOutcome{TaskID: work.ID(), Status: OutcomeSkipped, Reason: reason}
+}
+
+// authorizeBrain fails closed unless the configured Brain is active, matches the
+// project, and its Agent holds the brain.execute capability.
+func (s *Service) authorizeBrain(ctx context.Context, b brain.Brain, p project.Project) (agent.Agent, error) {
+	a, err := s.agents.Get(ctx, b.AgentID())
+	if err != nil {
+		return agent.Agent{}, err
+	}
+	if err := b.AuthorizeAction(brain.ActionPlan, p, a); err != nil {
+		return agent.Agent{}, err
+	}
+	return a, nil
+}
+
+// detached returns a bounded cleanup context that survives request cancellation.
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), finalizeTimeout)
 }
 
 func hasCapability(a agent.Agent, required string) bool {

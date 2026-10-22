@@ -29,10 +29,10 @@ func (r *RunRepository) Create(ctx context.Context, value run.Run) error {
 		return fmt.Errorf("encode run tools: %w", err)
 	}
 	_, err = r.database.ExecContext(ctx, `INSERT INTO runs (
-		id, project_id, task_id, agent_id, status, started_at, finished_at, runtime, provider, model, input, output, error, tools_used
-	) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshot.ID, snapshot.ProjectID, snapshot.TaskID,
+		id, project_id, task_id, agent_id, status, started_at, finished_at, runtime, provider, model, input, output, error, tools_used, kind
+	) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, snapshot.ID, snapshot.ProjectID, snapshot.TaskID,
 		snapshot.AgentID, snapshot.Status, nullableTime(snapshot.StartedAt), nullableTime(snapshot.FinishedAt), snapshot.Runtime,
-		snapshot.Provider, snapshot.Model, snapshot.Input, snapshot.Output, snapshot.Error, string(tools))
+		snapshot.Provider, snapshot.Model, snapshot.Input, snapshot.Output, snapshot.Error, string(tools), snapshot.Kind)
 	if err != nil {
 		return fmt.Errorf("insert run: %w", err)
 	}
@@ -110,6 +110,17 @@ func (r *RunRepository) List(ctx context.Context, projectID, taskID, agentID str
 	return values, nil
 }
 
+// CountWorkerAttempts returns the number of worker execution Runs for a task,
+// excluding Brain planning and failure-analysis Runs linked to the same task.
+func (r *RunRepository) CountWorkerAttempts(ctx context.Context, projectID, taskID string) (int, error) {
+	var count int
+	if err := r.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE project_id = ? AND task_id = ? AND kind = 'worker'`,
+		projectID, taskID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count worker attempts: %w", err)
+	}
+	return count, nil
+}
+
 func (r *RunRepository) ListAuditEvents(ctx context.Context, runID string) ([]run.AuditEvent, error) {
 	rows, err := r.database.QueryContext(ctx, `SELECT id, project_id, COALESCE(task_id,''), actor_type, actor_id,
 		event_type, resource_type, resource_id, from_status, to_status, created_at
@@ -178,7 +189,7 @@ func (r *RunRepository) ListAuditEventsForRuns(ctx context.Context, runIDs []str
 type runRowScanner interface{ Scan(...any) error }
 
 const runSelect = `SELECT id, project_id, COALESCE(task_id,''), agent_id, status,
-	COALESCE(started_at,''), COALESCE(finished_at,''), runtime, provider, model, input, output, error, tools_used
+	COALESCE(started_at,''), COALESCE(finished_at,''), runtime, provider, model, input, output, error, tools_used, kind
 	FROM runs`
 
 func scanRun(row runRowScanner) (run.Run, error) {
@@ -186,7 +197,7 @@ func scanRun(row runRowScanner) (run.Run, error) {
 	var started, finished, toolsJSON string
 	if err := row.Scan(&snapshot.ID, &snapshot.ProjectID, &snapshot.TaskID, &snapshot.AgentID, &snapshot.Status,
 		&started, &finished, &snapshot.Runtime, &snapshot.Provider, &snapshot.Model, &snapshot.Input, &snapshot.Output,
-		&snapshot.Error, &toolsJSON); err != nil {
+		&snapshot.Error, &toolsJSON, &snapshot.Kind); err != nil {
 		return run.Run{}, err
 	}
 	var err error

@@ -20,6 +20,15 @@ const (
 	StatusCancelled Status = "CANCELLED"
 )
 
+// Kind classifies a Run's purpose so worker attempt accounting can ignore
+// Brain planning and failure-analysis Runs linked to the same task.
+type Kind string
+
+const (
+	KindBrain  Kind = "brain"
+	KindWorker Kind = "worker"
+)
+
 var (
 	ErrInvalidTransition = errors.New("invalid run status transition")
 	ErrNotFound          = errors.New("run not found")
@@ -40,6 +49,7 @@ type Run struct {
 	output     string
 	errorText  string
 	toolsUsed  []string
+	kind       Kind
 }
 
 type Snapshot struct {
@@ -57,6 +67,7 @@ type Snapshot struct {
 	Output     string
 	Error      string
 	ToolsUsed  []string
+	Kind       Kind
 }
 
 type AuditEvent struct {
@@ -74,6 +85,16 @@ type AuditEvent struct {
 }
 
 func New(id, projectID, taskID, agentID string) (Run, error) {
+	return newTaskRun(id, projectID, taskID, agentID, KindWorker)
+}
+
+// NewBrainAnalysisRun creates a task-linked Run owned by the Brain, used when the
+// Brain analyzes a worker failure. It must not count as a worker execution attempt.
+func NewBrainAnalysisRun(id, projectID, taskID, agentID string) (Run, error) {
+	return newTaskRun(id, projectID, taskID, agentID, KindBrain)
+}
+
+func newTaskRun(id, projectID, taskID, agentID string, kind Kind) (Run, error) {
 	if strings.TrimSpace(taskID) == "" {
 		return Run{}, errors.New("task ID is required")
 	}
@@ -82,6 +103,7 @@ func New(id, projectID, taskID, agentID string) (Run, error) {
 		return Run{}, err
 	}
 	value.taskID = strings.TrimSpace(taskID)
+	value.kind = kind
 	return value, nil
 }
 
@@ -93,7 +115,7 @@ func NewBrainRun(id, projectID, agentID string) (Run, error) {
 			return Run{}, fmt.Errorf("%s is required", reference.name)
 		}
 	}
-	return Run{id: strings.TrimSpace(id), projectID: strings.TrimSpace(projectID), agentID: strings.TrimSpace(agentID), status: StatusPending}, nil
+	return Run{id: strings.TrimSpace(id), projectID: strings.TrimSpace(projectID), agentID: strings.TrimSpace(agentID), status: StatusPending, kind: KindBrain}, nil
 }
 
 func (r Run) ID() string            { return r.id }
@@ -110,12 +132,13 @@ func (r Run) Model() string         { return r.model }
 func (r Run) Input() string         { return r.input }
 func (r Run) Output() string        { return r.output }
 func (r Run) Error() string         { return r.errorText }
+func (r Run) Kind() Kind            { return r.kind }
 
 func (r Run) Snapshot() Snapshot {
 	return Snapshot{
 		ID: r.id, ProjectID: r.projectID, TaskID: r.taskID, AgentID: r.agentID, Status: r.status,
 		StartedAt: r.startedAt, FinishedAt: r.finishedAt, Runtime: r.runtime, Provider: r.provider,
-		Model: r.model, Input: r.input, Output: r.output, Error: r.errorText, ToolsUsed: append([]string(nil), r.toolsUsed...),
+		Model: r.model, Input: r.input, Output: r.output, Error: r.errorText, ToolsUsed: append([]string(nil), r.toolsUsed...), Kind: r.kind,
 	}
 }
 
@@ -127,6 +150,18 @@ func Restore(snapshot Snapshot) (Run, error) {
 	if strings.TrimSpace(snapshot.TaskID) != "" {
 		value.taskID = strings.TrimSpace(snapshot.TaskID)
 	}
+	kind := snapshot.Kind
+	if kind == "" {
+		if value.taskID != "" {
+			kind = KindWorker
+		} else {
+			kind = KindBrain
+		}
+	}
+	if !validKind(kind) {
+		return Run{}, fmt.Errorf("unknown run kind %q", kind)
+	}
+	value.kind = kind
 	if !validStatus(snapshot.Status) {
 		return Run{}, fmt.Errorf("unknown run status %q", snapshot.Status)
 	}
@@ -216,4 +251,8 @@ func validStatus(status Status) bool {
 	default:
 		return false
 	}
+}
+
+func validKind(kind Kind) bool {
+	return kind == KindBrain || kind == KindWorker
 }

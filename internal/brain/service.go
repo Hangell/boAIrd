@@ -221,7 +221,7 @@ func (s *Service) execute(ctx context.Context, projectID, taskID, objective stri
 	input := "System message:\n" + system + "\nUser message:\n" + objective
 	value, err := run.NewBrainRun(id, projectID, a.ID())
 	if taskID != "" {
-		value, err = run.New(id, projectID, taskID, a.ID())
+		value, err = run.NewBrainAnalysisRun(id, projectID, taskID, a.ID())
 	}
 	if err != nil {
 		return Execution{}, err

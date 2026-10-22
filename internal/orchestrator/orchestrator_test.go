@@ -68,20 +68,21 @@ func (f *fakeEscalations) Values() []audit.Escalation {
 }
 
 type fixture struct {
-	database      *sql.DB
-	projects      *project.Manager
-	agents        *agent.Manager
-	tasks         *task.Service
-	runs          *storage.RunRepository
-	conversations *conversation.Service
-	brainService  *brain.Service
-	project       project.Project
-	brain         brain.Brain
-	worker        agent.Agent
-	brainAgent    agent.Agent
-	executor      *fakeExecutor
-	escalations   *fakeEscalations
-	service       *orchestrator.Service
+	database        *sql.DB
+	projects        *project.Manager
+	agents          *agent.Manager
+	tasks           *task.Service
+	runs            *storage.RunRepository
+	brainRepository orchestrator.BrainReader
+	conversations   *conversation.Service
+	brainService    *brain.Service
+	project         project.Project
+	brain           brain.Brain
+	worker          agent.Agent
+	brainAgent      agent.Agent
+	executor        *fakeExecutor
+	escalations     *fakeEscalations
+	service         *orchestrator.Service
 }
 
 type fixtureOptions struct {
@@ -201,7 +202,7 @@ func newFixture(t *testing.T, options fixtureOptions) *fixture {
 	}
 	return &fixture{
 		database: database, projects: projectManager, agents: agentManager, tasks: taskService, runs: runRepository,
-		conversations: conversationService, brainService: brainService, project: value, brain: configuredBrain,
+		brainRepository: brainRepository, conversations: conversationService, brainService: brainService, project: value, brain: configuredBrain,
 		worker: worker, brainAgent: brainAgent, executor: executor, escalations: escalations, service: service,
 	}
 }
@@ -494,6 +495,130 @@ func TestDuplicateClaimIsPrevented(t *testing.T) {
 	}
 	if len(report.Outcomes) != 0 || len(f.executor.Calls()) != 0 {
 		t.Fatalf("claimed task was dispatched again: %+v", report.Outcomes)
+	}
+}
+
+func TestAttemptLimitCountsOnlyWorkerExecutions(t *testing.T) {
+	f := newFixture(t, fixtureOptions{maxAttempts: 3})
+	ctx := context.Background()
+	ready := f.readyTask(t, ctx)
+	f.executor.errs = []error{errors.New("fail-1"), errors.New("fail-2"), errors.New("fail-3")}
+
+	// Simulate the Brain failure-analysis Runs that the production advisor persists.
+	for _, id := range []string{"analysis-1", "analysis-2"} {
+		value, err := run.NewBrainAnalysisRun(id, f.project.ID(), ready.ID(), f.brainAgent.ID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err = value.ConfigureExecution(string(agent.RuntimeAPI), "openai-compatible", "test-model", "failure analysis")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.runs.Create(ctx, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		report, err := f.service.Dispatch(ctx, f.project.ID())
+		if err != nil {
+			t.Fatalf("dispatch %d: %v", attempt, err)
+		}
+		if len(report.Outcomes) != 1 {
+			t.Fatalf("dispatch %d outcomes = %+v", attempt, report.Outcomes)
+		}
+		want := orchestrator.OutcomeRetryScheduled
+		if attempt == 3 {
+			want = orchestrator.OutcomeEscalated
+		}
+		if report.Outcomes[0].Status != want {
+			t.Fatalf("dispatch %d outcome = %s, want %s", attempt, report.Outcomes[0].Status, want)
+		}
+	}
+	if got := len(f.executor.Calls()); got != 3 {
+		t.Fatalf("worker executions = %d, want 3", got)
+	}
+	workerRuns, err := f.runs.List(ctx, f.project.ID(), ready.ID(), "", 20, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerCount := 0
+	for _, value := range workerRuns {
+		if value.Kind() == run.KindWorker {
+			workerCount++
+		}
+	}
+	if workerCount != 3 {
+		t.Fatalf("worker runs = %d, want 3", workerCount)
+	}
+	blocked, err := f.tasks.Get(ctx, ready.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Status() != task.StatusBlocked {
+		t.Fatalf("task status = %s, want BLOCKED", blocked.Status())
+	}
+	if len(f.escalations.Values()) != 1 {
+		t.Fatalf("escalations = %d, want 1", len(f.escalations.Values()))
+	}
+}
+
+type blockingExecutor struct{ started chan struct{} }
+
+func (b *blockingExecutor) Execute(ctx context.Context, _ runtime.Request) (runtime.Result, error) {
+	close(b.started)
+	<-ctx.Done()
+	return runtime.Result{}, ctx.Err()
+}
+
+func TestCancellationLeavesTaskRecoverable(t *testing.T) {
+	f := newFixture(t, fixtureOptions{maxAttempts: 3})
+	ctx := context.Background()
+	ready := f.readyTask(t, ctx)
+
+	blocker := &blockingExecutor{started: make(chan struct{})}
+	service, err := orchestrator.New(orchestrator.Dependencies{
+		Tasks: f.tasks, Runs: f.runs, Agents: f.agents, Projects: f.projects,
+		Brains: f.brainRepository, Executor: blocker,
+		Conversations: f.conversations, Escalations: f.escalations,
+		Config: orchestrator.Config{MaxAttempts: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requestCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	var report orchestrator.DispatchReport
+	var dispatchErr error
+	go func() {
+		report, dispatchErr = service.Dispatch(requestCtx, f.project.ID())
+		close(done)
+	}()
+
+	<-blocker.started
+	cancel()
+	<-done
+
+	if dispatchErr != nil {
+		t.Fatalf("dispatch error = %v", dispatchErr)
+	}
+	if len(report.Outcomes) != 1 || report.Outcomes[0].Status != orchestrator.OutcomeRetryScheduled {
+		t.Fatalf("outcomes = %+v", report.Outcomes)
+	}
+	value, err := f.tasks.Get(ctx, ready.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Status() != task.StatusReady {
+		t.Fatalf("task status = %s, want READY (retry scheduled), not orphaned in WORKING", value.Status())
+	}
+	runs, err := f.runs.List(ctx, f.project.ID(), ready.ID(), "", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].Status() != run.StatusCancelled {
+		t.Fatalf("runs = %+v, want one CANCELLED run", runs)
 	}
 }
 
