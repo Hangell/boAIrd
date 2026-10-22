@@ -11,6 +11,7 @@ import (
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/credential"
+	"boAIrd/internal/project"
 	"boAIrd/internal/storage"
 )
 
@@ -96,6 +97,88 @@ func TestAgentAPIUsesDistinctProvidersAndDoesNotGrantByRole(t *testing.T) {
 	handler.ServeHTTP(switched, authorizedTestRequest(http.MethodPatch, "/api/v1/agents/"+backend.ID, strings.NewReader(string(switchRuntime))))
 	if switched.Code != http.StatusOK || strings.Contains(switched.Body.String(), "credential_id") || strings.Contains(switched.Body.String(), `"provider"`) {
 		t.Fatalf("switching away from API retained provider configuration: %d %s", switched.Code, switched.Body.String())
+	}
+}
+
+func TestAgentProjectScopeRoutesRequireAdministratorProjectMembership(t *testing.T) {
+	database, err := storage.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	projectRepository, err := storage.NewProjectRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectManager, err := project.NewManager(projectRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRepository, err := storage.NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentManager, err := agent.NewManager(agentRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := agentManager.Create(context.Background(), agent.CreateInput{Name: "Scoped Agent", Role: "worker", Runtime: agent.RuntimeMCP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandler(fakeDatabase{}, projectManager, nil, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes())
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Scope target"}`)))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create project status = %d, body = %s", created.Code, created.Body.String())
+	}
+	var projectValue projectResponse
+	if err := json.Unmarshal(created.Body.Bytes(), &projectValue); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/projects/" + projectValue.ID + "/agents/" + value.ID()
+	unauthenticated := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodPut, path, nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated scope grant status = %d, want 401", unauthenticated.Code)
+	}
+	granted := httptest.NewRecorder()
+	handler.ServeHTTP(granted, authorizedTestRequest(http.MethodPut, path, nil))
+	if granted.Code != http.StatusNoContent {
+		t.Fatalf("scope grant status = %d, body = %s", granted.Code, granted.Body.String())
+	}
+	loaded, err := agentManager.Get(context.Background(), value.ID())
+	if err != nil || len(loaded.ProjectIDs()) != 1 || loaded.ProjectIDs()[0] != projectValue.ID {
+		t.Fatalf("Agent scope after grant = %v, error = %v", loaded.ProjectIDs(), err)
+	}
+	revoked := httptest.NewRecorder()
+	handler.ServeHTTP(revoked, authorizedTestRequest(http.MethodDelete, path, nil))
+	if revoked.Code != http.StatusNoContent {
+		t.Fatalf("scope revoke status = %d, body = %s", revoked.Code, revoked.Body.String())
+	}
+	unknownAgent := httptest.NewRecorder()
+	handler.ServeHTTP(unknownAgent, authorizedTestRequest(http.MethodPut, "/api/v1/projects/"+projectValue.ID+"/agents/missing-agent", nil))
+	if unknownAgent.Code != http.StatusNotFound {
+		t.Fatalf("unknown Agent scope grant status = %d, want 404", unknownAgent.Code)
+	}
+	unknownProject := httptest.NewRecorder()
+	handler.ServeHTTP(unknownProject, authorizedTestRequest(http.MethodPut, "/api/v1/projects/missing-project/agents/"+value.ID(), nil))
+	if unknownProject.Code != http.StatusForbidden {
+		t.Fatalf("out-of-scope project grant status = %d, want 403", unknownProject.Code)
+	}
+	if err := agentManager.AddProject(context.Background(), value.ID(), projectValue.ID, project.LocalAdministratorID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`DELETE FROM project_members WHERE project_id = ? AND user_id = 'local-administrator'`, projectValue.ID); err != nil {
+		t.Fatal(err)
+	}
+	denied := httptest.NewRecorder()
+	handler.ServeHTTP(denied, authorizedTestRequest(http.MethodDelete, path, nil))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("non-member scope revoke status = %d, want 403; body = %s", denied.Code, denied.Body.String())
+	}
+	if capability, _, ok := requiredAPICapability(httptest.NewRequest(http.MethodPut, path, nil), projectManager, nil, nil); !ok || capability != "agent.scope.manage" {
+		t.Fatalf("scope route capability = %q, %v, want agent.scope.manage", capability, ok)
 	}
 }
 

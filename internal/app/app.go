@@ -102,7 +102,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	}
 	var mcpHandler http.Handler
 	if len(cfg.MCPAgentTokens) > 0 {
-		mcp, err := mcpserver.New(ctx, mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Conversations: conversationService, Brains: brainService, Runs: runManager}, cfg.MCPAgentTokens)
+		mcp, err := mcpserver.New(ctx, mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository, Conversations: conversationService, Brains: brainService, Runs: runManager}, cfg.MCPAgentTokens)
 		if err != nil {
 			return fmt.Errorf("initialize MCP server: %w", err)
 		}

@@ -1696,6 +1696,15 @@ starting work on a task already assigned by an authorized administrator or
 Brain; an MCP Agent cannot assign a task to itself. Agent completion requires
 `task.complete` and the existing task workflow and Human Review policy.
 
+Agent project scope is stored in the `agent_projects` relation and loaded with
+the Agent record. The authenticated local administrator manages it through
+`PUT` and `DELETE /api/v1/projects/{projectID}/agents/{agentID}`; each actual
+membership change is recorded in immutable audit history. Role labels remain
+descriptive. An assigned task grants only task-specific access after the
+assignment check and never adds general project scope. A Brain receives scope
+only for the project whose active Brain relation names that Agent. MCP scope
+denials are written to the immutable authorization denial log.
+
 ---
 
 # 69. MCP Architecture

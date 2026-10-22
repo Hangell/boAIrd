@@ -1196,6 +1196,12 @@ Tools check the authenticated Agent's capability and resource scope before
 accessing domain services. Task assignment grants access only to that exact
 task; project-wide reads require explicit project scope. Task transitions and
 Human Review decisions remain subject to the existing domain service rules.
+Agent project scope is persisted in `agent_projects` and can be granted or
+revoked only by the authenticated local administrator through the project
+membership API. Membership changes are recorded in immutable audit history.
+An Agent's role is descriptive. A Brain's project scope comes from its active
+Brain-to-project relation. MCP authorization denials, including cross-project
+scope failures, are recorded in the immutable authorization denial log.
 `boaird.task.claim` starts a task already assigned to the caller and cannot
 assign work to itself. Agent list/get tools expose only the authenticated Agent.
 Conversation access requires the exact assigned Agent and the corresponding

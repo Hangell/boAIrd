@@ -26,7 +26,7 @@ type authorizationAuditWriter interface {
 var administratorCapabilities = []capability.Capability{
 	"project.create", "project.read", "project.update", "project.archive",
 	"credential.create", "credential.read", "credential.delete",
-	"agent.create", "agent.read", "agent.update",
+	"agent.create", "agent.read", "agent.update", "agent.scope.manage",
 	"brain.attach", "brain.read", "brain.replace", "brain.execute",
 	"run.read", "task.create", "task.read", "task.assign", "task.transition",
 	"task.review", "task.complete", "conversation.read", "conversation.write",
@@ -185,6 +185,9 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		}
 		if len(parts) == 6 && parts[4] == "brain" && parts[5] == "runs" && method == http.MethodPost {
 			return "brain.execute", projectID, true
+		}
+		if len(parts) == 6 && parts[4] == "agents" && (method == http.MethodPut || method == http.MethodDelete) {
+			return "agent.scope.manage", projectID, true
 		}
 	case len(parts) == 3 && parts[2] == "agents":
 		switch method {

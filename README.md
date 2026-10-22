@@ -1156,19 +1156,25 @@ Tool inputs and required capabilities:
 
 | Tool | Inputs | Capability and scope |
 | --- | --- | --- |
-| `boaird.project.get` | `project_id` | `project.read`; explicit project scope or an assigned task in that project |
+| `boaird.project.get` | `project_id` | `project.read`; persisted project membership or the authenticated Agent's active Brain relationship for that project |
 | `boaird.agent.list`, `.get`, `.status` | optional `agent_id` for get/status | `agent.read`; returns only the authenticated Agent |
-| `boaird.task.list` | optional `project_id`, `status`, `limit` (1–100), `offset` (0–10,000) | `task.read`; returns only tasks assigned to the authenticated Agent |
-| `boaird.task.get` | `task_id` | `task.read`; exact assignment or explicit project scope |
+| `boaird.task.list` | optional `project_id`, `status`, `limit` (1–100), `offset` (0–10,000) | `task.read`; returns all tasks for projects in persisted membership or the authenticated Agent's active Brain scope, and otherwise only tasks assigned to that Agent |
+| `boaird.task.get` | `task_id` | `task.read`; exact assignment or persisted/active-Brain project scope |
 | `boaird.task.claim` | `task_id`, `reason` | `task.transition`; starts an already assigned READY task |
 | `boaird.task.update` | `task_id`, `status` (`WORKING`, `REVIEW`, `BLOCKED`), `reason` | `task.transition`; exact assignment |
 | `boaird.task.complete` | `task_id`, `reason` | `task.complete`; exact assignment, domain workflow and Human Review policy |
 | `boaird.task.fail` | `task_id`, `reason` | `task.transition`; exact assignment |
 | `boaird.conversation.read` | `task_id`, optional `before`, `limit` (1–100; default 50) | `task.read` and `conversation.read`; exact assignment |
 | `boaird.conversation.send` | `task_id`, `content`, optional `content_type` | `conversation.write`; exact assignment |
-| `boaird.context.get` | `task_id` | `task.read`, `project.read`, and `conversation.read`; assigned task context, at most 20 messages |
+| `boaird.context.get` | `task_id` | `task.read` and `conversation.read`; exact assignment or persisted/active-Brain project scope, at most 20 messages; project metadata is included only with effective project scope and `project.read` |
 | `boaird.brain.request` | `project_id`, `objective`, optional `max_tokens` (1–4096; default 2048) | `brain.execute`; authenticated Agent must be the project's active Brain |
-| `boaird.run.get` | `run_id` | `run.read`; run owner or explicit project scope |
+| `boaird.run.get` | `run_id` | `run.read`; persisted project membership or the authenticated Agent's active Brain relationship for the run's project; run ownership alone does not grant access |
+
+An active Brain's scope is derived from the Brain-to-project relationship and is
+limited to that one project; it does not create duplicate Agent project
+membership. Every project-scoped operation still requires its named
+capability. Assignment grants access only to that exact task and does not grant
+project metadata or project-wide task visibility.
 
 Missing or invalid bearer tokens receive HTTP 401. A service-level denied or
 invalid operation returns an MCP tool error with a generic message; malformed
