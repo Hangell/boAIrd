@@ -665,6 +665,16 @@ The registry may eventually support:
 - provider discovery;
 - dynamic configuration.
 
+Provider HTTP requests use an endpoint policy shared by the adapters. Built-in
+vendor defaults and explicit loopback development URLs are allowed. Custom
+hosts require an exact `BOAIRD_PROVIDER_ALLOWED_HOSTS` entry. The transport
+resolves DNS at dial time, rejects private, link-local, metadata, and listed
+special-purpose addresses unless the resolved address belongs to an explicitly
+configured `BOAIRD_PROVIDER_ALLOWED_IP_RANGES` CIDR, then dials that validated
+IP directly. Provider requests do not follow redirects or use environment
+proxies, so credentials cannot be redirected or sent through an unchecked
+proxy destination.
+
 ---
 
 # 21. Credentials

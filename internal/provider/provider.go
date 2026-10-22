@@ -160,6 +160,7 @@ type CredentialResolver interface {
 // Config identifies the API endpoint and credential reference used by an adapter.
 type Config struct {
 	BaseURL            string
+	EndpointPolicy     EndpointPolicy
 	CredentialID       string
 	CredentialResolver CredentialResolver
 	CredentialScope    credential.Scope

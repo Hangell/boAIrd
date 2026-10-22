@@ -52,7 +52,7 @@ func NewJSONClient(name string, config Config, defaultBaseURL, authHeader, authP
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
-	parsedURL, err := validateBaseURL(baseURL)
+	parsedURL, err := config.EndpointPolicy.validateBaseURL(baseURL, defaultBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidConfiguration, err)
 	}
@@ -72,6 +72,22 @@ func NewJSONClient(name string, config Config, defaultBaseURL, authHeader, authP
 			client.Timeout = defaultRequestTimeout
 		}
 	}
+	var transport *http.Transport
+	if client.Transport == nil {
+		transport = http.DefaultTransport.(*http.Transport).Clone()
+	} else {
+		configuredTransport, ok := client.Transport.(*http.Transport)
+		if !ok {
+			return nil, fmt.Errorf("%w: custom provider transport must be an *http.Transport", ErrInvalidConfiguration)
+		}
+		transport = configuredTransport.Clone()
+	}
+	// Resolve and pin provider destinations ourselves; proxies could bypass this check.
+	transport.Proxy = nil
+	transport.DialContext = config.EndpointPolicy.dialContext
+	transport.DialTLS = nil
+	transport.DialTLSContext = nil
+	client.Transport = transport
 	// Provider credentials must never follow a redirect to another origin.
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse

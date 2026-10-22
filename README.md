@@ -2042,8 +2042,12 @@ The service reads these optional environment variables:
 | `BOAIRD_MASTER_KEY` | Required | 32-byte encryption key encoded as 64 hexadecimal characters; never store it in SQLite or commit it. |
 | `BOAIRD_LOCAL_AUTH_TOKEN` | Required | 32-byte bearer token encoded as 64 hexadecimal characters; authenticates all versioned API routes except status and can be exchanged for a browser session. |
 | `BOAIRD_MCP_AGENT_TOKENS` | Empty | Legacy one-time bootstrap only: imported from the environment on first database startup with a 90-day expiry. Manage tokens through the authenticated MCP token API afterward. |
+| `BOAIRD_PROVIDER_ALLOWED_HOSTS` | Empty | Comma-separated exact hostnames or IPs approved for custom provider URLs. Built-in vendor defaults and explicit loopback development URLs remain available. |
+| `BOAIRD_PROVIDER_ALLOWED_IP_RANGES` | Empty | Comma-separated CIDR ranges that custom provider hosts may resolve to when private or special-use networks are intentionally required. |
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
+
+Custom HTTPS provider URLs are rejected unless their exact host is listed in `BOAIRD_PROVIDER_ALLOWED_HOSTS`. Every DNS answer is checked when a connection is opened and the selected validated IP is dialed directly. Loopback is allowed for explicit local development URLs. Private, link-local, metadata, and listed special-purpose IP ranges are blocked unless they fall within `BOAIRD_PROVIDER_ALLOWED_IP_RANGES`; only add ranges needed by a trusted provider, because credentials are sent to the configured endpoint.
 
 ---
 

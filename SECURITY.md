@@ -1986,6 +1986,14 @@ preserve logs
 
 The user must be aware that information sent to external providers leaves the local machine.
 
+Built-in provider defaults are allowed. A custom provider host must be listed
+exactly in `BOAIRD_PROVIDER_ALLOWED_HOSTS`; DNS results are validated when
+dialing and the validated IP is used for the connection. Private, link-local,
+metadata, and listed special-purpose IP ranges are denied unless their CIDR is
+explicitly listed in `BOAIRD_PROVIDER_ALLOWED_IP_RANGES`. Loopback URLs remain
+available for explicit local development. Only approve endpoints whose
+operators are trusted with the configured provider credential and request data.
+
 boAIrd must show which provider will receive specific context.
 
 Example:

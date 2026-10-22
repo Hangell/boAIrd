@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -45,7 +47,11 @@ func TestNewJSONClientRejectsUnsafeBaseURLs(t *testing.T) {
 func TestNewJSONClientAllowsHTTPSAndLoopbackHTTP(t *testing.T) {
 	for _, baseURL := range []string{"https://provider.example/v1", "http://127.0.0.1:8080/v1", "http://[::1]:8080/v1", "http://localhost:8080/v1"} {
 		t.Run(baseURL, func(t *testing.T) {
-			_, err := NewJSONClient("test", Config{BaseURL: baseURL, CredentialID: "credential", CredentialResolver: testCredentialResolver{value: "secret"}}, "", "Authorization", "Bearer ")
+			policy, err := NewEndpointPolicy([]string{"provider.example"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = NewJSONClient("test", Config{BaseURL: baseURL, EndpointPolicy: policy, CredentialID: "credential", CredentialResolver: testCredentialResolver{value: "secret"}}, "", "Authorization", "Bearer ")
 			if err != nil {
 				t.Fatalf("NewJSONClient(%q): %v", baseURL, err)
 			}
@@ -112,4 +118,55 @@ func TestCredentialResolverErrorDoesNotLeakSecret(t *testing.T) {
 	if requests.Load() != 0 {
 		t.Fatal("request was sent when credential resolution failed")
 	}
+}
+
+func TestEndpointPolicyFailureDoesNotLeakCredential(t *testing.T) {
+	const secret = "provider-secret"
+	policy, err := NewEndpointPolicy([]string{"provider.example"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy.lookupIP = func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("169.254.169.254")}, nil
+	}
+	client, err := NewJSONClient("test", Config{
+		BaseURL: "https://provider.example/v1", EndpointPolicy: policy, CredentialID: "credential",
+		CredentialResolver: testCredentialResolver{value: secret},
+	}, "", "Authorization", "Bearer ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.Do(context.Background(), http.MethodGet, "models", nil, nil, nil, nil)
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("policy failure = %v; want a non-secret error", err)
+	}
+}
+
+func TestNewJSONClientReplacesProxyAndTLSDialOverrides(t *testing.T) {
+	proxyTransport := http.DefaultTransport.(*http.Transport).Clone()
+	proxyTransport.Proxy = http.ProxyFromEnvironment
+	proxyTransport.DialTLSContext = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("unexpected custom TLS dial")
+	}
+	client, err := NewJSONClient("test", Config{
+		BaseURL: "https://provider.example", EndpointPolicy: mustEndpointPolicy(t, "provider.example"),
+		CredentialID: "credential", CredentialResolver: testCredentialResolver{value: "secret"},
+		HTTPClient: &http.Client{Transport: proxyTransport},
+	}, "", "Authorization", "Bearer ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := client.httpClient.Transport.(*http.Transport)
+	if transport.Proxy != nil || transport.DialTLS != nil || transport.DialTLSContext != nil {
+		t.Fatal("custom proxy or TLS dial override bypassed endpoint validation")
+	}
+}
+
+func mustEndpointPolicy(t *testing.T, host string) EndpointPolicy {
+	t.Helper()
+	policy, err := NewEndpointPolicy([]string{host}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return policy
 }

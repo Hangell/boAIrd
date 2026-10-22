@@ -45,6 +45,20 @@ func TestRegistryConfiguresAndResolvesAdapters(t *testing.T) {
 	}
 }
 
+func TestRegistryAllowsBuiltInProviderDefaults(t *testing.T) {
+	registry := provider.NewRegistry()
+	if err := adapters.Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"openai", "anthropic", "deepseek", "gemini"} {
+		t.Run(name, func(t *testing.T) {
+			if err := registry.Configure(name, name, provider.Config{CredentialID: "credential", CredentialResolver: staticCredential("secret")}); err != nil {
+				t.Fatalf("configure built-in default: %v", err)
+			}
+		})
+	}
+}
+
 func TestRegistryRejectsDuplicates(t *testing.T) {
 	registry := provider.NewRegistry()
 	if err := registry.Register("one", fakeProvider{}); err != nil {

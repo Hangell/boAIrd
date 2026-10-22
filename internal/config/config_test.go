@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadUsesLocalDefaults(t *testing.T) {
-	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS")
+	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -57,6 +57,8 @@ func setValidSecrets(t *testing.T) {
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 	t.Setenv("BOAIRD_MCP_AGENT_TOKENS", "")
+	t.Setenv("BOAIRD_PROVIDER_ALLOWED_HOSTS", "")
+	t.Setenv("BOAIRD_PROVIDER_ALLOWED_IP_RANGES", "")
 }
 
 func TestLoadUsesConfiguredValues(t *testing.T) {
@@ -66,12 +68,39 @@ func TestLoadUsesConfiguredValues(t *testing.T) {
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 	t.Setenv("BOAIRD_MCP_AGENT_TOKENS", "")
+	t.Setenv("BOAIRD_PROVIDER_ALLOWED_HOSTS", "models.example, 10.4.0.7")
+	t.Setenv("BOAIRD_PROVIDER_ALLOWED_IP_RANGES", "10.4.0.0/24, fd00::/8")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if cfg.Address() != "127.0.0.1:3110" {
 		t.Fatalf("Address() = %q, want %q", cfg.Address(), "127.0.0.1:3110")
+	}
+	if strings.Join(cfg.ProviderAllowedHosts, ",") != "models.example,10.4.0.7" || strings.Join(cfg.ProviderAllowedIPRanges, ",") != "10.4.0.0/24,fd00::/8" {
+		t.Fatalf("provider endpoint policy not parsed: hosts=%v ranges=%v", cfg.ProviderAllowedHosts, cfg.ProviderAllowedIPRanges)
+	}
+}
+
+func TestLoadRejectsInvalidProviderEndpointPolicy(t *testing.T) {
+	setValidSecrets(t)
+	for name, env := range map[string]string{
+		"wildcard host":       "*.example.com",
+		"URL instead of host": "https://provider.example/v1",
+		"invalid IP range":    "10.1.0.1/99",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("BOAIRD_PROVIDER_ALLOWED_HOSTS", "")
+			t.Setenv("BOAIRD_PROVIDER_ALLOWED_IP_RANGES", "")
+			if name == "invalid IP range" {
+				t.Setenv("BOAIRD_PROVIDER_ALLOWED_IP_RANGES", env)
+			} else {
+				t.Setenv("BOAIRD_PROVIDER_ALLOWED_HOSTS", env)
+			}
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() accepted invalid provider endpoint policy")
+			}
+		})
 	}
 }
 
