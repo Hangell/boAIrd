@@ -131,6 +131,60 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 	return nil
 }
 
+func (r *AgentRepository) AddProject(ctx context.Context, agentID, projectID, actorID string) error {
+	tx, err := r.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin agent project membership: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_projects(agent_id, project_id) VALUES (?, ?)`, agentID, projectID)
+	if err != nil {
+		return fmt.Errorf("add agent project membership: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count added agent project membership: %w", err)
+	}
+	if changed == 0 {
+		return tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
+		VALUES (?, 'administrator', ?, 'agent.project.joined', 'agent', ?, 'project scope granted')`, projectID, actorID, agentID); err != nil {
+		return fmt.Errorf("audit added agent project membership: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit agent project membership: %w", err)
+	}
+	return nil
+}
+
+func (r *AgentRepository) RemoveProject(ctx context.Context, agentID, projectID, actorID string) error {
+	tx, err := r.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin agent project membership removal: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM agent_projects WHERE agent_id = ? AND project_id = ?`, agentID, projectID)
+	if err != nil {
+		return fmt.Errorf("remove agent project membership: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count removed agent project membership: %w", err)
+	}
+	if changed == 0 {
+		return tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
+		VALUES (?, 'administrator', ?, 'agent.project.left', 'agent', ?, 'project scope revoked')`, projectID, actorID, agentID); err != nil {
+		return fmt.Errorf("audit removed agent project membership: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit agent project membership removal: %w", err)
+	}
+	return nil
+}
+
 type sqlExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
@@ -261,6 +315,25 @@ func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.S
 	}
 	if err := capabilities.Close(); err != nil {
 		return fmt.Errorf("close agent capabilities: %w", err)
+	}
+	projects, err := database.QueryContext(ctx, "SELECT project_id FROM agent_projects WHERE agent_id = ? ORDER BY project_id", snapshot.ID)
+	if err != nil {
+		return fmt.Errorf("query agent projects: %w", err)
+	}
+	for projects.Next() {
+		var value string
+		if err := projects.Scan(&value); err != nil {
+			projects.Close()
+			return fmt.Errorf("scan agent project: %w", err)
+		}
+		snapshot.ProjectIDs = append(snapshot.ProjectIDs, value)
+	}
+	if err := projects.Err(); err != nil {
+		projects.Close()
+		return fmt.Errorf("iterate agent projects: %w", err)
+	}
+	if err := projects.Close(); err != nil {
+		return fmt.Errorf("close agent projects: %w", err)
 	}
 	return nil
 }

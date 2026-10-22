@@ -963,7 +963,8 @@ Role != Permission
 - The local bearer token authenticates every `/api/v1` route except status; the browser exchanges it for a SameSite=Strict HttpOnly cookie.
 - Route policies map project, credential, agent, Brain, run, task, and conversation operations to explicit capabilities. Project-scoped routes validate the single administrator's membership before invoking managers.
 - Task services independently require explicit capabilities and project scope for administrator actors, check active Brain/agent grants, reject the legacy unprivileged local actor, and audit denied operations.
-- The API records denied requests in an immutable SQLite table. MCP Agent task mutations also use the task service, which records authorization denials and transition audit events.
+- The API and MCP adapters record authorization denials in an immutable SQLite table. Agent project memberships are persisted in `agent_projects`; actual grants and revocations are audited in `audit_events`.
+- MCP project-wide operations require explicit persisted Agent scope. Assignment grants only task-specific actions after checking the exact assignee. An active Brain derives scope only from its Brain-to-project relation.
 
 A Backend agent may have:
 
@@ -1131,6 +1132,8 @@ complete task
 - `/mcp` uses authenticated Streamable HTTP and is disabled unless `BOAIRD_MCP_AGENT_TOKENS` maps bearer tokens to existing Agents.
 - The authenticated token determines Agent identity; stateful MCP sessions reject requests authenticated as a different Agent.
 - Tools use explicit capabilities and project scope. Task assignment grants access only to that assigned task; MCP cannot self-assign.
+- Agent project memberships are stored in `agent_projects` and managed by the authenticated administrator at `PUT`/`DELETE /api/v1/projects/{projectID}/agents/{agentID}`. The Agent response exposes read-only `project_ids`; changes are written to immutable audit history.
+- Project reads, Brain Runs, and other project-wide MCP operations require explicit membership. Assignment does not add project scope; active Brain scope is derived from the Brain-project relation. MCP scope denials are recorded.
 - Task transitions, Human Review checks, conversation access, and Brain autonomy rules remain enforced by domain services.
 - Tokens are static process configuration and become invalid after replacement plus restart. MCP sessions idle for 30 minutes are closed.
 - Integration tests cover authentication, session binding, task-completion policy, and assigned-Agent conversation scope.

@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -29,9 +30,13 @@ type Services struct {
 	Agents        AgentService
 	Projects      ProjectService
 	Tasks         TaskService
+	Denials       AuthorizationDenialService
 	Conversations ConversationService
 	Brains        BrainService
 	Runs          RunService
+}
+type AuthorizationDenialService interface {
+	RecordAuthorizationDenial(context.Context, string, string, string, string, string) error
 }
 
 type AgentService interface {
@@ -137,9 +142,9 @@ func (s *Server) registerTools(server *mcp.Server) {
 	mcp.AddTool[taskActionInput, taskOutput](server, add("boaird.task.fail", "Mark an assigned task failed with a reason."), s.taskFail)
 	mcp.AddTool[conversationReadInput, conversationOutput](server, add("boaird.conversation.read", "Read a bounded page of messages for a task assigned to this Agent."), s.conversationRead)
 	mcp.AddTool[conversationSendInput, messageOutput](server, add("boaird.conversation.send", "Send a message as the authenticated Agent on an assigned task."), s.conversationSend)
-	mcp.AddTool[taskInput, contextOutput](server, add("boaird.context.get", "Get task and project context with a bounded recent conversation page."), s.contextGet)
+	mcp.AddTool[taskInput, contextOutput](server, add("boaird.context.get", "Get assigned task context with a bounded recent conversation page; project metadata is included only for explicitly scoped projects."), s.contextGet)
 	mcp.AddTool[brainRequestInput, brainOutput](server, add("boaird.brain.request", "Submit a planning request only when this identity is the configured Brain for the project."), s.brainRequest)
-	mcp.AddTool[runInput, runOutput](server, add("boaird.run.get", "Get a run owned by this Agent or visible within its explicit project scope."), s.runGet)
+	mcp.AddTool[runInput, runOutput](server, add("boaird.run.get", "Get a run in a project explicitly assigned to this Agent."), s.runGet)
 }
 
 type emptyInput struct{}
@@ -216,7 +221,7 @@ type messageOutput struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 type contextOutput struct {
-	Project      projectOutput      `json:"project"`
+	Project      *projectOutput     `json:"project,omitempty"`
 	Task         taskOutput         `json:"task"`
 	Conversation conversationOutput `json:"conversation"`
 }
@@ -283,20 +288,34 @@ func (s *Server) actor(ctx context.Context) (agent.Agent, error) {
 	}
 	return s.services.Agents.Get(ctx, id)
 }
+func (s *Server) recordDenial(ctx context.Context, a agent.Agent, projectID, required, reason string) {
+	if s.services.Denials != nil {
+		if err := s.services.Denials.RecordAuthorizationDenial(ctx, a.ID(), projectID, required, "mcp:"+required, reason); err != nil {
+			slog.Error("record MCP authorization denial", "error", err)
+		}
+	}
+}
 func (s *Server) authorize(ctx context.Context, a agent.Agent, required, projectID string) error {
 	grant, err := capability.New(required)
 	if err != nil {
 		return err
 	}
-	return (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: a.ProjectIDs()}, grant, projectID)
+	err = (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: a.ProjectIDs()}, grant, projectID)
+	if err != nil {
+		s.recordDenial(ctx, a, projectID, required, "capability_or_project_scope_denied")
+	}
+	return err
 }
-func (s *Server) authorizeInProject(a agent.Agent, required, projectID string) error {
+func (s *Server) authorizeAssignedTask(ctx context.Context, a agent.Agent, required string, t task.Task) error {
 	grant, err := capability.New(required)
 	if err != nil {
 		return err
 	}
-	scope := append(a.ProjectIDs(), projectID)
-	return (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: scope}, grant, projectID)
+	err = (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: []string{t.ProjectID()}}, grant, t.ProjectID())
+	if err != nil {
+		s.recordDenial(ctx, a, t.ProjectID(), required, "assigned_task_capability_denied")
+	}
+	return err
 }
 func (s *Server) assignedTask(ctx context.Context, a agent.Agent, id, required string) (task.Task, error) {
 	t, err := s.services.Tasks.Get(ctx, id)
@@ -304,20 +323,22 @@ func (s *Server) assignedTask(ctx context.Context, a agent.Agent, id, required s
 		return task.Task{}, err
 	}
 	if t.AssignedTo() != a.ID() {
+		s.recordDenial(ctx, a, t.ProjectID(), required, "task_assignment_required")
 		return task.Task{}, task.ErrForbidden
 	}
-	if err := s.authorizeInProject(a, required, t.ProjectID()); err != nil {
+	if err := s.authorizeAssignedTask(ctx, a, required, t); err != nil {
 		return task.Task{}, task.ErrForbidden
 	}
 	return t, nil
 }
 func (s *Server) taskVisible(ctx context.Context, a agent.Agent, t task.Task, required string) error {
 	if t.AssignedTo() == a.ID() {
-		return s.authorizeInProject(a, required, t.ProjectID())
+		return s.authorizeAssignedTask(ctx, a, required, t)
 	}
 	if projectInScope(a, t.ProjectID()) {
 		return s.authorize(ctx, a, required, t.ProjectID())
 	}
+	s.recordDenial(ctx, a, t.ProjectID(), required, "project_scope_or_task_assignment_required")
 	return task.ErrForbidden
 }
 func (s *Server) projectVisible(ctx context.Context, a agent.Agent, id string) (project.Project, error) {
@@ -326,18 +347,13 @@ func (s *Server) projectVisible(ctx context.Context, a agent.Agent, id string) (
 		return project.Project{}, err
 	}
 	if projectInScope(a, id) {
-		if err := s.authorize(ctx, a, "project.read", id); err == nil {
-			return p, nil
+		if err := s.authorize(ctx, a, "project.read", id); err != nil {
+			return project.Project{}, task.ErrForbidden
 		}
+		return p, nil
 	}
-	if s.authorize(ctx, a, "project.read", "") != nil {
-		return project.Project{}, task.ErrForbidden
-	}
-	values, err := s.services.Tasks.List(ctx, id, "", a.ID(), 100, 0)
-	if err != nil || len(values) == 0 || s.authorizeInProject(a, "project.read", id) != nil {
-		return project.Project{}, task.ErrForbidden
-	}
-	return p, nil
+	s.recordDenial(ctx, a, id, "project.read", "project_membership_required")
+	return project.Project{}, task.ErrForbidden
 }
 func (s *Server) projectGet(ctx context.Context, _ *mcp.CallToolRequest, in projectInput) (*mcp.CallToolResult, projectOutput, error) {
 	a, e := s.actor(ctx)
@@ -402,10 +418,16 @@ func (s *Server) taskList(ctx context.Context, _ *mcp.CallToolRequest, in taskLi
 	result := make([]taskOutput, 0)
 	skip := in.Offset
 	for _, p := range projects {
+		assignedTo := a.ID()
+		if projectInScope(a, p.ID()) {
+			if err := s.authorize(ctx, a, "task.read", p.ID()); err == nil {
+				assignedTo = ""
+			}
+		}
 		projectOffset := 0
 		for skip > 0 {
 			pageSize := min(skip, maxToolPageSize)
-			values, err := s.services.Tasks.List(ctx, p.ID(), status, a.ID(), pageSize, projectOffset)
+			values, err := s.services.Tasks.List(ctx, p.ID(), status, assignedTo, pageSize, projectOffset)
 			if err != nil || len(values) == 0 {
 				break
 			}
@@ -418,7 +440,7 @@ func (s *Server) taskList(ctx context.Context, _ *mcp.CallToolRequest, in taskLi
 		if skip > 0 {
 			continue
 		}
-		values, err := s.services.Tasks.List(ctx, p.ID(), status, a.ID(), min(limit-len(result), maxToolPageSize), projectOffset)
+		values, err := s.services.Tasks.List(ctx, p.ID(), status, assignedTo, min(limit-len(result), maxToolPageSize), projectOffset)
 		if err != nil {
 			continue
 		}
@@ -524,9 +546,13 @@ func (s *Server) contextGet(ctx context.Context, r *mcp.CallToolRequest, in task
 	if e != nil || s.taskVisible(ctx, a, t, "task.read") != nil || s.authorize(ctx, a, "conversation.read", "") != nil {
 		return nil, contextOutput{}, toolError(task.ErrForbidden)
 	}
-	p, e := s.projectVisible(ctx, a, t.ProjectID())
-	if e != nil {
-		return nil, contextOutput{}, toolError(e)
+	var projectContext *projectOutput
+	if projectInScope(a, t.ProjectID()) {
+		p, err := s.projectVisible(ctx, a, t.ProjectID())
+		if err != nil {
+			return nil, contextOutput{}, toolError(err)
+		}
+		projectContext = &projectOutput{ID: p.ID(), Name: p.Name(), Description: p.Description(), Status: string(p.Status())}
 	}
 	value, msgs, next, e := s.services.Conversations.GetPageForAgent(ctx, t.ID(), a.ID(), "", 20)
 	if e != nil {
@@ -536,7 +562,7 @@ func (s *Server) contextGet(ctx context.Context, r *mcp.CallToolRequest, in task
 	for _, m := range msgs {
 		conv.Messages = append(conv.Messages, messageView(m))
 	}
-	return nil, contextOutput{Project: projectOutput{ID: p.ID(), Name: p.Name(), Description: p.Description(), Status: string(p.Status())}, Task: taskView(t), Conversation: conv}, nil
+	return nil, contextOutput{Project: projectContext, Task: taskView(t), Conversation: conv}, nil
 }
 func (s *Server) brainRequest(ctx context.Context, _ *mcp.CallToolRequest, in brainRequestInput) (*mcp.CallToolResult, brainOutput, error) {
 	a, e := s.actor(ctx)
@@ -545,9 +571,12 @@ func (s *Server) brainRequest(ctx context.Context, _ *mcp.CallToolRequest, in br
 	}
 	b, e := s.services.Brains.Get(ctx, in.ProjectID)
 	if e != nil || b.AgentID() != a.ID() {
+		s.recordDenial(ctx, a, in.ProjectID, "brain.execute", "active_brain_identity_required")
 		return nil, brainOutput{}, toolError(task.ErrForbidden)
 	}
-	if s.authorizeInProject(a, "brain.execute", in.ProjectID) != nil {
+	grant, e := capability.New("brain.execute")
+	if e != nil || !b.Active() || (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: []string{b.ProjectID()}}, grant, b.ProjectID()) != nil {
+		s.recordDenial(ctx, a, b.ProjectID(), "brain.execute", "active_brain_scope_denied")
 		return nil, brainOutput{}, toolError(task.ErrForbidden)
 	}
 	out, e := s.services.Brains.Execute(ctx, in.ProjectID, in.Objective, in.MaxTokens)
@@ -568,7 +597,11 @@ func (s *Server) runGet(ctx context.Context, _ *mcp.CallToolRequest, in runInput
 	if e != nil {
 		return nil, runOutput{}, toolError(e)
 	}
-	if v.AgentID() != a.ID() && (!projectInScope(a, v.ProjectID()) || s.authorize(ctx, a, "run.read", v.ProjectID()) != nil) {
+	if !projectInScope(a, v.ProjectID()) {
+		s.recordDenial(ctx, a, v.ProjectID(), "run.read", "project_membership_required")
+		return nil, runOutput{}, toolError(task.ErrForbidden)
+	}
+	if s.authorize(ctx, a, "run.read", v.ProjectID()) != nil {
 		return nil, runOutput{}, toolError(task.ErrForbidden)
 	}
 	return nil, runOutput{ID: v.ID(), ProjectID: v.ProjectID(), TaskID: v.TaskID(), AgentID: v.AgentID(), Status: string(v.Status()), Output: v.Output(), Error: v.Error()}, nil

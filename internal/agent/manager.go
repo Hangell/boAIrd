@@ -27,6 +27,11 @@ type Repository interface {
 	Update(context.Context, Agent) error
 }
 
+type projectScopeRepository interface {
+	AddProject(context.Context, string, string, string) error
+	RemoveProject(context.Context, string, string, string) error
+}
+
 type Manager struct{ repository Repository }
 
 type CreateInput struct {
@@ -164,6 +169,28 @@ func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Age
 		return Agent{}, err
 	}
 	return value, nil
+}
+
+func (m *Manager) AddProject(ctx context.Context, agentID, projectID, actorID string) error {
+	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(projectID) == "" || strings.TrimSpace(actorID) == "" {
+		return invalidInput(errors.New("agent, project, and actor IDs are required"))
+	}
+	repository, ok := m.repository.(projectScopeRepository)
+	if !ok {
+		return errors.New("agent project scope is unavailable")
+	}
+	return repository.AddProject(ctx, agentID, projectID, actorID)
+}
+
+func (m *Manager) RemoveProject(ctx context.Context, agentID, projectID, actorID string) error {
+	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(projectID) == "" || strings.TrimSpace(actorID) == "" {
+		return invalidInput(errors.New("agent, project, and actor IDs are required"))
+	}
+	repository, ok := m.repository.(projectScopeRepository)
+	if !ok {
+		return errors.New("agent project scope is unavailable")
+	}
+	return repository.RemoveProject(ctx, agentID, projectID, actorID)
 }
 
 func invalidInput(err error) error { return fmt.Errorf("%w: %w", ErrInvalidInput, err) }

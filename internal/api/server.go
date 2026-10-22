@@ -52,6 +52,11 @@ type AgentManager interface {
 	Update(context.Context, string, agent.UpdateInput) (agent.Agent, error)
 }
 
+type AgentProjectScopeManager interface {
+	AddProject(context.Context, string, string, string) error
+	RemoveProject(context.Context, string, string, string) error
+}
+
 type BrainManager interface {
 	Create(context.Context, string, brain.CreateInput) (brain.Brain, error)
 	Get(context.Context, string) (brain.Brain, error)
@@ -139,7 +144,7 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 		registerCredentialRoutes(mux, credentials)
 	}
 	if agents != nil {
-		registerAgentRoutes(mux, agents)
+		registerAgentRoutes(mux, agents, projects)
 	}
 	if brains != nil {
 		registerBrainRoutes(mux, brains, localAuthToken, sessions)

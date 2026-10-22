@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/project"
 )
 
 type agentResponse struct {
@@ -21,6 +22,7 @@ type agentResponse struct {
 	Instructions        string        `json:"instructions"`
 	LanguagePreferences []string      `json:"language_preferences"`
 	Capabilities        []string      `json:"capabilities"`
+	ProjectIDs          []string      `json:"project_ids"`
 	Status              agent.Status  `json:"status"`
 }
 
@@ -30,7 +32,7 @@ type agentListResponse struct {
 	Offset int             `json:"offset"`
 }
 
-func registerAgentRoutes(mux *http.ServeMux, manager AgentManager) {
+func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects ProjectManager) {
 	mux.HandleFunc("POST /api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		var input agent.CreateInput
 		if err := decodeJSON(w, r, &input); err != nil {
@@ -95,6 +97,42 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager) {
 		}
 		writeJSON(w, http.StatusOK, toAgentResponse(value))
 	})
+
+	scopeManager, supportsProjectScope := manager.(AgentProjectScopeManager)
+	if projects != nil && supportsProjectScope {
+		mux.HandleFunc("PUT /api/v1/projects/{projectID}/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
+			projectID, agentID := r.PathValue("projectID"), r.PathValue("agentID")
+			if _, err := projects.Get(r.Context(), projectID); err != nil {
+				writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
+				return
+			}
+			if _, err := manager.Get(r.Context(), agentID); err != nil {
+				writeAgentError(w, err)
+				return
+			}
+			if err := scopeManager.AddProject(r.Context(), agentID, projectID, project.LocalAdministratorID); err != nil {
+				writeAgentError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+		mux.HandleFunc("DELETE /api/v1/projects/{projectID}/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
+			projectID, agentID := r.PathValue("projectID"), r.PathValue("agentID")
+			if _, err := projects.Get(r.Context(), projectID); err != nil {
+				writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
+				return
+			}
+			if _, err := manager.Get(r.Context(), agentID); err != nil {
+				writeAgentError(w, err)
+				return
+			}
+			if err := scopeManager.RemoveProject(r.Context(), agentID, projectID, project.LocalAdministratorID); err != nil {
+				writeAgentError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
 }
 
 func toAgentResponse(value agent.Agent) agentResponse {
@@ -103,7 +141,7 @@ func toAgentResponse(value agent.Agent) agentResponse {
 		ID: snapshot.ID, Name: snapshot.Name, Avatar: snapshot.Avatar, Description: snapshot.Description,
 		Role: snapshot.Role, Runtime: snapshot.Runtime, Provider: snapshot.Provider, ProviderBaseURL: snapshot.ProviderBaseURL, Model: snapshot.Model,
 		CredentialID: snapshot.CredentialID, Instructions: snapshot.Instructions,
-		LanguagePreferences: snapshot.LanguagePreferences, Capabilities: snapshot.Capabilities, Status: snapshot.Status,
+		LanguagePreferences: snapshot.LanguagePreferences, Capabilities: snapshot.Capabilities, ProjectIDs: snapshot.ProjectIDs, Status: snapshot.Status,
 	}
 }
 
