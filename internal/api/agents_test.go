@@ -44,7 +44,7 @@ func TestAgentAPIUsesDistinctProvidersAndDoesNotGrantByRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewHandlerWithAgents(fakeDatabase{}, nil, credentialManager, agentManager)
+	handler := newHandler(fakeDatabase{}, nil, credentialManager, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes())
 	create := func(name, role, provider, model, credentialID string) agentResponse {
 		t.Helper()
 		body, err := json.Marshal(agent.CreateInput{Name: name, Role: role, Runtime: agent.RuntimeAPI, Provider: provider, Model: model, CredentialID: credentialID})
@@ -52,7 +52,7 @@ func TestAgentAPIUsesDistinctProvidersAndDoesNotGrantByRole(t *testing.T) {
 			t.Fatal(err)
 		}
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(string(body))))
+		handler.ServeHTTP(response, authorizedTestRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(string(body))))
 		if response.Code != http.StatusCreated {
 			t.Fatalf("create status = %d, body=%s", response.Code, response.Body.String())
 		}
@@ -74,26 +74,26 @@ func TestAgentAPIUsesDistinctProvidersAndDoesNotGrantByRole(t *testing.T) {
 		t.Fatalf("role granted capabilities: backend=%v qa=%v", backend.Capabilities, qa.Capabilities)
 	}
 	list := httptest.NewRecorder()
-	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/agents?limit=10", nil))
+	handler.ServeHTTP(list, authorizedTestRequest(http.MethodGet, "/api/v1/agents?limit=10", nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"provider":"anthropic"`) {
 		t.Fatalf("list status = %d, body=%s", list.Code, list.Body.String())
 	}
 	get := httptest.NewRecorder()
-	handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/v1/agents/"+backend.ID, nil))
+	handler.ServeHTTP(get, authorizedTestRequest(http.MethodGet, "/api/v1/agents/"+backend.ID, nil))
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), backend.ID) {
 		t.Fatalf("get status = %d, body=%s", get.Code, get.Body.String())
 	}
 	name := "Backend Specialist"
 	patch, _ := json.Marshal(agent.UpdateInput{Name: &name})
 	updated := httptest.NewRecorder()
-	handler.ServeHTTP(updated, httptest.NewRequest(http.MethodPatch, "/api/v1/agents/"+backend.ID, strings.NewReader(string(patch))))
+	handler.ServeHTTP(updated, authorizedTestRequest(http.MethodPatch, "/api/v1/agents/"+backend.ID, strings.NewReader(string(patch))))
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), name) {
 		t.Fatalf("patch status = %d, body=%s", updated.Code, updated.Body.String())
 	}
 	localRuntime := agent.RuntimeLocal
 	switchRuntime, _ := json.Marshal(agent.UpdateInput{Runtime: &localRuntime})
 	switched := httptest.NewRecorder()
-	handler.ServeHTTP(switched, httptest.NewRequest(http.MethodPatch, "/api/v1/agents/"+backend.ID, strings.NewReader(string(switchRuntime))))
+	handler.ServeHTTP(switched, authorizedTestRequest(http.MethodPatch, "/api/v1/agents/"+backend.ID, strings.NewReader(string(switchRuntime))))
 	if switched.Code != http.StatusOK || strings.Contains(switched.Body.String(), "credential_id") || strings.Contains(switched.Body.String(), `"provider"`) {
 		t.Fatalf("switching away from API retained provider configuration: %d %s", switched.Code, switched.Body.String())
 	}
@@ -113,14 +113,14 @@ func TestAgentAPIRejectsRawSecretsAndWritableStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewHandlerWithAgents(fakeDatabase{}, nil, nil, manager)
+	handler := newHandler(fakeDatabase{}, nil, nil, manager, nil, nil, nil, nil, testLocalAuthTokenBytes())
 	badSecret := httptest.NewRecorder()
-	handler.ServeHTTP(badSecret, httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(`{"name":"x","role":"worker","runtime":"LOCAL","api_key":"do-not-echo-this"}`)))
+	handler.ServeHTTP(badSecret, authorizedTestRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(`{"name":"x","role":"worker","runtime":"LOCAL","api_key":"do-not-echo-this"}`)))
 	if badSecret.Code != http.StatusBadRequest || strings.Contains(badSecret.Body.String(), "do-not-echo-this") {
 		t.Fatalf("raw credential field was accepted or echoed: %d %s", badSecret.Code, badSecret.Body.String())
 	}
 	status := httptest.NewRecorder()
-	handler.ServeHTTP(status, httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(`{"name":"x","role":"worker","runtime":"LOCAL","status":"ONLINE"}`)))
+	handler.ServeHTTP(status, authorizedTestRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(`{"name":"x","role":"worker","runtime":"LOCAL","status":"ONLINE"}`)))
 	if status.Code != http.StatusBadRequest {
 		t.Fatalf("client writable status accepted: %d %s", status.Code, status.Body.String())
 	}

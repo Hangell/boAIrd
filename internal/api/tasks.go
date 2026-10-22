@@ -71,7 +71,7 @@ func registerTaskRoutes(mux *http.ServeMux, manager taskAPIManager) {
 		}
 		value, err := manager.Create(r.Context(), r.PathValue("id"), task.CreateInput{
 			Title: request.Title, Description: request.Description, Priority: request.Priority, ParentID: request.ParentID, Reason: request.Reason,
-		}, task.Actor{Type: task.ActorLocalAPI, ID: localTaskActorID})
+		}, taskActorFromRequest(r))
 		if err != nil {
 			writeTaskError(w, err)
 			return
@@ -123,7 +123,7 @@ func registerTaskRoutes(mux *http.ServeMux, manager taskAPIManager) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		value, err := manager.Assign(r.Context(), r.PathValue("id"), request.AgentID, request.Reason, task.Actor{Type: task.ActorLocalAPI, ID: localTaskActorID})
+		value, err := manager.Assign(r.Context(), r.PathValue("id"), request.AgentID, request.Reason, taskActorFromRequest(r))
 		if err != nil {
 			writeTaskError(w, err)
 			return
@@ -137,7 +137,7 @@ func registerTaskRoutes(mux *http.ServeMux, manager taskAPIManager) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		value, err := manager.Transition(r.Context(), r.PathValue("id"), task.Status(request.Status), request.Reason, task.Actor{Type: task.ActorLocalAPI, ID: localTaskActorID})
+		value, err := manager.Transition(r.Context(), r.PathValue("id"), task.Status(request.Status), request.Reason, taskActorFromRequest(r))
 		if err != nil {
 			writeTaskError(w, err)
 			return

@@ -13,7 +13,15 @@ func localConversationPrincipal(r *http.Request, expectedToken []byte) (string, 
 	if len(expectedToken) != 32 {
 		return "", false
 	}
-	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	authorization := r.Header.Get("Authorization")
+	if authorization == "" {
+		cookie, err := r.Cookie(localAuthCookieName)
+		if err != nil {
+			return "", false
+		}
+		authorization = "Bearer " + cookie.Value
+	}
+	scheme, token, ok := strings.Cut(authorization, " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") || len(token) != 64 {
 		return "", false
 	}

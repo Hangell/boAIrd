@@ -115,6 +115,7 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 	if len(localAuthTokens) > 0 {
 		localAuthToken = localAuthTokens[0]
 	}
+	registerSessionRoutes(mux, database, localAuthToken)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -155,7 +156,7 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 	if conversations != nil {
 		registerConversationRoutes(mux, conversations, localAuthToken)
 	}
-	return mux
+	return corsAPI(secureAPI(mux, database, projects, tasks, runs, localAuthToken))
 }
 
 // Serve listens on address and gracefully shuts down when ctx is cancelled.

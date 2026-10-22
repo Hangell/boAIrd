@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/capability"
 	"boAIrd/internal/project"
 )
 
@@ -131,12 +132,16 @@ func (b Brain) AuthorizeAction(action Action, p project.Project, a agent.Agent) 
 	default:
 		return ErrUnauthorizedAction
 	}
-	for _, capability := range a.Capabilities() {
-		if string(capability) == required {
-			return nil
-		}
+	value, err := capability.New(required)
+	if err != nil {
+		return ErrUnauthorizedAction
 	}
-	return ErrUnauthorizedAction
+	if err := (capability.Authorizer{}).Authorize(capability.Principal{
+		ID: a.ID(), Capabilities: a.Capabilities(), ProjectIDs: []string{p.ID()},
+	}, value, p.ID()); err != nil {
+		return ErrUnauthorizedAction
+	}
+	return nil
 }
 
 func validAutonomy(mode AutonomyMode) bool {

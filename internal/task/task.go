@@ -53,8 +53,10 @@ type Task struct {
 }
 
 type Actor struct {
-	Type ActorType
-	ID   string
+	Type         ActorType
+	ID           string
+	Capabilities []string
+	ProjectIDs   []string
 }
 
 type Snapshot struct {

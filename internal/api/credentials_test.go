@@ -29,8 +29,8 @@ func (failedCredentialStub) Create(context.Context, string, string, string) (cre
 func TestCredentialEndpointsNeverReturnSubmittedSecret(t *testing.T) {
 	secret := "fake-api-key-123456789"
 	manager := credentialStub{value: credential.Metadata{ID: "cred-1", Name: "test", Provider: "openai"}}
-	handler := NewHandler(fakeDatabase{}, nil, manager)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/credentials", strings.NewReader(`{"name":"test","provider":"openai","secret":"`+secret+`"}`))
+	handler := newHandler(fakeDatabase{}, nil, manager, nil, nil, nil, nil, nil, testLocalAuthTokenBytes())
+	request := authorizedTestRequest(http.MethodPost, "/api/v1/credentials", strings.NewReader(`{"name":"test","provider":"openai","secret":"`+secret+`"}`))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
@@ -41,16 +41,16 @@ func TestCredentialEndpointsNeverReturnSubmittedSecret(t *testing.T) {
 	}
 
 	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/credentials", nil))
+	handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/credentials", nil))
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), secret) {
 		t.Fatalf("unsafe list response: %d %s", response.Code, response.Body.String())
 	}
 }
 
 func TestCredentialEndpointDoesNotEchoInvalidSecret(t *testing.T) {
-	handler := NewHandler(fakeDatabase{}, nil, failedCredentialStub{})
+	handler := newHandler(fakeDatabase{}, nil, failedCredentialStub{}, nil, nil, nil, nil, nil, testLocalAuthTokenBytes())
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/credentials", strings.NewReader(`{"name":"x","provider":"openai","secret":"bad-secret"}`)))
+	handler.ServeHTTP(response, authorizedTestRequest(http.MethodPost, "/api/v1/credentials", strings.NewReader(`{"name":"x","provider":"openai","secret":"bad-secret"}`)))
 	if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "bad-secret") {
 		t.Fatalf("unexpected error response: %d %s", response.Code, response.Body.String())
 	}

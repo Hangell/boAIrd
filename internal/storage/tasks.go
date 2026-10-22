@@ -19,6 +19,15 @@ func NewTaskRepository(database *sql.DB) (*TaskRepository, error) {
 	return &TaskRepository{database: database}, nil
 }
 
+func (r *TaskRepository) RecordAuthorizationDenial(ctx context.Context, actorID, projectID, required, resource, reason string) error {
+	_, err := r.database.ExecContext(ctx, `INSERT INTO authorization_denials(principal_id, project_id, required_capability, resource, reason)
+		VALUES (?, ?, ?, ?, ?)`, actorID, projectID, required, resource, reason)
+	if err != nil {
+		return fmt.Errorf("insert authorization denial: %w", err)
+	}
+	return nil
+}
+
 func (r *TaskRepository) Create(ctx context.Context, value task.Task) error {
 	if err := writeTask(ctx, r.database, value); err != nil {
 		return fmt.Errorf("insert task: %w", err)

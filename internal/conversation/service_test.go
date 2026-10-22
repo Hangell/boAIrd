@@ -49,11 +49,12 @@ func TestConversationPersistsStructuredMessagesWithScopedActorsAndRedaction(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	work, err := tasks.Create(ctx, p.ID(), task.CreateInput{Title: "Discuss implementation", Reason: "requested"}, task.Actor{Type: task.ActorLocalAPI, ID: "local-api"})
+	administrator := task.Actor{Type: task.ActorAdministrator, ID: project.LocalAdministratorID, Capabilities: []string{"task.create", "task.assign"}, ProjectIDs: []string{p.ID()}}
+	work, err := tasks.Create(ctx, p.ID(), task.CreateInput{Title: "Discuss implementation", Reason: "requested"}, administrator)
 	if err != nil {
 		t.Fatal(err)
 	}
-	work, err = tasks.Assign(ctx, work.ID(), worker.ID(), "assign worker", task.Actor{Type: task.ActorLocalAPI, ID: "local-api"})
+	work, err = tasks.Assign(ctx, work.ID(), worker.ID(), "assign worker", administrator)
 	if err != nil {
 		t.Fatal(err)
 	}

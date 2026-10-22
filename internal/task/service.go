@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/brain"
+	"boAIrd/internal/capability"
 	"boAIrd/internal/project"
 )
 
@@ -37,6 +39,9 @@ type AgentReader interface {
 }
 type BrainReader interface {
 	GetActiveByProject(context.Context, string) (brain.Brain, error)
+}
+type authorizationDenialRecorder interface {
+	RecordAuthorizationDenial(context.Context, string, string, string, string, string) error
 }
 
 type Service struct {
@@ -83,6 +88,7 @@ func (s *Service) Create(ctx context.Context, projectID string, input CreateInpu
 		return Task{}, ErrProjectArchived
 	}
 	if err := s.authorizeCapability(ctx, projectID, actor, "task.create"); err != nil {
+		s.recordAuthorizationDenial(ctx, actor, projectID, "task.create", "project:"+projectID, "capability_denied")
 		return Task{}, err
 	}
 	if strings.TrimSpace(input.Reason) == "" {
@@ -160,6 +166,7 @@ func (s *Service) Assign(ctx context.Context, id, agentID, reason string, actor 
 		return Task{}, err
 	}
 	if err := s.authorizeCapability(ctx, value.ProjectID(), actor, "task.assign"); err != nil {
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.assign", "task:"+value.ID(), "capability_denied")
 		return Task{}, err
 	}
 	if strings.TrimSpace(agentID) == "" {
@@ -194,12 +201,15 @@ func (s *Service) Transition(ctx context.Context, id string, to Status, reason s
 		return Task{}, invalidTaskInput(errors.New("reason is required"))
 	}
 	if to == StatusHumanReview && !value.HumanReview() {
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.review", "task:"+value.ID(), "human_review_policy_denied")
 		return Task{}, ErrForbidden
 	}
 	if value.HumanReview() && to == StatusDone && actor.Type != ActorLocalAPI && actor.Type != ActorAdministrator {
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), "task.complete", "task:"+value.ID(), "human_review_required")
 		return Task{}, ErrForbidden
 	}
 	if err := s.authorizeTransition(ctx, value, to, actor); err != nil {
+		s.recordAuthorizationDenial(ctx, actor, value.ProjectID(), transitionCapability(to), "task:"+value.ID(), "capability_denied")
 		return Task{}, err
 	}
 	value, err = value.Transition(to)
@@ -214,6 +224,27 @@ func (s *Service) Transition(ctx context.Context, id string, to Status, reason s
 		return Task{}, err
 	}
 	return value, nil
+}
+
+func (s *Service) recordAuthorizationDenial(ctx context.Context, actor Actor, projectID, required, resource, reason string) {
+	recorder, ok := s.tasks.(authorizationDenialRecorder)
+	if !ok {
+		return
+	}
+	if err := recorder.RecordAuthorizationDenial(ctx, actor.ID, projectID, required, resource, reason); err != nil {
+		slog.ErrorContext(ctx, "record task authorization denial", "error", err)
+	}
+}
+
+func transitionCapability(to Status) string {
+	switch to {
+	case StatusReview, StatusHumanReview, StatusBlocked, StatusFailed, StatusCancelled:
+		return "task.review"
+	case StatusDone:
+		return "task.complete"
+	default:
+		return "task.transition"
+	}
 }
 
 func (s *Service) ListAuditEvents(ctx context.Context, id string) ([]AuditEvent, error) {
@@ -236,28 +267,52 @@ func (s *Service) ensureProjectActive(ctx context.Context, projectID string) err
 
 func (s *Service) authorizeCapability(ctx context.Context, projectID string, actor Actor, required string) error {
 	switch actor.Type {
-	case ActorLocalAPI, ActorAdministrator:
-		if strings.TrimSpace(actor.ID) != "" {
-			return nil
+	case ActorAdministrator:
+		value, err := capability.New(required)
+		if err != nil {
+			return ErrForbidden
 		}
+		grants := make([]capability.Capability, 0, len(actor.Capabilities))
+		for _, raw := range actor.Capabilities {
+			grant, err := capability.New(raw)
+			if err == nil {
+				grants = append(grants, grant)
+			}
+		}
+		if err := (capability.Authorizer{}).Authorize(capability.Principal{ID: actor.ID, Capabilities: grants, ProjectIDs: actor.ProjectIDs}, value, projectID); err != nil {
+			return ErrForbidden
+		}
+		return nil
+	case ActorLocalAPI:
+		return ErrForbidden
 	case ActorBrain:
 		configured, err := s.brains.GetActiveByProject(ctx, projectID)
 		if err != nil || configured.AgentID() != actor.ID {
 			return ErrForbidden
 		}
-		return s.agentHasCapability(ctx, actor.ID, required)
+		return s.agentHasCapability(ctx, projectID, actor.ID, required, true)
 	case ActorAgent:
-		return s.agentHasCapability(ctx, actor.ID, required)
+		return s.agentHasCapability(ctx, projectID, actor.ID, required, false)
 	}
 	return ErrForbidden
 }
 
 func (s *Service) authorizeTransition(ctx context.Context, value Task, to Status, actor Actor) error {
 	if actor.Type == ActorLocalAPI || actor.Type == ActorAdministrator {
-		return s.authorizeCapability(ctx, value.ProjectID(), actor, "")
+		required := "task.transition"
+		switch to {
+		case StatusReview, StatusHumanReview, StatusBlocked, StatusFailed, StatusCancelled:
+			required = "task.review"
+		case StatusDone:
+			required = "task.complete"
+		}
+		return s.authorizeCapability(ctx, value.ProjectID(), actor, required)
 	}
 	if actor.Type == ActorAgent {
 		if actor.ID != value.AssignedTo() {
+			return ErrForbidden
+		}
+		if err := s.agentHasCapability(ctx, value.ProjectID(), actor.ID, "task.transition", false); err != nil {
 			return ErrForbidden
 		}
 		switch to {
@@ -288,17 +343,27 @@ func (s *Service) agentExists(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Service) agentHasCapability(ctx context.Context, id, required string) error {
+func (s *Service) agentHasCapability(ctx context.Context, projectID, id, required string, activeBrain bool) error {
 	a, err := s.agents.Get(ctx, id)
 	if err != nil {
 		return ErrForbidden
 	}
-	for _, value := range a.Capabilities() {
-		if string(value) == required {
-			return nil
-		}
+	grant, err := capability.New(required)
+	if err != nil {
+		return ErrForbidden
 	}
-	return ErrForbidden
+	scope := a.ProjectIDs()
+	if activeBrain {
+		scope = []string{projectID}
+	}
+	grants := make([]capability.Capability, 0, len(a.Capabilities()))
+	for _, value := range a.Capabilities() {
+		grants = append(grants, value)
+	}
+	if err := (capability.Authorizer{}).Authorize(capability.Principal{ID: a.ID(), Capabilities: grants, ProjectIDs: scope}, grant, projectID); err != nil {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func mapProjectError(err error) error {
