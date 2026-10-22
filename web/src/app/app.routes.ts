@@ -1,14 +1,12 @@
 import type {} from '@angular/localize';
 import { Routes } from '@angular/router';
-import { ProjectDashboardComponent } from './features/projects/project-dashboard.component';
-import { ProjectListComponent } from './features/projects/project-list.component';
 import { FeaturePageComponent } from './shared/feature-page.component';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'overview' },
   {
     path: 'overview',
-    component: ProjectListComponent,
+    loadComponent: () => import('./features/projects/project-list.component').then((module) => module.ProjectListComponent),
     title: $localize`:@@page.overview.title:Overview`,
     data: {
       title: $localize`:@@page.overview.heading:Project overview`,
@@ -17,7 +15,7 @@ export const routes: Routes = [
   },
   {
     path: 'projects',
-    component: ProjectListComponent,
+    loadComponent: () => import('./features/projects/project-list.component').then((module) => module.ProjectListComponent),
     title: $localize`:@@page.projects.title:Projects`,
     data: {
       title: $localize`:@@page.projects.heading:Projects`,
@@ -26,7 +24,7 @@ export const routes: Routes = [
   },
   {
     path: 'projects/:projectId',
-    component: ProjectDashboardComponent,
+    loadComponent: () => import('./features/projects/project-dashboard.component').then((module) => module.ProjectDashboardComponent),
     title: $localize`:@@page.project.title:Project details`,
     data: {
       title: $localize`:@@page.project.heading:Project workspace`,
@@ -52,8 +50,18 @@ export const routes: Routes = [
     },
   },
   {
+    path: 'agents/new',
+    loadComponent: () => import('./features/agents/agent-editor.component').then((module) => module.AgentEditorComponent),
+    title: $localize`:@@page.agentCreate.title:Create agent`,
+  },
+  {
+    path: 'agents/:agentId',
+    loadComponent: () => import('./features/agents/agent-editor.component').then((module) => module.AgentEditorComponent),
+    title: $localize`:@@page.agent.title:Agent details`,
+  },
+  {
     path: 'agents',
-    component: FeaturePageComponent,
+    loadComponent: () => import('./features/agents/agent-list.component').then((module) => module.AgentListComponent),
     title: $localize`:@@page.agents.title:Agents`,
     data: {
       title: $localize`:@@page.agents.heading:Agents`,

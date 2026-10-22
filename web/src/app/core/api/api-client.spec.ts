@@ -47,4 +47,16 @@ describe('ApiClient', () => {
     request.flush({ id: 'p1' });
     expect(response).toEqual({ id: 'p1' });
   });
+
+  it('patches typed configuration to a resource path', () => {
+    let response: { id: string } | undefined;
+
+    client.patch<{ name: string }, { id: string }>('agents/a1', { name: 'Updated' }).subscribe((value) => (response = value));
+
+    const request = http.expectOne('http://127.0.0.1:3110/agents/a1');
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({ name: 'Updated' });
+    request.flush({ id: 'a1' });
+    expect(response).toEqual({ id: 'a1' });
+  });
 });

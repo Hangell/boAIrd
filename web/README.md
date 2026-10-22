@@ -28,4 +28,6 @@ Routes and feature pages live under `src/app`. Shared API transport is provided 
 
 The project list opens a project scoped overview using the existing project, task, Brain, agent, and run endpoints. The view reports blocked tasks and recent failed runs, and provides loading, empty, and retryable error states.
 
+The Agents route lists agents and provides create/detail configuration forms using the versioned agent and credential metadata endpoints. Agent status is read-only. API agents reference an existing credential by ID; the dashboard never requests or displays raw secrets. Role is a descriptive label, while capabilities remain an explicit configuration list. API failures use generic messages so internal server responses are not shown in the UI.
+
 Template strings use Angular `i18n` markers and TypeScript strings use `$localize` IDs. English is the source locale. The shell provides semantic landmarks, a keyboard skip link, visible focus indicators, and reduced-motion styling.

@@ -2013,7 +2013,7 @@ Each task has a persisted conversation. `GET` and `POST /api/v1/tasks/{id}/messa
 
 ## Dashboard foundation
 
-The standalone Angular dashboard lives in [`web/`](web/README.md). It uses Angular Material, SCSS, strict TypeScript, feature routes, a server-owned state model, and a local API base URL of `http://127.0.0.1:3110/api/v1` during development. The project list opens a project scoped overview of its Brain, assigned agents, task status, blocked work, and recent runs. Run `npm install`, `npm start`, and `npm run build` from `web/`.
+The standalone Angular dashboard lives in [`web/`](web/README.md). It uses Angular Material, SCSS, strict TypeScript, feature routes, a server-owned state model, and a local API base URL of `http://127.0.0.1:3110/api/v1` during development. The project list opens a project scoped overview of its Brain, assigned agents, task status, blocked work, and recent runs. The Agents screen lists, creates, and edits agent configuration through the versioned API; it displays only stored credential metadata, treats status as read-only, and keeps capabilities explicit rather than deriving them from role labels. Run `npm install`, `npm start`, and `npm run build` from `web/`.
 
 ---
 
