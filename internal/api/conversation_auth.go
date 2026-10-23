@@ -19,10 +19,10 @@ func localConversationPrincipal(r *http.Request, expectedToken []byte, sessions 
 		if err != nil {
 			return "", false
 		}
-		if sessions == nil || !sessions.valid(cookie.Value) {
+		if sessions == nil {
 			return "", false
 		}
-		return project.LocalAdministratorID, true
+		return sessions.valid(cookie.Value)
 	}
 	return localBearerPrincipal(authorization, expectedToken)
 }

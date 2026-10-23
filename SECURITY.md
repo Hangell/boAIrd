@@ -135,6 +135,40 @@ The Brain must never be able to:
 
 ---
 
+# Multi-User Isolation
+
+Human user identity is modeled separately from Agent and Brain identity:
+
+```text
+User (id, name, role: administrator | member)
+        │
+        ├── project_members(project_id, user_id, role: ADMIN | MEMBER)
+        │
+        └── session (opaque ID → user ID, in-memory, 30 minutes)
+```
+
+The seeded bootstrap administrator `local-administrator` is an administrator and
+is auto-added as `ADMIN` to every project. Administrators manage users and
+project membership through `user.manage`-guarded REST routes:
+
+```text
+GET/POST    /api/v1/users
+GET/DELETE  /api/v1/users/{id}
+POST        /api/v1/users/{id}/sessions     (administrator-issued user session)
+PUT/DELETE  /api/v1/projects/{id}/members/{userID}
+```
+
+Members are deny-by-default: they receive a read-only capability set and can
+access only projects they are members of. They cannot manage users, grant
+membership, or escalate their own role. The bootstrap administrator cannot be
+deleted, and its project membership cannot be revoked, preserving administrator
+authority. Deleting a user removes their memberships; membership revocation and
+user deletion invalidate that user's in-memory sessions. Task, conversation,
+credential, Run, and audit access remains project-scoped and is gated by the
+membership check in the Go API, never by the frontend.
+
+---
+
 # Brain Security
 
 The Brain has broad operational authority, but no administrative authority.
@@ -1204,7 +1238,17 @@ by default.
 
 # Local Mode
 
-Loopback binding controls network exposure; it does not replace authentication. Every versioned REST route other than status requires the local administrator token or a valid browser session. Browser cookies contain opaque server-side session IDs with a 30-minute lifetime and are revoked by logout; process restart invalidates all sessions. Cookie-authenticated unsafe requests require a trusted dashboard Origin. Capabilities are evaluated in the Go API and are independent of role labels and frontend controls. Project-scoped operations require membership. Denials fail closed and are recorded in the immutable authorization denial table. The current deployment has a single administrator identity; multi-user policy management remains future work.
+Loopback binding controls network exposure; it does not replace authentication. Every versioned REST route other than status requires the local administrator token or a valid browser session. Browser cookies contain opaque server-side session IDs with a 30-minute lifetime and are revoked by logout; process restart invalidates all sessions. Cookie-authenticated unsafe requests require a trusted dashboard Origin. Capabilities are evaluated in the Go API and are independent of role labels and frontend controls. Project-scoped operations require membership. Denials fail closed and are recorded in the immutable authorization denial table.
+
+Human users are modeled in the `users` table, kept separate from Agent and Brain
+identity. The seeded `local-administrator` is the bootstrap administrator and is
+always a member of every project. Administrators manage users and project
+membership through `user.manage`-guarded routes. Members receive a read-only,
+deny-by-default capability set and can access only projects they are members of;
+they cannot create users, grant membership, or escalate their own authority.
+Sessions are bound to a user identity, and an administrator can issue a session
+for any user. Deleting a user removes their memberships, and revoking a
+membership denies that user immediately on the next request.
 
 Default:
 

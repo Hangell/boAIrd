@@ -109,6 +109,16 @@ func (r *ProjectRepository) IsMember(ctx context.Context, projectID, userID stri
 	return member, nil
 }
 
+// Exists reports whether a project row exists regardless of lifecycle state.
+func (r *ProjectRepository) Exists(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := r.database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)", id).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check project existence: %w", err)
+	}
+	return exists, nil
+}
+
 const projectSelect = `SELECT id, name, description, status, COALESCE(brain_id, ''),
 	workspace_path, repository_url, human_review_required FROM projects`
 

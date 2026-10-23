@@ -1885,17 +1885,36 @@ Do not implement this until the gate opens and the ADR is approved.
 
 # Phase 38 — Multi-User
 
-Future.
-
 Implement:
 
 ```text
 Users
-Organizations
 Roles
-Permissions
 Project membership
 ```
+
+## Implemented
+
+- `internal/user` — `User` identity (`administrator` / `member`) and a `Service`
+  enforcing user and membership rules, kept separate from Agent and Brain
+  identity. The seeded `local-administrator` is the bootstrap administrator and
+  cannot be deleted or demoted.
+- `internal/storage/users.go` + migration `0025_users.sql` persist users and
+  manage the existing `project_members` table (grant/update/revoke membership).
+  Deleting a user removes their memberships.
+- Authorization resolves the authenticated user from the bearer token or a
+  user-bound session and checks project membership before capability
+  evaluation. Administrators receive the full capability set; members receive a
+  read-only, deny-by-default set and can access only their own projects.
+- Sessions are bound to a user identity; an administrator can issue a session
+  for any user (`POST /api/v1/users/{id}/sessions`), and membership revocation
+  denies immediately on the next request.
+- API: `GET/POST /api/v1/users`, `GET/DELETE /api/v1/users/{id}`, and
+  `PUT/DELETE /api/v1/projects/{id}/members/{userID}`, all gated by the
+  `user.manage` capability.
+- Tests cover user CRUD, bootstrap-administrator protection, membership
+  grant/revoke, member deny-by-default, cross-project isolation, and
+  privilege-escalation denial.
 
 ---
 

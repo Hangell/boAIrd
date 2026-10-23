@@ -15,7 +15,7 @@ func registerSessionRoutes(mux *http.ServeMux, database DatabaseHealth, expected
 			writeConversationUnauthorized(w)
 			return
 		}
-		identifier, expiresAt, err := sessions.create()
+		identifier, expiresAt, err := sessions.create(project.LocalAdministratorID)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not create a browser session")
 			return
