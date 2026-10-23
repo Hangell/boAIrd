@@ -1181,6 +1181,8 @@ boaird.context.get
 boaird.brain.request
 
 boaird.run.get
+
+boaird.shell.execute (only when explicitly enabled)
 ```
 
 Tool inputs and required capabilities:
@@ -1201,6 +1203,7 @@ Tool inputs and required capabilities:
 | `boaird.context.get` | `task_id` | Workers require `task.read` and `conversation.read` with exact assignment; the active Brain requires both capabilities and scope to its own project; at most 20 messages; project metadata is included only with effective project scope and `project.read` |
 | `boaird.brain.request` | `project_id`, `objective`, optional `max_tokens` (1–4096; default 2048) | `brain.execute`; API-backed active Brain only. An MCP Brain uses its authenticated MCP tools directly |
 | `boaird.run.get` | `run_id` | `run.read`; persisted project membership or the authenticated Agent's active Brain relationship for the run's project; run ownership alone does not grant access |
+| `boaird.shell.execute` | `project_id`, `executable`, optional structured `arguments`, optional `working_directory` | `shell.execute` and persisted project membership or active-Brain scope; the executable must be in the administrator allowlist |
 
 An active Brain's scope is derived from the Brain-to-project relationship and is
 limited to that one project; it does not create duplicate Agent project
@@ -2096,6 +2099,8 @@ The service reads these optional environment variables:
 | `BOAIRD_ORCHESTRATOR_TIMEOUT` | `5m` | Maximum duration of one worker execution. Timeouts are recorded as cancelled Runs and handled through the bounded retry flow. |
 | `BOAIRD_CONTEXT_MAX_BYTES` | `16384` | Maximum serialized worker context size in bytes; valid range is 512 bytes to 1 MiB. |
 | `BOAIRD_CONTEXT_MAX_TOKENS` | `4096` | Maximum estimated worker context tokens; valid range is 128 to 100,000. |
+| `BOAIRD_SHELL_ENABLED` | `false` | Enables the controlled `boaird.shell.execute` MCP tool. Requires a non-empty executable allowlist. |
+| `BOAIRD_SHELL_ALLOWED_EXECUTABLES` | Empty | Comma-separated executable names or paths trusted by the administrator. The tool passes structured arguments directly and does not provide an OS filesystem sandbox. |
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
 

@@ -128,7 +128,7 @@ func (e *Enforcer) Execute(ctx context.Context, request Request) (json.RawMessag
 	}
 	executionCtx, cancel := context.WithTimeout(ctx, contract.Limits.Timeout)
 	defer cancel()
-	output, err := value.execute(executionCtx, input)
+	output, err := value.execute(executionCtx, request, input)
 	if err == nil && errors.Is(executionCtx.Err(), context.DeadlineExceeded) {
 		if e.record(ctx, request, "timeout") != nil {
 			return nil, ErrAudit

@@ -48,6 +48,8 @@ type Config struct {
 	OrchestratorTimeout     time.Duration
 	ContextMaxBytes         int
 	ContextMaxTokens        int
+	ShellEnabled            bool
+	ShellAllowedExecutables []string
 }
 
 // MCPAgentToken registers one MCP bearer token for an existing Agent identity.
@@ -137,6 +139,14 @@ func Load() (Config, error) {
 	}
 	cfg.ProviderAllowedHosts = splitList(os.Getenv("BOAIRD_PROVIDER_ALLOWED_HOSTS"))
 	cfg.ProviderAllowedIPRanges = splitList(os.Getenv("BOAIRD_PROVIDER_ALLOWED_IP_RANGES"))
+	if rawEnabled, ok := os.LookupEnv("BOAIRD_SHELL_ENABLED"); ok {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(rawEnabled))
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_SHELL_ENABLED: %w", err)
+		}
+		cfg.ShellEnabled = enabled
+	}
+	cfg.ShellAllowedExecutables = splitExactList(os.Getenv("BOAIRD_SHELL_ALLOWED_EXECUTABLES"))
 	var durationErr error
 	if cfg.AgentStaleAfter, durationErr = envDuration("BOAIRD_AGENT_STALE_AFTER", defaultAgentStaleAfter); durationErr != nil {
 		return Config{}, durationErr
@@ -239,6 +249,12 @@ func (c Config) Validate() error {
 	if c.ContextMaxTokens < 128 || c.ContextMaxTokens > maximumContextMaxTokens {
 		return fmt.Errorf("BOAIRD_CONTEXT_MAX_TOKENS must be between 128 and %d", maximumContextMaxTokens)
 	}
+	if c.ShellEnabled && len(c.ShellAllowedExecutables) == 0 {
+		return fmt.Errorf("BOAIRD_SHELL_ALLOWED_EXECUTABLES must be set when BOAIRD_SHELL_ENABLED is true")
+	}
+	if len(c.ShellAllowedExecutables) > 64 {
+		return fmt.Errorf("BOAIRD_SHELL_ALLOWED_EXECUTABLES must contain at most 64 executable names")
+	}
 	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
 	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))
 	for _, entry := range c.MCPAgentTokens {
@@ -282,6 +298,21 @@ func splitList(value string) []string {
 		part = strings.TrimSpace(part)
 		if part != "" {
 			result = append(result, strings.ToLower(strings.TrimSuffix(part, ".")))
+		}
+	}
+	return result
+}
+
+func splitExactList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
 		}
 	}
 	return result

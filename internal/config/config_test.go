@@ -11,7 +11,7 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES",
 		"BOAIRD_AGENT_STALE_AFTER", "BOAIRD_AGENT_OFFLINE_AFTER", "BOAIRD_AGENT_STATUS_INTERVAL",
 		"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS", "BOAIRD_ORCHESTRATOR_TIMEOUT")
-	unsetEnvironment(t, "BOAIRD_CONTEXT_MAX_BYTES", "BOAIRD_CONTEXT_MAX_TOKENS")
+	unsetEnvironment(t, "BOAIRD_CONTEXT_MAX_BYTES", "BOAIRD_CONTEXT_MAX_TOKENS", "BOAIRD_SHELL_ENABLED", "BOAIRD_SHELL_ALLOWED_EXECUTABLES")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -30,6 +30,39 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.ContextMaxBytes != defaultContextMaxBytes || cfg.ContextMaxTokens != defaultContextMaxTokens {
 		t.Fatalf("context defaults = %d bytes/%d tokens", cfg.ContextMaxBytes, cfg.ContextMaxTokens)
+	}
+	if cfg.ShellEnabled || len(cfg.ShellAllowedExecutables) != 0 {
+		t.Fatalf("shell defaults = enabled %t, allowed %v; want disabled without executables", cfg.ShellEnabled, cfg.ShellAllowedExecutables)
+	}
+}
+
+func TestLoadParsesShellPolicyWithoutChangingExecutableNames(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_SHELL_ENABLED", "true")
+	t.Setenv("BOAIRD_SHELL_ALLOWED_EXECUTABLES", "/usr/local/bin/Go, npm")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ShellEnabled || len(cfg.ShellAllowedExecutables) != 2 || cfg.ShellAllowedExecutables[0] != "/usr/local/bin/Go" || cfg.ShellAllowedExecutables[1] != "npm" {
+		t.Fatalf("shell policy = enabled %t, allowlist %q", cfg.ShellEnabled, cfg.ShellAllowedExecutables)
+	}
+}
+
+func TestLoadRejectsShellEnabledWithoutAllowlist(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_SHELL_ENABLED", "true")
+	t.Setenv("BOAIRD_SHELL_ALLOWED_EXECUTABLES", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted enabled shell without an executable allowlist")
+	}
+}
+
+func TestLoadRejectsMalformedShellEnabled(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_SHELL_ENABLED", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted a malformed shell enable flag")
 	}
 }
 

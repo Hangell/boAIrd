@@ -99,7 +99,7 @@ type Tool interface {
 	validDefinition() bool
 	frozen() Tool
 	decodeAndValidate(json.RawMessage) (any, error)
-	execute(context.Context, any) (json.RawMessage, error)
+	execute(context.Context, Request, any) (json.RawMessage, error)
 }
 
 // Definition adapts a typed input/output tool to the registry contract.
@@ -108,12 +108,13 @@ type Definition[I, O any] struct {
 	Validate       func(I) error
 	ValidateOutput func(O) error
 	Run            func(context.Context, I) (O, error)
+	RunWithRequest func(context.Context, Request, I) (O, error)
 }
 
 func (d Definition[I, O]) Contract() Contract { return cloneContract(d.Metadata) }
 
 func (d Definition[I, O]) validDefinition() bool {
-	return d.Validate != nil && d.ValidateOutput != nil && d.Run != nil
+	return d.Validate != nil && d.ValidateOutput != nil && ((d.Run != nil) != (d.RunWithRequest != nil))
 }
 
 func (d Definition[I, O]) frozen() Tool {
@@ -139,12 +140,20 @@ func (d Definition[I, O]) decodeAndValidate(raw json.RawMessage) (any, error) {
 	return input, nil
 }
 
-func (d Definition[I, O]) execute(ctx context.Context, value any) (json.RawMessage, error) {
+func (d Definition[I, O]) execute(ctx context.Context, request Request, value any) (json.RawMessage, error) {
 	input, ok := value.(I)
-	if !ok || d.Run == nil {
+	if !ok {
 		return nil, ErrExecution
 	}
-	output, err := d.Run(ctx, input)
+	var output O
+	var err error
+	if d.RunWithRequest != nil {
+		output, err = d.RunWithRequest(ctx, request, input)
+	} else if d.Run != nil {
+		output, err = d.Run(ctx, input)
+	} else {
+		return nil, ErrExecution
+	}
 	if err != nil {
 		return nil, ErrExecution
 	}

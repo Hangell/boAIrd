@@ -13,6 +13,8 @@ var ErrDenied = errors.New("authorization denied")
 
 type Capability string
 
+const ShellExecute Capability = "shell.execute"
+
 func New(identifier string) (Capability, error) {
 	if strings.TrimSpace(identifier) != identifier || !identifierPattern.MatchString(identifier) {
 		return "", errors.New("capability must be a lowercase dotted identifier")
