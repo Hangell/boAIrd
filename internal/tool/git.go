@@ -559,11 +559,15 @@ func resolveGitPushRemote(ctx context.Context, repoRoot, requested string) (stri
 	if !gitRemotePattern.MatchString(remote) {
 		return "", ErrGitPolicy
 	}
-	remoteURL, _, _, err := runGitCommand(ctx, repoRoot, 4096, "remote", "get-url", "--push", remote)
-	if err != nil {
+	remoteURLs, _, truncated, err := runGitCommand(ctx, repoRoot, 4096, "remote", "get-url", "--push", "--all", remote)
+	if err != nil || truncated {
 		return "", ErrGitPolicy
 	}
-	parsed, err := url.Parse(strings.TrimSpace(remoteURL))
+	remoteURLs = strings.TrimSuffix(remoteURLs, "\n")
+	if remoteURLs == "" || strings.Contains(remoteURLs, "\n") {
+		return "", ErrGitPolicy
+	}
+	parsed, err := url.Parse(remoteURLs)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", ErrGitPolicy
 	}

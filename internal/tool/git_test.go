@@ -386,6 +386,27 @@ func TestGitPushRejectsNonHTTPSOrCredentialBearingRemote(t *testing.T) {
 	}
 }
 
+func TestGitPushRejectsMultiplePushURLsAndAllowsOneValidatedURL(t *testing.T) {
+	root := gitWorkspace(t)
+	runGitFixture(t, root, "remote", "add", "origin", "https://example.invalid/repo.git")
+	if remote, err := resolveGitPushRemote(context.Background(), root, "origin"); err != nil || remote != "origin" {
+		t.Fatalf("single HTTPS push URL = %q, error = %v; want origin and no error", remote, err)
+	}
+
+	runGitFixture(t, root, "config", "--add", "remote.origin.pushurl", "https://example.invalid/first.git")
+	runGitFixture(t, root, "config", "--add", "remote.origin.pushurl", "https://user:secret@other.invalid/second.git")
+	if _, err := resolveGitPushRemote(context.Background(), root, "origin"); !errors.Is(err, ErrGitPolicy) {
+		t.Fatalf("multiple push URLs with unvalidated second destination error = %v, want policy rejection", err)
+	}
+
+	runGitFixture(t, root, "config", "--unset-all", "remote.origin.pushurl")
+	runGitFixture(t, root, "config", "--add", "remote.origin.pushurl", "https://user:secret@other.invalid/first.git")
+	runGitFixture(t, root, "config", "--add", "remote.origin.pushurl", "https://example.invalid/second.git")
+	if _, err := resolveGitPushRemote(context.Background(), root, "origin"); !errors.Is(err, ErrGitPolicy) {
+		t.Fatalf("multiple push URLs with credential-bearing first destination error = %v, want policy rejection", err)
+	}
+}
+
 func TestGitPushTargetsOnlyOneExistingLocalBranch(t *testing.T) {
 	root := gitWorkspace(t)
 	if branch, err := resolveGitPushBranch(context.Background(), root, ""); err != nil || branch != "main" {

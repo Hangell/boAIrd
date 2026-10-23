@@ -1556,8 +1556,9 @@ Git Manager Agent
   task in the same project when required; a policy lookup error denies the
   operation. Supplied task/run IDs are validated against project and task scope
   before audit. Git subprocesses use a minimal environment, ignore system and
-  global config, disable hooks, credential helpers, and SSH, permit only HTTPS
-  remotes without embedded credentials, push one existing local branch, and
+  global config, disable hooks, credential helpers, and SSH, enumerate and
+  validate exactly one HTTPS push URL without embedded credentials, reject
+  zero or multiple destinations, push one existing local branch, and
   reject external merge drivers, filters, and URL-specific transport
   credentials. Commands use structured `git -C` arguments, never `sh -c`;
   output is bounded and redacted; timeouts apply.

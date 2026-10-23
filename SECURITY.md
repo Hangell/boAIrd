@@ -667,7 +667,9 @@ agent/configuration or other host environment variables. URL-specific HTTP
 credential/proxy settings in repository config are rejected. Only HTTPS remote
 transport is enabled; credential-bearing remote URLs are rejected, and
 terminal prompting is disabled. Push targets exactly one checked-out local
-branch. Git operations therefore cannot reuse host Git/SSH credentials;
+branch and requires exactly one configured push URL; all URLs are enumerated
+before validation, and zero or multiple destinations are rejected. Git
+operations therefore cannot reuse host Git/SSH credentials;
 authenticated remote operations require a future dedicated credential
 integration. Diff/show disable external diff and text conversion, and merge
 rejects repositories with configured external merge drivers or
