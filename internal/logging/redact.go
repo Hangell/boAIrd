@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -90,3 +91,24 @@ func redactText(value string) string {
 
 // RedactSensitiveText removes common credentials and secret assignments from stored or displayed text.
 func RedactSensitiveText(value string) string { return redactText(value) }
+
+// ContainsSensitiveText reports whether text still contains a recognizable secret
+// pattern. Redaction markers produced by RedactSensitiveText are ignored.
+func ContainsSensitiveText(value string) bool {
+	normalized := strings.ReplaceAll(value, "[REDACTED PRIVATE KEY]", "")
+	normalized = strings.ReplaceAll(normalized, "[REDACTED]", "")
+	return privateKeyPattern.MatchString(normalized) ||
+		bearerPattern.MatchString(normalized) ||
+		keyPattern.MatchString(normalized) ||
+		assignmentPattern.MatchString(normalized)
+}
+
+// SanitizeSensitiveText redacts known secret patterns and fails closed when
+// recognizable secret content remains after redaction.
+func SanitizeSensitiveText(value string) (string, error) {
+	cleaned := redactText(value)
+	if ContainsSensitiveText(cleaned) {
+		return "", errors.New("sensitive content remains after redaction")
+	}
+	return cleaned, nil
+}

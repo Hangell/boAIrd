@@ -17,6 +17,7 @@ import (
 	agentcontext "boAIrd/internal/context"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/logging"
+	"boAIrd/internal/memory"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/runtime"
@@ -86,6 +87,16 @@ type ConversationContextReader interface {
 	GetPageForAgent(context.Context, string, string, string, int) (conversation.Conversation, []conversation.Message, string, error)
 }
 
+type ProjectMemory interface {
+	Select(context.Context, string, string, int) (memory.Selection, error)
+	Record(context.Context, string, memory.RecordInput) (memory.Summary, error)
+	Prune(context.Context, string) (int, error)
+}
+
+type MemorySummarizer interface {
+	Summarize(context.Context, string, string, int) (brain.Execution, error)
+}
+
 // FailureAdvisor lets the project Brain analyze a worker failure before retrying.
 type FailureAdvisor interface {
 	Analyze(context.Context, string, string, string) (string, error)
@@ -101,6 +112,8 @@ type Dependencies struct {
 	Executor      runtime.Executor
 	Conversations ConversationWriter
 	ContextReader ConversationContextReader
+	Memory        ProjectMemory
+	Summarizer    MemorySummarizer
 	Escalations   audit.Recorder
 	Advisor       FailureAdvisor
 	Config        Config
@@ -146,6 +159,8 @@ type Service struct {
 	conversations ConversationWriter
 	contextReader ConversationContextReader
 	contextEngine *agentcontext.Engine
+	memory        ProjectMemory
+	summarizer    MemorySummarizer
 	escalations   audit.Recorder
 	advisor       FailureAdvisor
 	config        Config
@@ -195,6 +210,7 @@ func New(dependencies Dependencies) (*Service, error) {
 		tasks: dependencies.Tasks, runs: dependencies.Runs, agents: dependencies.Agents, projects: dependencies.Projects,
 		brains: dependencies.Brains, executor: dependencies.Executor, conversations: dependencies.Conversations,
 		contextReader: dependencies.ContextReader, contextEngine: contextEngine,
+		memory: dependencies.Memory, summarizer: dependencies.Summarizer,
 		escalations: dependencies.Escalations, advisor: dependencies.Advisor, config: config,
 	}, nil
 }
@@ -315,9 +331,18 @@ func (s *Service) Review(ctx context.Context, taskID string, decision ReviewDeci
 			summary += ": " + reason
 		}
 		if work.HumanReview() {
-			return s.tasks.Transition(ctx, work.ID(), task.StatusHumanReview, summary+"; human review required", brainActor)
+			approved, err := s.tasks.Transition(ctx, work.ID(), task.StatusHumanReview, summary+"; human review required", brainActor)
+			if err != nil {
+				return task.Task{}, err
+			}
+			return approved, nil
 		}
-		return s.tasks.Transition(ctx, work.ID(), task.StatusDone, summary, brainActor)
+		approved, err := s.tasks.Transition(ctx, work.ID(), task.StatusDone, summary, brainActor)
+		if err != nil {
+			return task.Task{}, err
+		}
+		s.recordTaskMemory(ctx, p, b, work)
+		return approved, nil
 	case DecisionRework:
 		if reason == "" {
 			return task.Task{}, fmt.Errorf("%w: rework reason is required", ErrInvalidRequest)
@@ -355,6 +380,26 @@ func (s *Service) Review(ctx context.Context, taskID string, decision ReviewDeci
 	default:
 		return task.Task{}, fmt.Errorf("%w: review decision must be APPROVE or REWORK", ErrInvalidRequest)
 	}
+}
+
+// RecordHumanReviewCompletion stores project memory only after a human-approved task reaches DONE.
+func (s *Service) RecordHumanReviewCompletion(ctx context.Context, completed task.Task) error {
+	if !completed.HumanReview() || completed.Status() != task.StatusDone || completed.LastActorType() != task.ActorAdministrator {
+		return fmt.Errorf("task %s is not a human-approved completion", completed.ID())
+	}
+	p, err := s.projects.Get(ctx, completed.ProjectID())
+	if err != nil {
+		return err
+	}
+	b, err := s.brains.GetActiveByProject(ctx, completed.ProjectID())
+	if err != nil {
+		return err
+	}
+	if _, err := s.authorizeBrain(ctx, b, p); err != nil {
+		return err
+	}
+	s.recordTaskMemory(ctx, p, b, completed)
+	return nil
 }
 
 func (s *Service) execute(ctx context.Context, p project.Project, b brain.Brain, work task.Task, a agent.Agent, attempt int, instructions string) (ExecutionOutcome, error) {

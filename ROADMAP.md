@@ -1338,7 +1338,7 @@ Remote Runtime
 
 Select context intelligently.
 
-Initial implementation: bounded project/task context composition for API Agent Runs with source/trust provenance, deterministic selection, conversation and same-task Run history, and explicit omission reporting. Files, memory, Git, issues, PRs, and documentation require scoped readers and remain unavailable until those are implemented.
+Initial implementation: bounded project/task context composition for API Agent Runs with source/trust provenance, deterministic selection, project memory, authorized conversation and same-task Run history, and explicit omission reporting. Files, Git, issues, PRs, and documentation require scoped readers and remain unavailable until those are implemented.
 
 Final context:
 
@@ -1404,6 +1404,27 @@ Task History
 Raw history remains available.
 
 However, it does not need to be sent to models on every run.
+
+---
+
+## Implemented
+
+- `internal/memory` — provider-independent `Summary` domain and `Service`
+  (`Record`, `List`, `Decisions`, `Select`, `Prune`).
+- `internal/storage/memory.go` + migration `0019_project_memory.sql` — versioned
+  summaries keyed by `(project_id, category, version)`, with source provenance.
+- App wiring connects the Memory Service to task context selection. Work without
+  Human Review is summarized after Brain approval; with Human Review, summaries
+  are recorded only after the task transitions from `HUMAN_REVIEW` to `DONE`.
+- Version numbers are allocated atomically by SQLite; archived projects reject
+  both recording and pruning.
+- Secrets are redacted before persistence; redaction is fail-closed.
+- `Architecture Decision` and `Project Decision` summaries are canonical and are
+  never pruned. Ephemeral categories retain the newest
+  `MaxSummariesPerCategory` summaries per category.
+- `Select` returns a bounded, reproducible selection and reports omitted items,
+  so raw history is never sent to a model in full.
+- Raw conversations and runs are never deleted; only summaries are pruned.
 
 ---
 

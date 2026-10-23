@@ -37,3 +37,31 @@ func TestRedactSensitiveTextHandlesJSONAndCommonTokens(t *testing.T) {
 		t.Fatalf("redacted text = %q", output)
 	}
 }
+
+func TestContainsSensitiveTextIgnoresRedactionMarkers(t *testing.T) {
+	cleaned := RedactSensitiveText("token sk-1234567890abcdefgh and password=message-key")
+	if ContainsSensitiveText(cleaned) {
+		t.Fatalf("redacted text reported sensitive: %q", cleaned)
+	}
+	if !ContainsSensitiveText("leaked key sk-1234567890abcdefgh") {
+		t.Fatal("expected raw key to be detected as sensitive")
+	}
+	if !ContainsSensitiveText("-----BEGIN PRIVATE KEY-----\ncontent\n-----END PRIVATE KEY-----") {
+		t.Fatal("expected private key block to be detected as sensitive")
+	}
+}
+
+func TestSanitizeSensitiveText(t *testing.T) {
+	cleaned, err := SanitizeSensitiveText("use key sk-1234567890abcdefgh going forward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cleaned, "sk-1234567890abcdefgh") || !strings.Contains(cleaned, "[REDACTED]") {
+		t.Fatalf("unexpected sanitized output: %q", cleaned)
+	}
+	// A bearer token followed by more token characters leaves a recognizable
+	// bearer pattern behind after the first redaction pass.
+	if _, err := SanitizeSensitiveText("Bearer abc def"); err == nil {
+		t.Fatal("expected fail-closed error when redaction is incomplete")
+	}
+}

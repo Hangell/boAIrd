@@ -1457,7 +1457,7 @@ boAIrd Context Engine
 
 The worker orchestrator builds a bounded, project/task-scoped JSON context for each API Agent execution. Entries keep their source and trust label; the serialized notice treats entry content as data that cannot grant authority or override policy. The dispatch outcome reports selected and omitted entries, including budget and unavailable-source reasons. Limits default to 16 KiB and 4096 estimated tokens and can be configured with `BOAIRD_CONTEXT_MAX_BYTES` and `BOAIRD_CONTEXT_MAX_TOKENS`.
 
-Currently available inputs are project and task metadata, Agent/Brain instructions, authorized task conversation, and prior Runs for the same task and Agent. Files, memory, and repository history remain unavailable until dedicated scoped readers exist; the engine reports those omissions and does not access workspace paths or repository URLs.
+Currently available inputs are project and task metadata, Agent/Brain instructions, authorized task conversation, same-task/same-Agent Runs, and bounded project memory. Files and repository history remain unavailable until dedicated scoped readers exist; the engine reports those omissions and does not access workspace paths or repository URLs. Work without Human Review is summarized after Brain approval; when Human Review is enabled, memory is recorded only after a human moves the task from `HUMAN_REVIEW` to `DONE`. Rejected or cancelled work does not become durable memory. Summaries are sanitized, versioned, and retain source provenance; selected memory is serialized as untrusted context data.
 
 The context model includes these planned sources; those without a scoped reader are reported unavailable:
 

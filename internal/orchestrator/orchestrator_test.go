@@ -15,6 +15,7 @@ import (
 	"boAIrd/internal/brain"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
+	"boAIrd/internal/memory"
 	"boAIrd/internal/orchestrator"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
@@ -28,6 +29,15 @@ type fakeExecutor struct {
 	calls   []runtime.Request
 	outputs []string
 	errs    []error
+}
+
+type fakeMemorySummarizer struct{}
+
+func (fakeMemorySummarizer) Summarize(_ context.Context, _, objective string, _ int) (brain.Execution, error) {
+	if !strings.Contains(objective, "delivered work") {
+		return brain.Execution{}, errors.New("summary input is missing completed Run output")
+	}
+	return brain.Execution{Content: "The assigned change was implemented and delivered."}, nil
 }
 
 func (f *fakeExecutor) Execute(_ context.Context, request runtime.Request) (runtime.Result, error) {
@@ -77,6 +87,7 @@ type fixture struct {
 	brainRepository orchestrator.BrainReader
 	conversations   *conversation.Service
 	brainService    *brain.Service
+	memory          *memory.Service
 	project         project.Project
 	brain           brain.Brain
 	worker          agent.Agent
@@ -171,6 +182,14 @@ func newFixture(t *testing.T, options fixtureOptions) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	memoryRepository, err := storage.NewMemoryRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memoryService, err := memory.NewService(memoryRepository, projectManager, memory.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	configuredBrain, err := brainService.Create(ctx, value.ID(), brain.CreateInput{AgentID: brainAgent.ID(), Autonomy: brain.AutonomyAutonomous})
 	if err != nil {
 		t.Fatal(err)
@@ -196,6 +215,7 @@ func newFixture(t *testing.T, options fixtureOptions) *fixture {
 	service, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
 		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService, Escalations: escalations,
+		Memory: memoryService, Summarizer: fakeMemorySummarizer{},
 		Config: orchestrator.Config{MaxAttempts: options.maxAttempts},
 	})
 	if err != nil {
@@ -203,7 +223,7 @@ func newFixture(t *testing.T, options fixtureOptions) *fixture {
 	}
 	return &fixture{
 		database: database, projects: projectManager, agents: agentManager, tasks: taskService, runs: runRepository,
-		brainRepository: brainRepository, conversations: conversationService, brainService: brainService, project: value, brain: configuredBrain,
+		brainRepository: brainRepository, conversations: conversationService, brainService: brainService, memory: memoryService, project: value, brain: configuredBrain,
 		worker: worker, brainAgent: brainAgent, executor: executor, escalations: escalations, service: service,
 	}
 }
@@ -238,6 +258,11 @@ func TestDispatchExecutesTaskAndReviewCompletes(t *testing.T) {
 	f := newFixture(t, fixtureOptions{maxAttempts: 3})
 	ctx := context.Background()
 	ready := f.readyTask(t, ctx)
+	if _, err := f.memory.Record(ctx, f.project.ID(), memory.RecordInput{
+		Category: memory.CategoryKnownProblem, Content: "assigned change persist safely", CreatedByType: "brain", CreatedBy: f.brain.AgentID(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	report, err := f.service.Dispatch(ctx, f.project.ID())
 	if err != nil {
@@ -252,6 +277,9 @@ func TestDispatchExecutesTaskAndReviewCompletes(t *testing.T) {
 	}
 	if len(selection.Selected) < 2 {
 		t.Fatalf("context selection omitted project/task inputs: %+v", selection.Selected)
+	}
+	if !strings.Contains(f.executor.Calls()[0].Input, "assigned change persist safely") {
+		t.Fatalf("executor input missing selected project memory: %q", f.executor.Calls()[0].Input)
 	}
 	calls := f.executor.Calls()
 	if len(calls) != 1 || calls[0].TaskID != ready.ID() || calls[0].AgentID != f.worker.ID() {
@@ -285,6 +313,23 @@ func TestDispatchExecutesTaskAndReviewCompletes(t *testing.T) {
 	}
 	if completed.Status() != task.StatusDone {
 		t.Fatalf("task status after approval = %s", completed.Status())
+	}
+	memoryValues, err := f.memory.List(ctx, f.project.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundTaskSummary := false
+	for _, value := range memoryValues {
+		if value.Category() != memory.CategoryTaskHistory {
+			continue
+		}
+		foundTaskSummary = true
+		if !strings.Contains(value.Content(), "implemented and delivered") || len(value.SourceIDs()) < 2 || value.CreatedByType() != "brain" {
+			t.Fatalf("unexpected generated task memory: %+v", value)
+		}
+	}
+	if !foundTaskSummary {
+		t.Fatal("Brain approval did not persist a task history summary")
 	}
 }
 
@@ -411,6 +456,13 @@ func TestHumanReviewIsPreserved(t *testing.T) {
 	if _, err := f.service.Review(ctx, ready.ID(), orchestrator.DecisionApprove, "again"); !errors.Is(err, orchestrator.ErrTaskNotInReview) {
 		t.Fatalf("second review error = %v, want ErrTaskNotInReview", err)
 	}
+	memoryValues, err := f.memory.List(ctx, f.project.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memoryValues) != 0 {
+		t.Fatalf("Brain persisted memory before human approval: %+v", memoryValues)
+	}
 
 	completed, err := f.tasks.Transition(ctx, ready.ID(), task.StatusDone, "administrator approved", f.adminActor())
 	if err != nil {
@@ -418,6 +470,46 @@ func TestHumanReviewIsPreserved(t *testing.T) {
 	}
 	if completed.Status() != task.StatusDone {
 		t.Fatalf("task status = %s, want DONE", completed.Status())
+	}
+	if err := f.service.RecordHumanReviewCompletion(ctx, completed); err != nil {
+		t.Fatalf("record memory after human approval: %v", err)
+	}
+	memoryValues, err = f.memory.List(ctx, f.project.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memoryValues) != 1 || memoryValues[0].Category() != memory.CategoryTaskHistory {
+		t.Fatalf("memory after human approval = %+v, want one task history summary", memoryValues)
+	}
+}
+
+func TestHumanReviewRejectionDoesNotPersistMemory(t *testing.T) {
+	f := newFixture(t, fixtureOptions{humanReview: true, maxAttempts: 3})
+	ctx := context.Background()
+	ready := f.readyTask(t, ctx)
+	if _, err := f.service.Dispatch(ctx, f.project.ID()); err != nil {
+		t.Fatal(err)
+	}
+	awaitingHuman, err := f.service.Review(ctx, ready.ID(), orchestrator.DecisionApprove, "awaiting human approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeDone, err := awaitingHuman.Transition(task.StatusDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.RecordHumanReviewCompletion(ctx, fakeDone); err == nil {
+		t.Fatal("Brain transition was accepted as human approval")
+	}
+	if _, err := f.tasks.Transition(ctx, ready.ID(), task.StatusWorking, "human rejected; rework required", f.adminActor()); err != nil {
+		t.Fatal(err)
+	}
+	memoryValues, err := f.memory.List(ctx, f.project.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memoryValues) != 0 {
+		t.Fatalf("rejected human review left durable project memory: %+v", memoryValues)
 	}
 }
 

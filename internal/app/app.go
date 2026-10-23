@@ -16,6 +16,7 @@ import (
 	"boAIrd/internal/heartbeat"
 	"boAIrd/internal/mcpserver"
 	"boAIrd/internal/mcptoken"
+	"boAIrd/internal/memory"
 	"boAIrd/internal/orchestrator"
 	"boAIrd/internal/project"
 	"boAIrd/internal/provider"
@@ -56,6 +57,14 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	projectManager, err := project.NewManager(projectRepository)
 	if err != nil {
 		return fmt.Errorf("initialize project manager: %w", err)
+	}
+	memoryRepository, err := storage.NewMemoryRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize memory repository: %w", err)
+	}
+	memoryService, err := memory.NewService(memoryRepository, projectManager, memory.Config{})
+	if err != nil {
+		return fmt.Errorf("initialize memory service: %w", err)
 	}
 	credentialRepository, err := storage.NewCredentialRepository(database)
 	if err != nil {
@@ -182,6 +191,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
 		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService,
+		Memory: memoryService, Summarizer: brainService,
 		Escalations: auditRepository, Advisor: brainAdvisor{service: brainService},
 		Config: orchestrator.Config{
 			MaxAttempts: cfg.OrchestratorMaxAttempts, ExecutionTimeout: cfg.OrchestratorTimeout,

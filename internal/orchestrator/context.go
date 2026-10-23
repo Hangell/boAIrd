@@ -19,7 +19,7 @@ type runContextReader interface {
 }
 
 func (s *Service) selectExecutionContext(ctx context.Context, p project.Project, b brain.Brain, work task.Task, worker agent.Agent, attempt int, instructions string) (agentcontext.Result, error) {
-	unavailable := []agentcontext.Source{agentcontext.SourceFile, agentcontext.SourceMemory, agentcontext.SourceRepository}
+	unavailable := []agentcontext.Source{agentcontext.SourceFile, agentcontext.SourceRepository}
 	candidates := []agentcontext.Candidate{
 		{
 			ID: "project:" + p.ID(), ProjectID: p.ID(), Source: agentcontext.SourceProject,
@@ -52,6 +52,26 @@ func (s *Service) selectExecutionContext(ctx context.Context, p project.Project,
 			ID: "agent-instructions:" + worker.ID(), ProjectID: work.ProjectID(), TaskID: work.ID(),
 			Source: agentcontext.SourceAgent, Trust: agentcontext.TrustAgent, Priority: 70, Content: agentInstructions,
 		})
+	}
+	var memoryOmissions []agentcontext.Omission
+	if s.memory == nil {
+		unavailable = append(unavailable, agentcontext.SourceMemory)
+	} else {
+		selected, err := s.memory.Select(ctx, work.ProjectID(), work.Title()+"\n"+work.Description(), s.config.ContextMaxBytes)
+		if err != nil {
+			unavailable = append(unavailable, agentcontext.SourceMemory)
+		} else {
+			for _, value := range selected.Items {
+				candidates = append(candidates, agentcontext.Candidate{
+					ID: "memory:" + value.ID(), ProjectID: work.ProjectID(), Source: agentcontext.SourceMemory,
+					Trust: memoryTrust(value.CreatedByType()), Priority: 65,
+					Content: fmt.Sprintf("Category: %s\nVersion: %d\nSources: %s\n%s", value.Category(), value.Version(), strings.Join(value.SourceIDs(), ", "), value.Content()),
+				})
+			}
+			for _, item := range selected.Omitted {
+				memoryOmissions = append(memoryOmissions, agentcontext.Omission{ID: item.ID, Source: agentcontext.SourceMemory, Reason: item.Reason})
+			}
+		}
 	}
 
 	if s.contextReader == nil {
@@ -100,12 +120,26 @@ func (s *Service) selectExecutionContext(ctx context.Context, p project.Project,
 	if err != nil {
 		return agentcontext.Result{}, err
 	}
+	selection.Summary.Omitted = append(selection.Summary.Omitted, memoryOmissions...)
 	for _, item := range selection.Summary.Selected {
 		if item.ID == "task:"+work.ID() {
 			return selection, nil
 		}
 	}
 	return agentcontext.Result{}, fmt.Errorf("task details did not fit the configured context budget")
+}
+
+func memoryTrust(creatorType string) agentcontext.Trust {
+	switch strings.ToLower(strings.TrimSpace(creatorType)) {
+	case "administrator":
+		return agentcontext.TrustAdmin
+	case "brain":
+		return agentcontext.TrustBrain
+	case "agent", "worker":
+		return agentcontext.TrustAgent
+	default:
+		return agentcontext.TrustUntrusted
+	}
 }
 
 func taskTrust(actor task.ActorType) agentcontext.Trust {
