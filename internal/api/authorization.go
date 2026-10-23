@@ -248,8 +248,25 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 				return "agent.scope.manage", projectID, true
 			}
 		}
+		if len(parts) == 7 && parts[4] == "templates" && parts[6] == "instantiate" && method == http.MethodPost {
+			return "agent.scope.manage", projectID, true
+		}
 	case len(parts) == 3 && parts[2] == "profiles" && method == http.MethodGet:
 		return "agent.read", "", true
+	case len(parts) == 3 && parts[2] == "templates":
+		switch method {
+		case http.MethodGet:
+			return "agent.read", "", true
+		case http.MethodPost:
+			return "agent.create", "", true
+		}
+	case len(parts) == 4 && parts[2] == "templates":
+		if method == http.MethodGet {
+			return "agent.read", "", true
+		}
+		if method == http.MethodPatch {
+			return "agent.update", "", true
+		}
 	case len(parts) == 3 && parts[2] == "agents":
 		switch method {
 		case http.MethodGet:

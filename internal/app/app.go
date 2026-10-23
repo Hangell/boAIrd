@@ -27,6 +27,7 @@ import (
 	"boAIrd/internal/runtime"
 	"boAIrd/internal/storage"
 	"boAIrd/internal/task"
+	"boAIrd/internal/template"
 	governedtool "boAIrd/internal/tool"
 )
 
@@ -237,6 +238,14 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 		return fmt.Errorf("initialize notification service: %w", err)
 	}
 	go notificationService.Run(ctx)
+	templateRepository, err := storage.NewTemplateRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize template repository: %w", err)
+	}
+	templateService, err := template.NewService(templateRepository)
+	if err != nil {
+		return fmt.Errorf("initialize template service: %w", err)
+	}
 	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
 		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService,
@@ -254,7 +263,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("configure HTTP security policy: %w", err)
 	}
-	handler := api.NewHandlerWithSecurityAndNotifications(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, policy, mcp.Handler())
+	handler := api.NewHandlerWithSecurityNotificationsAndTemplates(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, templateService, policy, mcp.Handler())
 	if cfg.TLSCertFile != "" {
 		if err := api.ServeTLS(ctx, cfg.Address(), cfg.TLSCertFile, cfg.TLSKeyFile, handler, logger); err != nil {
 			return fmt.Errorf("run HTTPS API: %w", err)
