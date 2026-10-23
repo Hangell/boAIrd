@@ -2327,6 +2327,15 @@ security.invalid_mcp_client
 
 Some Security Events must trigger an alert for the administrator.
 
+Notifications are generated from persisted audit/status events with project
+scope. Their summaries are fixed text and do not include denial reasons, raw
+provider errors, request bodies, or credentials. Access requires the local
+administrator session plus project membership and `notification.read`; read,
+acknowledge, and retry operations have separate capabilities. SSE is only a
+best-effort delivery channel: the persisted inbox remains authoritative, and
+delivery retries are bounded and idempotent by source event. Acknowledgement
+and delivery-retry mutations are written with immutable audit events.
+
 Example:
 
 ```text

@@ -141,6 +141,21 @@ export interface RunSummary {
   audit_events?: RunAuditEvent[];
 }
 
+export interface NotificationNotice {
+  id: string;
+  project_id: string;
+  event_type: string;
+  resource_id?: string;
+  severity: 'INFO' | 'WARNING' | 'CRITICAL';
+  summary: string;
+  created_at: string;
+  delivery_state: 'PENDING' | 'DELIVERED' | 'FAILED';
+  delivery_attempts: number;
+  delivery_error?: string;
+  read_at?: string;
+  acknowledged_at?: string;
+}
+
 export interface RunAuditEvent {
   id: string;
   event_type: string;

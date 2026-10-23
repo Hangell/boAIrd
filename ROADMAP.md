@@ -1698,6 +1698,11 @@ credentials
 
 Create an internal notification system.
 
+Notifications are persisted with deduplicated source-event keys and fixed safe
+summaries. Project-scoped REST inbox operations support read, acknowledge, and
+bounded retry; authenticated SSE provides best-effort live delivery. Failed
+critical notices remain in the inbox until acknowledged.
+
 Examples:
 
 ```text

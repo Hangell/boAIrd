@@ -15,6 +15,7 @@ import (
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
 	"boAIrd/internal/mcptoken"
+	"boAIrd/internal/notification"
 	"boAIrd/internal/orchestrator"
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
@@ -102,6 +103,14 @@ type MCPTokenManager interface {
 	List(context.Context) ([]mcptoken.Metadata, error)
 }
 
+type NotificationManager interface {
+	List(context.Context, string, int, int) ([]notification.Notice, error)
+	MarkRead(context.Context, string, string) error
+	Acknowledge(context.Context, string, string) error
+	Retry(context.Context, string, string) error
+	Subscribe(string) (<-chan notification.Notice, func())
+}
+
 // NewHandler returns the HTTP handler for the configured service endpoints.
 func NewHandler(database DatabaseHealth, projects ProjectManager, credentials ...CredentialManager) http.Handler {
 	var credentialManager CredentialManager
@@ -134,22 +143,36 @@ func NewHandlerWithMCPTokenManagement(database DatabaseHealth, projects ProjectM
 
 // NewHandlerWithOrchestration returns a handler that also exposes orchestration and review routes.
 func NewHandlerWithOrchestration(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, nil, nil, mcpHandlers...)
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, nil, nil, nil, mcpHandlers...)
 }
 
 // NewHandlerWithProfiles returns a handler that also exposes specialized agent profile routes.
 func NewHandlerWithProfiles(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, nil, mcpHandlers...)
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, nil, nil, mcpHandlers...)
 }
 
 // NewHandlerWithAudit returns a handler that also exposes project-scoped audit routes.
 func NewHandlerWithAudit(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, auditReader AuditReader, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, nil, auditReader, mcpHandlers...)
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, nil, auditReader, nil, mcpHandlers...)
 }
 
 // NewHandlerWithProfilesAndAudit returns a handler with profile and audit routes.
 func NewHandlerWithProfilesAndAudit(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, mcpHandlers...)
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, nil, mcpHandlers...)
+}
+
+func NewHandlerWithNotifications(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, notifications NotificationManager, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, nil, nil, notifications, mcpHandlers...)
+}
+
+// NewHandlerWithProfilesAndNotifications exposes project profile and notification routes.
+func NewHandlerWithProfilesAndNotifications(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, notifications NotificationManager, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, nil, notifications, mcpHandlers...)
+}
+
+// NewHandlerWithProfilesAuditAndNotifications exposes profile, audit, and notification routes.
+func NewHandlerWithProfilesAuditAndNotifications(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, mcpHandlers...)
 }
 
 func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, mcpHandlers ...http.Handler) http.Handler {
@@ -157,10 +180,10 @@ func newHandler(database DatabaseHealth, projects ProjectManager, credentials Cr
 }
 
 func newHandlerWithMCP(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, nil, nil, nil, mcpHandlers...)
+	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, nil, nil, nil, nil, mcpHandlers...)
 }
 
-func newHandlerWithOrchestration(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, mcpHandlers ...http.Handler) http.Handler {
+func newHandlerWithServices(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	sessions := newLocalSessionStore()
 	registerSessionRoutes(mux, database, localAuthToken, sessions)
@@ -219,6 +242,9 @@ func newHandlerWithOrchestration(database DatabaseHealth, projects ProjectManage
 	}
 	if auditReader != nil {
 		registerAuditRoutes(mux, auditReader)
+	}
+	if notifications != nil {
+		registerNotificationRoutes(mux, notifications)
 	}
 	if len(mcpHandlers) > 0 && mcpHandlers[0] != nil {
 		mux.Handle("/mcp", mcpHandlers[0])

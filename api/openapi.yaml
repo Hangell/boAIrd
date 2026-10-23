@@ -333,6 +333,112 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{id}/notifications:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: listProjectNotifications
+      x-required-capability: notification.read
+      summary: List persisted project notifications
+      description: Summaries are fixed safe text. Unread, pending, failed, and critical notices remain visible until acknowledged.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Project-scoped notification page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{id}/notifications/stream:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: streamProjectNotifications
+      x-required-capability: notification.read
+      summary: Receive best-effort live project notifications
+      description: Server-Sent Events require the local administrator session and project membership. The persisted REST inbox remains authoritative when clients are disconnected.
+      security:
+        - localSessionCookie: []
+      responses:
+        '200':
+          description: Notification event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: 'data: {"id":"notice-id","event_type":"HUMAN_REVIEW"}'
+        '401': { description: Missing or invalid administrator session cookie. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/projects/{id}/notifications/{notification_id}/read:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: notification_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: markProjectNotificationRead
+      x-required-capability: notification.read
+      summary: Mark a project notification as read
+      responses:
+        '204': { description: Notification marked as read. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{id}/notifications/{notification_id}/acknowledge:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: notification_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: acknowledgeProjectNotification
+      x-required-capability: notification.acknowledge
+      summary: Acknowledge a project notification
+      responses:
+        '204': { description: Notification acknowledged and marked as read. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{id}/notifications/{notification_id}/retry:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: notification_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: retryProjectNotificationDelivery
+      x-required-capability: notification.retry
+      summary: Retry a failed notification delivery
+      description: Delivery allows three automatic attempts and two additional manual retries. Retries retain the original notification identifier and cannot create another notice.
+      responses:
+        '202': { description: Delivery retry queued. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Notification was acknowledged or its retry limit was reached. }
   /api/v1/projects/{id}/orchestration/dispatch:
     parameters:
       - name: id
@@ -1025,6 +1131,30 @@ components:
         audit_events:
           type: array
           items: { $ref: '#/components/schemas/AuditEvent' }
+    Notification:
+      type: object
+      required: [id, project_id, event_type, severity, summary, created_at, delivery_state, delivery_attempts]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        event_type: { type: string }
+        resource_id: { type: string, description: Internal resource identifier; raw request paths and event payloads are omitted. }
+        severity: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        summary: { type: string, description: Fixed safe summary with no secrets or raw error payloads. }
+        created_at: { type: string, format: date-time }
+        delivery_state: { type: string, enum: [PENDING, DELIVERED, FAILED] }
+        delivery_attempts: { type: integer, minimum: 0, maximum: 5 }
+        delivery_error: { type: string, description: Safe error code only. }
+        delivered_at: { type: string, format: date-time }
+        read_at: { type: string, format: date-time }
+        acknowledged_at: { type: string, format: date-time }
+    NotificationPage:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+        limit: { type: integer }
+        offset: { type: integer }
     RunPage:
       type: object
       required: [items, limit, offset]

@@ -1955,6 +1955,16 @@ External agent disconnected
 Security policy denied action
 ```
 
+Project notifications are persisted from task/run audit transitions, agent error
+status events, and project-scoped authorization denials. Database triggers use
+stable source keys so retries cannot create duplicate notices. Summaries are
+fixed safe text; raw reasons, provider errors, credentials, and request payloads
+are never copied. The administrator reads project-scoped notices over REST and
+may receive best-effort SSE delivery. Delivery retries are bounded; pending or
+failed critical notices remain in the inbox until acknowledged. Acknowledging
+or manually retrying delivery commits the state change with an immutable audit
+event.
+
 ---
 
 # 77. Audit

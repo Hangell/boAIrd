@@ -31,6 +31,7 @@ var administratorCapabilities = []capability.Capability{
 	"run.read", "task.create", "task.read", "task.assign", "task.transition",
 	"task.review", "task.complete", "conversation.read", "conversation.write", "mcp.token.manage",
 	"audit.read",
+	"notification.read", "notification.acknowledge", "notification.retry",
 }
 
 func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, token []byte, sessions *localSessionStore) http.Handler {
@@ -115,6 +116,15 @@ func (w *statusCaptureWriter) Write(value []byte) (int, error) {
 	return w.ResponseWriter.Write(value)
 }
 
+func (w *statusCaptureWriter) Flush() {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func isUnsafeMethod(method string) bool {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
@@ -167,6 +177,10 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		}
 		if len(parts) == 5 {
 			switch parts[4] {
+			case "notifications":
+				if method == http.MethodGet {
+					return "notification.read", projectID, true
+				}
 			case "tasks":
 				if method == http.MethodPost {
 					return "task.create", projectID, true
@@ -192,6 +206,21 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 				if method == http.MethodGet {
 					return "audit.read", projectID, true
 				}
+			}
+		}
+		if len(parts) == 6 && parts[4] == "notifications" {
+			if parts[5] == "stream" && method == http.MethodGet {
+				return "notification.read", projectID, true
+			}
+		}
+		if len(parts) == 7 && parts[4] == "notifications" && parts[5] != "" && method == http.MethodPost {
+			switch parts[6] {
+			case "read":
+				return "notification.read", projectID, true
+			case "acknowledge":
+				return "notification.acknowledge", projectID, true
+			case "retry":
+				return "notification.retry", projectID, true
 			}
 		}
 		if len(parts) == 6 && parts[4] == "brain" && parts[5] == "runs" && method == http.MethodPost {

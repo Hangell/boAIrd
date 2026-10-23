@@ -9,7 +9,7 @@ export class SseClient {
   connect<TEvent>(path: string, decode: (value: unknown) => TEvent): Observable<TEvent> {
     return new Observable<TEvent>((subscriber) => {
       const endpoint = `${this.baseUrl}/${path.replace(/^\/+/, '')}`;
-      const source = new EventSource(endpoint, { withCredentials: false });
+      const source = new EventSource(endpoint, { withCredentials: true });
 
       source.onmessage = (event: MessageEvent<string>) => {
         try {

@@ -17,6 +17,7 @@ import (
 	"boAIrd/internal/mcpserver"
 	"boAIrd/internal/mcptoken"
 	"boAIrd/internal/memory"
+	"boAIrd/internal/notification"
 	"boAIrd/internal/orchestrator"
 	"boAIrd/internal/profile"
 	"boAIrd/internal/project"
@@ -197,6 +198,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize profile service: %w", err)
 	}
+	notificationRepository, err := storage.NewNotificationRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize notification repository: %w", err)
+	}
+	notificationService, err := notification.NewService(notificationRepository)
+	if err != nil {
+		return fmt.Errorf("initialize notification service: %w", err)
+	}
+	go notificationService.Run(ctx)
 	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
 		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService,
@@ -210,7 +220,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize orchestrator: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithProfilesAndAudit(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, mcp.Handler()), logger); err != nil {
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithProfilesAuditAndNotifications(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, mcp.Handler()), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

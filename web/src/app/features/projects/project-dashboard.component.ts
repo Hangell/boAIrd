@@ -4,7 +4,8 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, forkJoin, map, Observable, of, switchMap, throwError } from 'rxjs';
 import { ApiClient } from '../../core/api/api-client';
-import { AgentSummary, ApiPage, BrainSummary, ProjectSummary, RunSummary, TaskSummary } from '../../core/api/api-models';
+import { AgentSummary, ApiPage, BrainSummary, NotificationNotice, ProjectSummary, RunSummary, TaskSummary } from '../../core/api/api-models';
+import { SseClient } from '../../core/api/sse-client';
 
 interface ProjectDashboardData {
   project: ProjectSummary;
@@ -12,6 +13,7 @@ interface ProjectDashboardData {
   runs: RunSummary[];
   brain: BrainSummary | null;
   agents: AgentSummary[];
+  notifications: NotificationNotice[];
 }
 
 type ProjectDashboardState =
@@ -77,6 +79,25 @@ type ProjectDashboardState =
       </section>
 
       <div class="detail-grid">
+        <section class="detail-card" aria-labelledby="notifications-heading">
+          <h2 id="notifications-heading" i18n="@@projectDashboard.notifications">Notifications</h2>
+          @if (data.notifications.length > 0) {
+            <ul class="work-list">
+              @for (notice of data.notifications; track notice.id) {
+                <li class="notification-item">
+                  <span class="run-copy"><strong>{{ notice.event_type }}</strong><span>{{ notice.summary }}</span><span class="secondary">{{ notice.created_at }} · {{ notice.delivery_state }}</span></span>
+                  @if (!notice.acknowledged_at) {
+                    <span class="notification-actions">
+                      @if (!notice.read_at) { <button class="button button-small" type="button" (click)="markNotificationRead(notice)" i18n="@@projectDashboard.markRead">Read</button> }
+                      @if (notice.delivery_state === 'FAILED') { <button class="button button-small" type="button" (click)="retryNotification(notice)" i18n="@@common.retry">Retry</button> }
+                      <button class="button button-small" type="button" (click)="acknowledgeNotification(notice)" i18n="@@projectDashboard.acknowledge">Acknowledge</button>
+                    </span>
+                  } @else { <span class="tag" i18n="@@projectDashboard.acknowledged">Acknowledged</span> }
+                </li>
+              }
+            </ul>
+          } @else { <p class="secondary" i18n="@@projectDashboard.noNotifications">There are no notifications for this project.</p> }
+        </section>
         <section class="detail-card" aria-labelledby="blocked-heading">
           <h2 id="blocked-heading" i18n="@@projectDashboard.blockedHeading">Blocked work</h2>
           @if (blockedTasks(data.tasks).length > 0) {
@@ -137,6 +158,9 @@ type ProjectDashboardState =
     .detail-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); margin-block: 1rem 2rem; }
     .run-copy { display: grid; gap: .2rem; min-width: 0; }
     .run-copy .secondary { overflow-wrap: anywhere; }
+    .notification-item { align-items: flex-start !important; }
+    .notification-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+    .button-small { font-size: .75rem; padding: .45rem .6rem; }
     .notice { background: var(--boaird-surface); border: 1px solid var(--boaird-border); border-radius: .9rem; color: var(--boaird-muted); padding: 1.25rem; }
     .notice-error { border-color: var(--boaird-danger); }
     .button { background: var(--boaird-ink); border: 0; border-radius: .5rem; color: var(--boaird-on-ink); cursor: pointer; font: inherit; font-weight: 700; padding: .65rem 1rem; }
@@ -144,6 +168,7 @@ type ProjectDashboardState =
 })
 export class ProjectDashboardComponent implements OnInit {
   private readonly api = inject(ApiClient);
+  private readonly sse = inject(SseClient);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
   private projectId = '';
@@ -157,6 +182,12 @@ export class ProjectDashboardComponent implements OnInit {
       map((params) => params.get('projectId') ?? ''),
       switchMap((projectId) => {
         this.projectId = projectId;
+        if (projectId) {
+          this.sse.connect<{ id: string }>(`projects/${encodeURIComponent(projectId)}/notifications/stream`, (value) => {
+            if (typeof value !== 'object' || value === null || !('id' in value) || typeof value.id !== 'string') throw new Error('Invalid notification event.');
+            return { id: value.id };
+          }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.refreshNotifications());
+        }
         return this.loadProject(projectId);
       }),
       takeUntilDestroyed(this.destroyRef),
@@ -181,6 +212,29 @@ export class ProjectDashboardComponent implements OnInit {
     return runs.filter((run) => run.status === 'FAILED').length;
   }
 
+  protected markNotificationRead(notice: NotificationNotice): void { this.mutateNotification(notice, 'read'); }
+  protected acknowledgeNotification(notice: NotificationNotice): void { this.mutateNotification(notice, 'acknowledge'); }
+  protected retryNotification(notice: NotificationNotice): void { this.mutateNotification(notice, 'retry'); }
+
+  private mutateNotification(notice: NotificationNotice, action: 'read' | 'acknowledge' | 'retry'): void {
+    this.api.post<Record<string, never>, void>(`projects/${encodeURIComponent(notice.project_id)}/notifications/${encodeURIComponent(notice.id)}/${action}`, {}).pipe(
+      switchMap(() => this.api.get<ApiPage<NotificationNotice>>(`projects/${encodeURIComponent(notice.project_id)}/notifications?limit=50&offset=0`)),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe((page) => this.updateNotifications(page.items));
+  }
+
+  private refreshNotifications(): void {
+    if (!this.projectId) return;
+    this.api.get<ApiPage<NotificationNotice>>(`projects/${encodeURIComponent(this.projectId)}/notifications?limit=50&offset=0`).pipe(
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe((page) => this.updateNotifications(page.items));
+  }
+
+  private updateNotifications(notifications: NotificationNotice[]): void {
+    const current = this.state();
+    if (current.kind === 'loaded') this.state.set({ kind: 'loaded', data: { ...current.data, notifications } });
+  }
+
   private loadProject(projectId: string): Observable<ProjectDashboardState> {
     if (!projectId) return of({ kind: 'error' });
 
@@ -193,6 +247,7 @@ export class ProjectDashboardComponent implements OnInit {
       project: this.api.get<ProjectSummary>(`projects/${encodedID}`),
       tasks: this.api.getAllPages<TaskSummary>(`projects/${encodedID}/tasks`),
       runs: this.api.get<ApiPage<RunSummary>>(`projects/${encodedID}/runs?limit=5&offset=0`).pipe(map((page) => page.items)),
+      notifications: this.api.get<ApiPage<NotificationNotice>>(`projects/${encodedID}/notifications?limit=50&offset=0`).pipe(map((page) => page.items)),
       brain: optionalBrain,
     }).pipe(
       switchMap((overview) => {
