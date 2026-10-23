@@ -66,7 +66,49 @@ func (r *AgentRepository) Get(ctx context.Context, id string) (agent.Agent, erro
 }
 
 func (r *AgentRepository) List(ctx context.Context, limit, offset int) ([]agent.Agent, error) {
-	rows, err := r.database.QueryContext(ctx, agentSelect+" ORDER BY lower(name), id LIMIT ? OFFSET ?", limit, offset)
+	return r.list(ctx, agentSelect+" ORDER BY lower(name), id LIMIT ? OFFSET ?", limit, offset)
+}
+
+// ListForUser applies current membership scope before pagination. Active Brain
+// Agents are visible through their Brain-to-project relation as well.
+func (r *AgentRepository) ListForUser(ctx context.Context, userID string, limit, offset int) ([]agent.Agent, error) {
+	query := agentSelect + ` WHERE EXISTS (
+		SELECT 1 FROM agent_projects ap
+		JOIN project_members pm ON pm.project_id = ap.project_id
+		WHERE ap.agent_id = agents.id AND pm.user_id = ?
+	) OR EXISTS (
+		SELECT 1 FROM brain_configuration bc
+		JOIN brains b ON b.id = bc.brain_id AND b.active = 1
+		JOIN projects p ON p.id = b.project_id AND p.brain_id = b.id
+		JOIN project_members pm ON pm.project_id = p.id
+		WHERE bc.agent_id = agents.id AND pm.user_id = ?
+	) ORDER BY lower(agents.name), agents.id LIMIT ? OFFSET ?`
+	return r.list(ctx, query, userID, userID, limit, offset)
+}
+
+// HasProjectAssociation permits a member to read an Agent scoped directly or
+// through an active Brain configuration in one of the member's projects.
+func (r *AgentRepository) HasProjectAssociation(ctx context.Context, agentID, userID string) (bool, error) {
+	query := `SELECT EXISTS(
+		SELECT 1 FROM agent_projects ap
+		JOIN project_members pm ON pm.project_id = ap.project_id
+		WHERE ap.agent_id = ? AND pm.user_id = ?
+		UNION ALL
+		SELECT 1 FROM brain_configuration bc
+		JOIN brains b ON b.id = bc.brain_id AND b.active = 1
+		JOIN projects p ON p.id = b.project_id AND p.brain_id = b.id
+		JOIN project_members pm ON pm.project_id = p.id
+		WHERE bc.agent_id = ? AND pm.user_id = ?
+	)`
+	var associated bool
+	if err := r.database.QueryRowContext(ctx, query, agentID, userID, agentID, userID).Scan(&associated); err != nil {
+		return false, fmt.Errorf("check agent project association: %w", err)
+	}
+	return associated, nil
+}
+
+func (r *AgentRepository) list(ctx context.Context, query string, args ...any) ([]agent.Agent, error) {
+	rows, err := r.database.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query agents: %w", err)
 	}

@@ -1,12 +1,71 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"boAIrd/internal/user"
 )
+
+type failingUserResolver struct{ err error }
+
+func (f failingUserResolver) Get(context.Context, string) (user.User, error) {
+	return user.User{}, f.err
+}
+
+type fixedUserResolver struct{ value user.User }
+
+func (f fixedUserResolver) Get(_ context.Context, id string) (user.User, error) {
+	if f.value.ID() != id {
+		return user.User{}, user.ErrNotFound
+	}
+	return f.value, nil
+}
+
+type bootstrapTestUserManager struct{}
+
+func (bootstrapTestUserManager) Create(context.Context, string, string, string, user.Role) (user.User, error) {
+	return user.User{}, errors.New("not implemented")
+}
+
+func (bootstrapTestUserManager) List(context.Context) ([]user.User, error) { return nil, nil }
+
+func (bootstrapTestUserManager) Get(_ context.Context, id string) (user.User, error) {
+	if id != user.BootstrapAdministratorID {
+		return user.User{}, user.ErrNotFound
+	}
+	return user.Restore(id, "Administrator", user.RoleAdministrator)
+}
+
+func (bootstrapTestUserManager) Delete(context.Context, string, string) error {
+	return errors.New("not implemented")
+}
+
+func (bootstrapTestUserManager) GrantProject(context.Context, string, string, string, user.MembershipRole) error {
+	return errors.New("not implemented")
+}
+
+func (bootstrapTestUserManager) RevokeProject(context.Context, string, string, string) error {
+	return errors.New("not implemented")
+}
+
+func (bootstrapTestUserManager) ProjectsFor(context.Context, string) (map[string]user.MembershipRole, error) {
+	return nil, nil
+}
+
+func (bootstrapTestUserManager) RecordSessionIssued(context.Context, string, string) error {
+	return errors.New("not implemented")
+}
+
+func newAuthorizedTestHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, token []byte) http.Handler {
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations,
+		token, nil, nil, nil, nil, nil, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
+}
 
 func TestRESTRequiresBearerAndAuditsDenial(t *testing.T) {
 	handler, database := newProjectHandler(t)
@@ -35,6 +94,32 @@ func TestRESTRequiresBearerAndAuditsDenial(t *testing.T) {
 	}
 	if _, err := database.Exec("UPDATE authorization_denials SET reason='changed' WHERE sequence=1"); err == nil {
 		t.Fatal("authorization denial audit was mutable")
+	}
+}
+
+func TestCapabilitiesForUserFailsClosed(t *testing.T) {
+	if _, err := capabilitiesForUser(context.Background(), nil, "alice"); err == nil {
+		t.Fatal("missing user resolver granted capabilities")
+	}
+	if _, err := capabilitiesForUser(context.Background(), failingUserResolver{err: errors.New("database unavailable")}, "alice"); err == nil {
+		t.Fatal("user lookup error granted capabilities")
+	}
+	if _, err := capabilitiesForUser(context.Background(), failingUserResolver{err: user.ErrNotFound}, "deleted-user"); err == nil {
+		t.Fatal("deleted user received member capabilities")
+	}
+	if _, err := capabilitiesForUser(context.Background(), nil, user.BootstrapAdministratorID); err == nil {
+		t.Fatal("bootstrap administrator was authorized without a user resolver")
+	}
+	administrator, err := user.Restore(user.BootstrapAdministratorID, "Administrator", user.RoleAdministrator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := capabilitiesForUser(context.Background(), fixedUserResolver{value: administrator}, user.BootstrapAdministratorID)
+	if err != nil || len(values) != len(administratorCapabilities) {
+		t.Fatalf("bootstrap administrator capabilities = %v, error = %v", values, err)
+	}
+	if _, err := capabilitiesForUser(context.Background(), fixedUserResolver{}, "unknown"); err == nil {
+		t.Fatal("unknown user received capabilities")
 	}
 }
 
@@ -205,7 +290,7 @@ func TestRESTAuditsDomainAuthorizationDenials(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "forbidden", "domain policy denied the operation")
 	})
-	handler := secureAPI(next, database, nil, nil, nil, testLocalAuthTokenBytes(), newLocalSessionStore())
+	handler := secureAPI(next, database, nil, nil, nil, bootstrapTestUserManager{}, testLocalAuthTokenBytes(), newLocalSessionStore())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/agents", nil))
 	if response.Code != http.StatusForbidden {

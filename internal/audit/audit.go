@@ -60,3 +60,22 @@ type Entry struct {
 type Reader interface {
 	ListEvents(context.Context, string, int, int) ([]Entry, error)
 }
+
+// UserAuthorityEntry records a global human identity or membership change.
+type UserAuthorityEntry struct {
+	ID           string
+	ActorID      string
+	EventType    string
+	TargetUserID string
+	ProjectID    string
+	PreviousRole string
+	NextRole     string
+	Result       string
+	Reason       string
+	CreatedAt    time.Time
+}
+
+// UserAuthorityReader lists global user and membership authority changes.
+type UserAuthorityReader interface {
+	ListUserAuthorityEvents(context.Context, int, int) ([]UserAuthorityEntry, error)
+}

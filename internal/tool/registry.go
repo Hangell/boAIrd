@@ -24,37 +24,53 @@ type Registry struct {
 func NewRegistry() *Registry { return &Registry{tools: make(map[string]Tool)} }
 
 func (r *Registry) Register(value Tool) error {
-	if isNil(value) {
-		return fmt.Errorf("%w: tool is required", ErrInvalidRequest)
-	}
-	if !value.validDefinition() {
-		return fmt.Errorf("%w: tool must define input/output validation and execution", ErrInvalidRequest)
-	}
-	contract := value.Contract()
-	if !toolNamePattern.MatchString(contract.Name) || strings.TrimSpace(contract.Description) == "" {
-		return fmt.Errorf("%w: tool name and description are required", ErrInvalidRequest)
-	}
-	if !validSchema(contract.InputSchema) || !validSchema(contract.OutputSchema) {
-		return fmt.Errorf("%w: tool input and output schemas must be JSON objects", ErrInvalidRequest)
-	}
-	if contract.Limits.Timeout <= 0 || contract.Limits.Timeout > maximumTimeout ||
-		contract.Limits.MaxInputBytes <= 0 || contract.Limits.MaxOutputBytes <= 0 {
-		return fmt.Errorf("%w: tool limits must be positive and timeout cannot exceed one hour", ErrInvalidRequest)
-	}
-	if len(contract.RequiredCapabilities) == 0 {
-		return fmt.Errorf("%w: at least one capability is required", ErrInvalidRequest)
-	}
-	for _, required := range contract.RequiredCapabilities {
-		if !required.Valid() {
-			return fmt.Errorf("%w: invalid required capability", ErrInvalidRequest)
+	return r.RegisterBatch([]Tool{value})
+}
+
+// RegisterBatch validates every tool before changing registry state.
+func (r *Registry) RegisterBatch(values []Tool) error {
+	prepared := make(map[string]Tool, len(values))
+	for _, value := range values {
+		if isNil(value) {
+			return fmt.Errorf("%w: tool is required", ErrInvalidRequest)
 		}
+		if !value.validDefinition() {
+			return fmt.Errorf("%w: tool must define input/output validation and execution", ErrInvalidRequest)
+		}
+		contract := value.Contract()
+		if !toolNamePattern.MatchString(contract.Name) || strings.TrimSpace(contract.Description) == "" {
+			return fmt.Errorf("%w: tool name and description are required", ErrInvalidRequest)
+		}
+		if !validSchema(contract.InputSchema) || !validSchema(contract.OutputSchema) {
+			return fmt.Errorf("%w: tool input/output schemas must be JSON objects", ErrInvalidRequest)
+		}
+		if contract.Limits.Timeout <= 0 || contract.Limits.Timeout > maximumTimeout ||
+			contract.Limits.MaxInputBytes <= 0 || contract.Limits.MaxOutputBytes <= 0 {
+			return fmt.Errorf("%w: tool limits must be positive and timeout cannot exceed one hour", ErrInvalidRequest)
+		}
+		if len(contract.RequiredCapabilities) == 0 {
+			return fmt.Errorf("%w: at least one capability is required", ErrInvalidRequest)
+		}
+		for _, required := range contract.RequiredCapabilities {
+			if !required.Valid() {
+				return fmt.Errorf("%w: invalid required capability", ErrInvalidRequest)
+			}
+		}
+		if _, exists := prepared[contract.Name]; exists {
+			return fmt.Errorf("%w: tool %s is repeated in the batch", ErrInvalidRequest, contract.Name)
+		}
+		prepared[contract.Name] = value.frozen()
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.tools[contract.Name]; exists {
-		return fmt.Errorf("%w: tool %s is already registered", ErrInvalidRequest, contract.Name)
+	for name := range prepared {
+		if _, exists := r.tools[name]; exists {
+			return fmt.Errorf("%w: tool %s is already registered", ErrInvalidRequest, name)
+		}
 	}
-	r.tools[contract.Name] = value.frozen()
+	for name, value := range prepared {
+		r.tools[name] = value
+	}
 	return nil
 }
 
@@ -66,6 +82,23 @@ func (r *Registry) Resolve(name string) (Tool, error) {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 	return value, nil
+}
+
+// Unregister removes a previously registered tool, used when an extension is
+// deactivated. Removing an unknown tool is not an error.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
+// UnregisterBatch removes a set of registered tools under one registry lock.
+func (r *Registry) UnregisterBatch(names []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, name := range names {
+		delete(r.tools, name)
+	}
 }
 
 // Enforcer authorizes and bounds every call before invoking a registered tool.

@@ -4,7 +4,7 @@
 
 boAIrd will be developed incrementally.
 
-The initial priority is to build a functional, local-first, highly controllable MVP before adding distributed features, multi-user support, or complex infrastructure.
+The initial priority was to build a functional, local-first, highly controllable MVP before expanding to distributed features or complex infrastructure.
 
 Primary stack:
 
@@ -627,7 +627,7 @@ metadata
 - Messages retain opaque content, content type, JSON metadata, sender type/ID, and timestamp; sensitive text and metadata are redacted before persistence.
 - `GET` and `POST /api/v1/tasks/{id}/messages` require `BOAIRD_LOCAL_AUTH_TOKEN` and a project membership for the single `local-administrator` principal. The sender identity is set by the server, and callers cannot provide it in JSON.
 - Existing projects are backfilled with local administrator membership, and new projects receive that membership automatically. Trusted service calls may add messages from the agent assigned to the task or the active Brain for its project.
-- The one configured administrator is the only HTTP principal. Multi-user identity and membership administration remain future work. The dashboard exchanges the root token for a random opaque HttpOnly cookie session ID stored in server memory for 30 minutes; logout revokes it and restart invalidates all sessions. Cookie writes and logout require SameSite and a trusted dashboard Origin.
+- Registered administrators and members authenticate through user-bound sessions. The bootstrap administrator remains the only identity authenticated directly by the local bearer token. Sessions are opaque, stored in memory for 30 minutes, and invalidated by logout, user deletion, membership revocation, or restart; cookie writes require SameSite and a trusted dashboard Origin.
 
 ## Formats
 
@@ -972,9 +972,9 @@ Role != Permission
 ## Current implementation
 
 - The local bearer token authenticates every `/api/v1` route except status; the browser exchanges it for a SameSite=Strict HttpOnly cookie.
-- Route policies map project, credential, agent, Brain, run, task, and conversation operations to explicit capabilities. Project-scoped routes validate the single administrator's membership before invoking managers.
+- Route policies map project, credential, agent, Brain, run, task, and conversation operations to explicit capabilities. Project-scoped routes validate the authenticated user's membership before invoking managers.
 - Task services independently require explicit capabilities and project scope for administrator actors, check active Brain/agent grants, reject the legacy unprivileged local actor, and audit denied operations.
-- The API and MCP adapters record authorization denials in an immutable SQLite table. Agent project memberships are persisted in `agent_projects`; actual grants and revocations are audited in `audit_events`.
+- The API and MCP adapters record authorization denials in an immutable table in the configured database. Agent project memberships are persisted in `agent_projects`; actual grants and revocations are audited in `audit_events`.
 - MCP project-wide operations require explicit persisted Agent scope. Assignment grants only task-specific actions after checking the exact assignee. An active Brain derives scope only from its Brain-to-project relation.
 
 A Backend agent may have:
@@ -1915,17 +1915,46 @@ Do not implement this until the gate opens and the ADR is approved.
 
 # Phase 38 — Multi-User
 
-Future.
+Status: implemented.
 
 Implement:
 
 ```text
 Users
-Organizations
 Roles
-Permissions
 Project membership
 ```
+
+## Implemented
+
+- `internal/user` — `User` identity (`administrator` / `member`) and a `Service`
+  enforcing user and membership rules, kept separate from Agent and Brain
+  identity. The seeded `local-administrator` is the bootstrap administrator and
+  cannot be deleted or demoted.
+- `internal/storage/users.go` persists users and manages the existing
+  `project_members` table (grant/update/revoke membership). SQLite migrations
+  `0025`, `0027`, and `0028` add users, authority audit, and retired identity
+  protection; PostgreSQL migrations `0003` through `0005` provide the same
+  schema and constraints.
+- Authorization resolves the authenticated user from the bearer token or a
+  user-bound session and checks project membership before capability
+  evaluation. Administrators receive the full capability set; members receive a
+  read-only, deny-by-default set and can access only their own projects.
+- Sessions are bound to a user identity; an administrator can issue a session
+  for any user (`POST /api/v1/users/{id}/sessions`). User deletion and
+  membership revocation invalidate active sessions; deleted user IDs cannot be
+  reused.
+- Project and Agent lists are scoped before pagination. Agent detail and status
+  event reads enforce project membership, and expose only the member's visible
+  project IDs.
+- API: `GET/POST /api/v1/users`, `GET/DELETE /api/v1/users/{id}`, and
+  `PUT/DELETE /api/v1/projects/{id}/members/{userID}`, all gated by the
+  `user.manage` capability.
+- Tests cover user CRUD, bootstrap-administrator protection, membership
+  grant/revoke, member deny-by-default, cross-project isolation, and
+  privilege-escalation denial.
+- User, membership, session issuance, and authorization-denial mutations write
+  immutable audit events atomically with their state changes where applicable.
 
 ---
 
@@ -1973,13 +2002,41 @@ Git Manager
 
 # Phase 40 — Tool Marketplace / Extensions
 
-Future.
-
 Allow tools to be added without changing the core.
 
 ```text
 boAIrd Tool SDK
 ```
+
+## Implemented
+
+- `internal/extension` — versioned, declarative extension SDK (`sdk_version: 1`,
+  documented in `docs/EXTENSIONS.md`). Extensions are manifests, never
+  executable code; every tool declares name, description, input/output schemas,
+  required capabilities, and data access.
+- `internal/storage/extensions.go` + SQLite migration `0026_extensions.sql` and
+  PostgreSQL migration `0006_extensions.sql` persist manifests, global tool-name
+  reservations, and an immutable `extension_audit` stream (`extension.installed`
+  / `extension.activated` / `extension.deactivated`) in the same transactions
+  as lifecycle state changes.
+- Deny-by-default boundaries: manifests may only declare `none` or
+  `network:<host>` data access; filesystem, secret, credential, and shell/exec
+  access are rejected. HTTP endpoints require the exact administrator-approved
+  host, HTTPS port 443, DNS pinning, public addresses, no redirects or proxy,
+  and TLS 1.2 or later; provider CIDR exceptions do not apply. Inputs and redacted outputs are validated against the
+  bounded SDK v1 JSON Schema subset. `declarative` tools are contract-only.
+- Lifecycle: name reservations and install audit are transactional; activation
+  registers tools atomically before committing active status/audit; each call
+  checks persisted active state, authenticated MCP Agent, capability, project,
+  and optional task/run scope before adapter execution. Deactivation commits
+  removal/audit before unregistering, so active-state checks deny immediately.
+  All lifecycle routes require the `extension.manage` capability.
+- MCP exposes the static `boaird.extension.execute` gateway for activated
+  tools; caller-supplied identity or capability fields are not accepted.
+- API: `GET/POST /api/v1/extensions`, `GET /api/v1/extensions/{name}`,
+  `PUT /api/v1/extensions/{name}/activate`, `DELETE /api/v1/extensions/{name}`.
+- Tests cover invalid manifests, isolation (no fs/secret/exec access),
+  capability enforcement, unauthorized access, and lifecycle/audit.
 
 Possible integrations:
 
@@ -2172,10 +2229,6 @@ specialized tools
 
 remote deployment
 
-PostgreSQL
-
-multi-user
-
 distributed workers
 
 tool extensions
@@ -2231,8 +2284,6 @@ Observability
 
 ```text
 Remote Mode
-PostgreSQL
-Multi-user
 Distributed workers
 Extensions
 ```

@@ -183,6 +183,25 @@ func TestRegistryDeniesProjectResourceEscapeBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestRegistryBatchRegistrationIsAtomicOnNameConflict(t *testing.T) {
+	registry := NewRegistry()
+	first := testTool(t, func(_ context.Context, value input) (output, error) { return output(value), nil })
+	if err := registry.Register(first); err != nil {
+		t.Fatal(err)
+	}
+	newTool := testTool(t, func(_ context.Context, value input) (output, error) { return output(value), nil })
+	newTool.Metadata.Name = "extension.new"
+	if err := registry.RegisterBatch([]Tool{newTool, first}); err == nil {
+		t.Fatal("batch with an existing name unexpectedly registered")
+	}
+	if _, err := registry.Resolve("extension.new"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("partial batch registration left extension tool in registry: %v", err)
+	}
+	if _, err := registry.Resolve("test.echo"); err != nil {
+		t.Fatalf("conflicting existing tool was removed: %v", err)
+	}
+}
+
 func TestEnforcerRejectsEmptyProjectIDWithPermissiveScopeAuthorizer(t *testing.T) {
 	var toolCalls, scopeCalls int
 	registry := NewRegistry()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/netip"
 	"strconv"
 	"testing"
@@ -226,5 +227,31 @@ func TestEndpointPolicyAllowsExplicitPrivateCIDR(t *testing.T) {
 	}
 	if policy.addressAllowed(netip.MustParseAddr("10.21.4.9"), "internal.provider.example") {
 		t.Fatal("private IP outside the configured range was allowed")
+	}
+}
+
+func TestExtensionHTTPClientRejectsPrivateCIDRExceptions(t *testing.T) {
+	policy, err := NewEndpointPolicy([]string{"extension.example"}, []string{"10.20.0.0/16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy.lookupIP = func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("10.20.1.2")}, nil
+	}
+	dials := 0
+	policy.dialer = func(context.Context, string, string) (net.Conn, error) {
+		dials++
+		return nil, errors.New("unexpected dial")
+	}
+	client := policy.NewExtensionHTTPClient(time.Second)
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("extension client does not use the endpoint-policy transport")
+	}
+	if _, err := transport.DialContext(context.Background(), "tcp", "extension.example:443"); err == nil {
+		t.Fatal("extension endpoint accepted a private address from a provider CIDR exception")
+	}
+	if dials != 0 {
+		t.Fatalf("extension endpoint attempted %d private network dials", dials)
 	}
 }
