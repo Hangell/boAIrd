@@ -53,10 +53,15 @@ AFTER INSERT ON agent_status_events
 WHEN NEW.to_status IN ('ERROR', 'STALE', 'OFFLINE')
 BEGIN
     INSERT OR IGNORE INTO notifications(project_id, source_key, event_type, resource_id, severity, summary)
-    SELECT ap.project_id, 'agent-status:' || NEW.sequence || ':' || ap.project_id,
+    SELECT project_id, 'agent-status:' || NEW.sequence || ':' || project_id,
         CASE WHEN NEW.to_status = 'ERROR' THEN 'agent.failed' ELSE 'agent.disconnected' END,
         NEW.agent_id,
         CASE WHEN NEW.to_status = 'ERROR' THEN 'CRITICAL' ELSE 'WARNING' END,
         CASE WHEN NEW.to_status = 'ERROR' THEN 'An agent entered an error state.' ELSE 'An external agent disconnected or became stale.' END
-    FROM agent_projects ap WHERE ap.agent_id = NEW.agent_id;
+    FROM (
+        SELECT ap.project_id FROM agent_projects ap WHERE ap.agent_id = NEW.agent_id
+        UNION
+        SELECT b.project_id FROM brains b JOIN projects p ON p.id = b.project_id AND p.brain_id = b.id
+        WHERE b.id = NEW.agent_id AND b.active = 1
+    );
 END;

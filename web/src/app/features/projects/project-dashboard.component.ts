@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, inject, OnInit, signal 
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, forkJoin, map, Observable, of, switchMap, throwError } from 'rxjs';
+import { catchError, distinctUntilChanged, EMPTY, forkJoin, map, Observable, of, switchMap, throwError } from 'rxjs';
 import { ApiClient } from '../../core/api/api-client';
 import { AgentSummary, ApiPage, BrainSummary, NotificationNotice, ProjectSummary, RunSummary, TaskSummary } from '../../core/api/api-models';
 import { SseClient } from '../../core/api/sse-client';
@@ -178,18 +178,26 @@ export class ProjectDashboardComponent implements OnInit {
   protected readonly inactiveLabel = $localize`:@@projectDashboard.inactive:Inactive`;
 
   ngOnInit(): void {
-    this.route.paramMap.pipe(
+    const projectIDs = this.route.paramMap.pipe(
       map((params) => params.get('projectId') ?? ''),
+      distinctUntilChanged(),
+    );
+    projectIDs.pipe(
       switchMap((projectId) => {
         this.projectId = projectId;
-        if (projectId) {
-          this.sse.connect<{ id: string }>(`projects/${encodeURIComponent(projectId)}/notifications/stream`, (value) => {
-            if (typeof value !== 'object' || value === null || !('id' in value) || typeof value.id !== 'string') throw new Error('Invalid notification event.');
-            return { id: value.id };
-          }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.refreshNotifications());
-        }
-        return this.loadProject(projectId);
+        return projectId ? this.sse.connect<{ id: string }>(`projects/${encodeURIComponent(projectId)}/notifications/stream`, (value) => {
+          if (typeof value !== 'object' || value === null || !('id' in value) || typeof value.id !== 'string') throw new Error('Invalid notification event.');
+          return { id: value.id };
+        }).pipe(
+          map(() => projectId),
+          catchError(() => EMPTY),
+        ) : EMPTY;
       }),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe((projectId) => this.refreshNotifications(projectId));
+
+    projectIDs.pipe(
+      switchMap((projectId) => this.loadProject(projectId)),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe((state) => this.state.set(state));
   }
@@ -220,14 +228,18 @@ export class ProjectDashboardComponent implements OnInit {
     this.api.post<Record<string, never>, void>(`projects/${encodeURIComponent(notice.project_id)}/notifications/${encodeURIComponent(notice.id)}/${action}`, {}).pipe(
       switchMap(() => this.api.get<ApiPage<NotificationNotice>>(`projects/${encodeURIComponent(notice.project_id)}/notifications?limit=50&offset=0`)),
       takeUntilDestroyed(this.destroyRef),
-    ).subscribe((page) => this.updateNotifications(page.items));
+    ).subscribe((page) => {
+      if (this.projectId === notice.project_id) this.updateNotifications(page.items);
+    });
   }
 
-  private refreshNotifications(): void {
-    if (!this.projectId) return;
-    this.api.get<ApiPage<NotificationNotice>>(`projects/${encodeURIComponent(this.projectId)}/notifications?limit=50&offset=0`).pipe(
+  private refreshNotifications(projectId: string): void {
+    if (!projectId || this.projectId !== projectId) return;
+    this.api.get<ApiPage<NotificationNotice>>(`projects/${encodeURIComponent(projectId)}/notifications?limit=50&offset=0`).pipe(
       takeUntilDestroyed(this.destroyRef),
-    ).subscribe((page) => this.updateNotifications(page.items));
+    ).subscribe((page) => {
+      if (this.projectId === projectId) this.updateNotifications(page.items);
+    });
   }
 
   private updateNotifications(notifications: NotificationNotice[]): void {

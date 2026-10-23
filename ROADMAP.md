@@ -1701,7 +1701,12 @@ Create an internal notification system.
 Notifications are persisted with deduplicated source-event keys and fixed safe
 summaries. Project-scoped REST inbox operations support read, acknowledge, and
 bounded retry; authenticated SSE provides best-effort live delivery. Failed
-critical notices remain in the inbox until acknowledged.
+critical notices remain in the inbox until acknowledged. Migration
+`0022_notifications.sql` associates status alerts with both explicit Agent
+project membership and the active Brain-to-project relationship. The dashboard
+closes the previous project's SSE stream when its route changes, preventing a
+late event from refreshing or acknowledging notifications in the newly selected
+project.
 
 Examples:
 
