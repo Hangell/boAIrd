@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"boAIrd/internal/extension"
 	"boAIrd/internal/logging"
+	"boAIrd/internal/provider"
 	governedtool "boAIrd/internal/tool"
 )
 
@@ -19,47 +21,57 @@ const (
 	extensionHTTPMaxResponse = 256 << 10
 )
 
-// extensionToolRegistrar adapts validated extension tool declarations to the
-// governed tool registry. Declarative tools are contract-only and are not
-// executable; http tools perform one bounded, redacted request to their
-// administrator-approved HTTPS endpoint and can never touch the filesystem,
-// secrets, or an arbitrary program.
 type extensionToolRegistrar struct {
 	registry *governedtool.Registry
 	client   *http.Client
+	policy   provider.EndpointPolicy
 }
 
-func newExtensionToolRegistrar(registry *governedtool.Registry) *extensionToolRegistrar {
-	return &extensionToolRegistrar{registry: registry, client: &http.Client{Timeout: extensionHTTPTimeout}}
+func newExtensionToolRegistrar(registry *governedtool.Registry, policy provider.EndpointPolicy) *extensionToolRegistrar {
+	return &extensionToolRegistrar{
+		registry: registry,
+		client:   policy.NewExtensionHTTPClient(extensionHTTPTimeout),
+		policy:   policy,
+	}
 }
 
-func (r *extensionToolRegistrar) RegisterTool(_ context.Context, declaration extension.ToolDeclaration) error {
-	if declaration.Kind == extension.KindDeclarative {
-		return nil
+func (r *extensionToolRegistrar) RegisterTools(_ context.Context, declarations []extension.ToolDeclaration) error {
+	tools := make([]governedtool.Tool, 0, len(declarations))
+	for _, declaration := range declarations {
+		if declaration.Kind == extension.KindDeclarative {
+			continue
+		}
+		if declaration.Kind != extension.KindHTTP || r.policy.ValidateExtensionEndpoint(declaration.Endpoint) != nil {
+			return fmt.Errorf("%w: extension endpoint is not approved", extension.ErrInvalidManifest)
+		}
+		value := declaration
+		tool := governedtool.Definition[json.RawMessage, json.RawMessage]{
+			Metadata: governedtool.Contract{
+				Name: value.Name, Description: value.Description,
+				InputSchema: value.InputSchema, OutputSchema: value.OutputSchema,
+				RequiredCapabilities: value.RequiredCapabilities,
+				Limits:               governedtool.Limits{Timeout: extensionHTTPTimeout, MaxInputBytes: 64 << 10, MaxOutputBytes: extensionHTTPMaxResponse + 4096},
+			},
+			Validate: func(input json.RawMessage) error {
+				return extension.ValidateJSONSchema(value.InputSchema, input)
+			},
+			ValidateOutput: func(output json.RawMessage) error {
+				return extension.ValidateJSONSchema(value.OutputSchema, output)
+			},
+			RunWithRequest: func(ctx context.Context, _ governedtool.Request, input json.RawMessage) (json.RawMessage, error) {
+				return r.runHTTP(ctx, value, input)
+			},
+		}
+		tools = append(tools, tool)
 	}
-	if declaration.Kind != extension.KindHTTP {
-		return fmt.Errorf("%w: unsupported extension tool kind %q", extension.ErrInvalidManifest, declaration.Kind)
+	if err := r.registry.RegisterBatch(tools); err != nil {
+		return fmt.Errorf("%w: an extension tool name is already registered", extension.ErrToolNameConflict)
 	}
-	tool := governedtool.Definition[json.RawMessage, json.RawMessage]{
-		Metadata: governedtool.Contract{
-			Name:                 declaration.Name,
-			Description:          declaration.Description,
-			InputSchema:          declaration.InputSchema,
-			OutputSchema:         declaration.OutputSchema,
-			RequiredCapabilities: declaration.RequiredCapabilities,
-			Limits:               governedtool.Limits{Timeout: extensionHTTPTimeout, MaxInputBytes: 64 << 10, MaxOutputBytes: extensionHTTPMaxResponse + 4096},
-		},
-		Validate:       func(json.RawMessage) error { return nil },
-		ValidateOutput: func(json.RawMessage) error { return nil },
-		RunWithRequest: func(ctx context.Context, _ governedtool.Request, input json.RawMessage) (json.RawMessage, error) {
-			return r.runHTTP(ctx, declaration, input)
-		},
-	}
-	return r.registry.Register(tool)
+	return nil
 }
 
-func (r *extensionToolRegistrar) UnregisterTool(_ context.Context, name string) {
-	r.registry.Unregister(name)
+func (r *extensionToolRegistrar) UnregisterTools(_ context.Context, names []string) {
+	r.registry.UnregisterBatch(names)
 }
 
 func (r *extensionToolRegistrar) runHTTP(ctx context.Context, declaration extension.ToolDeclaration, input json.RawMessage) (json.RawMessage, error) {
@@ -68,17 +80,22 @@ func (r *extensionToolRegistrar) runHTTP(ctx context.Context, declaration extens
 		return nil, extension.ErrInvalidManifest
 	}
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
 	response, err := r.client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("extension HTTP request failed")
+		return nil, errors.New("extension HTTP request failed")
 	}
 	defer func() { _ = response.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(response.Body, extensionHTTPMaxResponse))
-	if err != nil {
-		return nil, fmt.Errorf("extension HTTP response failed")
+	data, err := io.ReadAll(io.LimitReader(response.Body, extensionHTTPMaxResponse+1))
+	if err != nil || len(data) > extensionHTTPMaxResponse {
+		return nil, errors.New("extension HTTP response is invalid or exceeds its limit")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("extension HTTP endpoint returned status %d", response.StatusCode)
 	}
-	return json.RawMessage(logging.RedactSensitiveText(string(data))), nil
+	redacted := []byte(logging.RedactSensitiveText(string(data)))
+	if !json.Valid(redacted) {
+		return nil, errors.New("extension HTTP response is not valid JSON")
+	}
+	return json.RawMessage(redacted), nil
 }

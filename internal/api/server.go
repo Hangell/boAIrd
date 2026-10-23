@@ -189,22 +189,32 @@ func NewHandlerWithProfilesAuditNotificationsAndTemplates(database DatabaseHealt
 
 // NewHandlerWithSecurity applies the configured request-boundary security policy.
 func NewHandlerWithSecurity(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, nil, nil, nil, policy, mcpHandlers...)
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, nil, nil, nil, nil, policy, mcpHandlers...)
 }
 
 // NewHandlerWithSecurityAndNotifications also registers the notification routes.
 func NewHandlerWithSecurityAndNotifications(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, nil, nil, policy, mcpHandlers...)
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, nil, nil, nil, policy, mcpHandlers...)
 }
 
 // NewHandlerWithSecurityNotificationsAndTemplates registers template and notification routes with request security applied.
 func NewHandlerWithSecurityNotificationsAndTemplates(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, nil, policy, mcpHandlers...)
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, nil, nil, policy, mcpHandlers...)
 }
 
 // NewHandlerWithSecurityNotificationsTemplatesAndExtensions also registers the extension routes.
 func NewHandlerWithSecurityNotificationsTemplatesAndExtensions(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, extensions ExtensionManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, extensions, policy, mcpHandlers...)
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, extensions, nil, policy, mcpHandlers...)
+}
+
+// NewHandlerWithSecurityNotificationsTemplatesAndUsers also registers the user and project membership routes.
+func NewHandlerWithSecurityNotificationsTemplatesAndUsers(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, users UserManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, nil, users, policy, mcpHandlers...)
+}
+
+// NewHandlerWithSecurityNotificationsTemplatesExtensionsAndUsers registers extension and multi-user routes.
+func NewHandlerWithSecurityNotificationsTemplatesExtensionsAndUsers(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, extensions ExtensionManager, users UserManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, extensions, users, policy, mcpHandlers...)
 }
 
 func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, mcpHandlers ...http.Handler) http.Handler {
@@ -216,13 +226,13 @@ func newHandlerWithMCP(database DatabaseHealth, projects ProjectManager, credent
 }
 
 func newHandlerWithServices(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, mcpHandlers ...http.Handler) http.Handler {
-	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, nil, SecurityPolicy{}, mcpHandlers...)
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, templates, nil, nil, SecurityPolicy{}, mcpHandlers...)
 }
 
-func newHandlerWithServicesAndSecurity(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, extensions ExtensionManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
+func newHandlerWithServicesAndSecurity(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, extensions ExtensionManager, users UserManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	sessions := newLocalSessionStore()
-	registerSessionRoutes(mux, database, localAuthToken, sessions)
+	registerSessionRoutes(mux, database, localAuthToken, sessions, users)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -243,13 +253,13 @@ func newHandlerWithServicesAndSecurity(database DatabaseHealth, projects Project
 		})
 	})
 	if projects != nil {
-		registerProjectRoutes(mux, projects)
+		registerProjectRoutes(mux, projects, users)
 	}
 	if credentials != nil {
 		registerCredentialRoutes(mux, credentials)
 	}
 	if agents != nil {
-		registerAgentRoutes(mux, agents, projects)
+		registerAgentRoutes(mux, agents, projects, users)
 	}
 	if brains != nil {
 		registerBrainRoutes(mux, brains, localAuthToken, sessions)
@@ -288,10 +298,13 @@ func newHandlerWithServicesAndSecurity(database DatabaseHealth, projects Project
 	if extensions != nil {
 		registerExtensionRoutes(mux, extensions)
 	}
+	if users != nil {
+		registerUserRoutes(mux, users, sessions)
+	}
 	if len(mcpHandlers) > 0 && mcpHandlers[0] != nil {
 		mux.Handle("/mcp", mcpHandlers[0])
 	}
-	secured := secureAPI(mux, database, projects, tasks, runs, localAuthToken, sessions)
+	secured := secureAPI(mux, database, projects, tasks, runs, users, localAuthToken, sessions)
 	secured = rateLimitHandler(secured, policy)
 	return securityHeaders(corsAPI(secured))
 }

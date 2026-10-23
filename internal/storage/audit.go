@@ -122,3 +122,35 @@ func (r *AuditRepository) ListEvents(ctx context.Context, projectID string, limi
 	}
 	return events, nil
 }
+
+// ListUserAuthorityEvents returns global user and membership changes newest first.
+func (r *AuditRepository) ListUserAuthorityEvents(ctx context.Context, limit, offset int) ([]audit.UserAuthorityEntry, error) {
+	rows, err := r.database.QueryContext(ctx, `SELECT id, actor_id, event_type, target_user_id, project_id,
+		previous_role, next_role, result, reason, created_at
+		FROM user_authority_audit_events ORDER BY sequence DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("query user authority audit events: %w", err)
+	}
+	values := make([]audit.UserAuthorityEntry, 0)
+	for rows.Next() {
+		var value audit.UserAuthorityEntry
+		var created string
+		if err := rows.Scan(&value.ID, &value.ActorID, &value.EventType, &value.TargetUserID, &value.ProjectID,
+			&value.PreviousRole, &value.NextRole, &value.Result, &value.Reason, &created); err != nil {
+			return nil, closeRowsAfter(rows, "user authority audit", fmt.Errorf("scan user authority audit event: %w", err))
+		}
+		value.Reason = logging.RedactSensitiveText(value.Reason)
+		value.CreatedAt, err = parseDatabaseTime(created)
+		if err != nil {
+			return nil, closeRowsAfter(rows, "user authority audit", fmt.Errorf("parse user authority audit time: %w", err))
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, closeRowsAfter(rows, "user authority audit", fmt.Errorf("iterate user authority audit events: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close user authority audit rows: %w", err)
+	}
+	return values, nil
+}

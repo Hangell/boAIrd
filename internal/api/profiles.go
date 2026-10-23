@@ -7,7 +7,6 @@ import (
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/profile"
-	"boAIrd/internal/project"
 )
 
 // ProfileManager exposes built-in profile definitions and project overrides.
@@ -80,12 +79,17 @@ func registerProfileRoutes(mux *http.ServeMux, manager ProfileManager) {
 	})
 
 	mux.HandleFunc("PUT /api/v1/projects/{projectID}/profiles/{key}", func(w http.ResponseWriter, r *http.Request) {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
 		var input profile.SaveInput
 		if err := decodeJSON(w, r, &input); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid profile request")
 			return
 		}
-		input.ActorID = project.LocalAdministratorID
+		input.ActorID = actorID
 		value, err := manager.Save(r.Context(), r.PathValue("projectID"), r.PathValue("key"), input)
 		if err != nil {
 			writeProfileError(w, err)

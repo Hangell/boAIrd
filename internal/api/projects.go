@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +40,11 @@ type apiErrorDetail struct {
 	Message string `json:"message"`
 }
 
-func registerProjectRoutes(mux *http.ServeMux, manager ProjectManager) {
+type userScopedProjectLister interface {
+	ListForUser(context.Context, string, int, int) ([]project.Project, error)
+}
+
+func registerProjectRoutes(mux *http.ServeMux, manager ProjectManager, users UserManager) {
 	mux.HandleFunc("POST /api/v1/projects", func(w http.ResponseWriter, r *http.Request) {
 		var input project.CreateInput
 		if err := decodeJSON(w, r, &input); err != nil {
@@ -70,7 +75,25 @@ func registerProjectRoutes(mux *http.ServeMux, manager ProjectManager) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		values, err := manager.List(r.Context(), limit, offset)
+		if limit == 0 {
+			limit = 50
+		}
+		var values []project.Project
+		if principalIsAdministrator(r) {
+			values, err = manager.List(r.Context(), limit, offset)
+		} else {
+			principal, ok := principalID(r)
+			if !ok || users == nil {
+				writeAPIError(w, http.StatusForbidden, "forbidden", "project access is not authorized")
+				return
+			}
+			lister, supported := manager.(userScopedProjectLister)
+			if !supported {
+				writeAPIError(w, http.StatusForbidden, "forbidden", "project access is not authorized")
+				return
+			}
+			values, err = lister.ListForUser(r.Context(), principal, limit, offset)
+		}
 		if err != nil {
 			writeProjectError(w, err)
 			return
@@ -78,9 +101,6 @@ func registerProjectRoutes(mux *http.ServeMux, manager ProjectManager) {
 		items := make([]projectResponse, 0, len(values))
 		for _, value := range values {
 			items = append(items, toProjectResponse(value))
-		}
-		if limit == 0 {
-			limit = 50
 		}
 		writeJSON(w, http.StatusOK, projectListResponse{Items: items, Limit: limit, Offset: offset})
 	})

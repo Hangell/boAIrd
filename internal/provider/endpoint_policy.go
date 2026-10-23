@@ -2,12 +2,15 @@ package provider
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // EndpointPolicy controls which provider hosts and resolved addresses adapters may reach.
@@ -80,6 +83,58 @@ func (p EndpointPolicy) validateBaseURL(value, defaultBaseURL string) (*url.URL,
 		return nil, errors.New("custom provider host is not in the configured allowlist")
 	}
 	return parsed, nil
+}
+
+// ValidateExtensionEndpoint restricts extension HTTP calls to exact HTTPS
+// hosts explicitly approved by the administrator.
+func (p EndpointPolicy) ValidateExtensionEndpoint(raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
+		return errors.New("extension endpoint must be an absolute HTTPS URL without credentials, query, or fragment")
+	}
+	if parsed.Port() != "" && parsed.Port() != "443" {
+		return errors.New("extension endpoint must use port 443")
+	}
+	host := normalizeURLHost(parsed.Hostname())
+	if host == "" || isExplicitLoopbackHost(host) {
+		return errors.New("extension endpoint host is not allowed")
+	}
+	if address, err := netip.ParseAddr(host); err == nil {
+		if address.Zone() != "" {
+			return errors.New("extension endpoint IP zones are not allowed")
+		}
+		return errors.New("extension endpoint must use an allowlisted DNS hostname")
+	}
+	if _, allowed := p.allowedHosts[host]; !allowed {
+		return errors.New("extension endpoint host is not in the configured allowlist")
+	}
+	return nil
+}
+
+// NewExtensionHTTPClient pins DNS resolution through the shared endpoint
+// policy and refuses redirects so each request stays within the approved host.
+func (p EndpointPolicy) NewExtensionHTTPClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			Proxy:           nil,
+			DialContext:     p.extensionDialContext,
+			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func (p EndpointPolicy) extensionDialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	// Provider-specific CIDR exceptions must not widen extension network access.
+	p.allowedIPRanges = nil
+	return p.dialContext(ctx, network, address)
 }
 
 func (p EndpointPolicy) dialContext(ctx context.Context, network, address string) (net.Conn, error) {

@@ -33,7 +33,7 @@ The architecture must support the following goals:
 - optimized memory usage;
 - auditability;
 - future remote deployment;
-- future multi-user operation;
+- user-scoped project isolation;
 - future distributed execution.
 
 ---
@@ -272,6 +272,23 @@ The Administrator controls:
 - tool permissions.
 
 The Brain cannot override administrative policies.
+
+Human Users are separate from Agents and have a global `administrator` or
+`member` role plus explicit project membership. The configured local bearer
+token identifies the undeletable bootstrap administrator; administrators can
+issue opaque sessions to registered users. Members receive read-only
+capabilities and can access only their current project memberships. Administrator
+capabilities do not bypass project membership on project-specific routes; the
+administrator role adds operation authority, while membership still supplies
+resource scope. The bootstrap administrator is seeded into every project, and
+other administrators must be granted membership before using project-scoped
+operations. Administrators can list all projects and Agents and read Agent
+details/status events globally. Member lists filter membership before
+pagination, and member Agent details/status events require a direct or
+active-Brain association with a member project.
+User, membership, and session issuance changes are recorded in immutable audit;
+user and membership mutations commit with their audit event. Deleting a user or
+revoking membership invalidates the user's active in-memory sessions. Deleted user IDs are retired permanently so stale memberships cannot transfer to a recreated identity.
 
 ---
 
@@ -2667,20 +2684,27 @@ Task transitions
 The implemented task workflow persists BACKLOG, READY, WORKING, REVIEW,
 HUMAN_REVIEW, BLOCKED, FAILED, DONE, and CANCELLED states. The service validates
 transitions and project/agent references, applies project human-review policy,
-and requires an actor and reason for each mutation. SQLite writes immutable
-audit rows for task creation, assignment, and status changes. Every `/api/v1` operation except status requires the configured local
-administrator bearer token or its HttpOnly session cookie. The Go API evaluates
-an explicit capability per operation and verifies project membership before
-accessing project-scoped resources. Task mutations receive a server-derived
-administrator actor with explicit capability grants; caller JSON cannot set an
-actor. Authorization denials are written to an immutable SQLite audit table.
-The browser exchanges the token at `/api/v1/session`, keeps it out of persistent
-application storage, and receives a SameSite=Strict HttpOnly cookie containing
-a random opaque session ID. The server stores the ID and its 30-minute expiry in
-memory; logout revokes it, and service restart invalidates all sessions. The
-cookie mutation path checks a fixed dashboard-origin allowlist, including logout.
-Direct Bearer authentication remains available to local API clients. Brain replacement also
-records its required reason in the existing immutable project audit stream.
+and requires an actor and reason for each mutation. Both storage backends write
+immutable audit rows for task creation, assignment, and status changes. Every `/api/v1`
+operation except status requires a current user identity: the configured bearer
+token identifies the bootstrap administrator, and administrators can issue
+opaque, 30-minute browser sessions to registered users. The Go API resolves the
+current role on every request, evaluates an explicit capability, and verifies
+project membership before accessing project-scoped resources, including for
+administrator-role users. The role grants capabilities but never project scope.
+The bootstrap administrator is seeded into every project; other administrators
+must first receive project membership. Administrators can list all projects and
+Agents; member listings filter by membership before pagination, and Agent
+detail/status-event reads for members enforce the same scope. Members receive a
+read-only capability set. Task
+mutations receive a server-derived actor; caller JSON cannot set an actor.
+Authorization denials and user, membership, and session changes are written to
+immutable configured-database audit tables. The server stores opaque session IDs and expiry
+in memory; logout, user deletion, or membership revocation invalidates that
+user's sessions, and service restart invalidates all sessions. Cookie mutations
+check a fixed dashboard-origin allowlist. Direct Bearer authentication remains
+available to the bootstrap administrator. Brain replacement also records its
+required reason in the existing immutable project audit stream.
 
 Task records carry a monotonically increasing version. Assignment and status
 updates use a SQLite compare-and-swap against the version that was read, so a
@@ -2712,16 +2736,19 @@ Message
 conversation history
 ```
 
-The implementation stores one Conversation per Task in SQLite. Messages preserve
-opaque content with a content type and JSON metadata. All REST routes authenticate
-the single local administrator; the service checks project-scoped requests against
+The implementation stores one Conversation per Task in the configured database. Messages preserve
+opaque content with a content type and JSON metadata. REST routes authenticate a
+registered human identity and check project-scoped requests against
 `project_members`. Existing projects are backfilled and new projects receive local
-administrator membership. Message history is bounded and cursor-paginated. The
+administrator membership. Administrators manage human users and memberships;
+members can read only their current project scopes. User, membership, and session
+issuance changes are recorded in an immutable authority audit stream, and deleting
+a user or revoking membership invalidates their sessions. Message history is
+bounded and cursor-paginated. The
 service checks Agent senders against task assignment and Brain senders against the
 active project Brain. Secret-pattern redaction runs before message content and
-metadata are stored. Multi-user identity and membership management remain future
-work. The MCP server is an executable adapter over these services. Its Agent
-tokens are registered in configuration and its tool calls apply explicit
+metadata are stored. The MCP server is an executable adapter over these services. Its
+Agent tokens are registered in configuration and its tool calls apply explicit
 capabilities, project scope, or exact task-assignment checks before accessing
 project, task, conversation, Brain, or run data.
 
@@ -3549,7 +3576,6 @@ Kafka
 microservices
 distributed workers
 vector database
-multi-user
 enterprise SSO
 local LLM
 complex billing
@@ -3620,7 +3646,6 @@ Advanced Audit
 ```text
 Remote Deployment
 PostgreSQL
-Multi-user
 Distributed Workers
 ```
 

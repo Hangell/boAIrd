@@ -28,16 +28,17 @@ import (
 const maxToolPageSize = 100
 
 type Services struct {
-	Agents        AgentService
-	Projects      ProjectService
-	Tasks         TaskService
-	Denials       AuthorizationDenialService
-	Conversations ConversationService
-	Brains        BrainService
-	Runs          RunService
-	Heartbeats    HeartbeatService
-	Tools         ToolExecutor
-	GitTools      ToolExecutor
+	Agents         AgentService
+	Projects       ProjectService
+	Tasks          TaskService
+	Denials        AuthorizationDenialService
+	Conversations  ConversationService
+	Brains         BrainService
+	Runs           RunService
+	Heartbeats     HeartbeatService
+	Tools          ToolExecutor
+	GitTools       ToolExecutor
+	ExtensionTools ToolExecutor
 }
 
 type ToolExecutor interface {
@@ -153,6 +154,9 @@ func (s *Server) registerTools(server *mcp.Server) {
 		mcp.AddTool[gitCommitMCPInput, governedtool.GitCommitOutput](server, add("boaird.git.commit", "Commit staged changes with a message inside an authorized project workspace."), s.gitCommit)
 		mcp.AddTool[gitPushMCPInput, governedtool.GitPushOutput](server, add("boaird.git.push", "Push a branch to a named remote inside an authorized project workspace; denied by default and subject to Human Review."), s.gitPush)
 		mcp.AddTool[gitMergeMCPInput, governedtool.GitMergeOutput](server, add("boaird.git.merge", "Merge a reference into the current branch inside an authorized project workspace; denied by default and subject to Human Review."), s.gitMerge)
+	}
+	if s.services.ExtensionTools != nil {
+		mcp.AddTool[extensionExecuteMCPInput, map[string]any](server, add("boaird.extension.execute", "Execute one activated project extension tool through capability, project-scope, schema, and audit enforcement."), s.extensionExecute)
 	}
 }
 
@@ -316,6 +320,14 @@ type gitMergeMCPInput struct {
 	RunID            string `json:"run_id,omitempty"`
 	Reference        string `json:"reference"`
 	WorkingDirectory string `json:"working_directory,omitempty"`
+}
+
+type extensionExecuteMCPInput struct {
+	ProjectID string         `json:"project_id"`
+	ToolName  string         `json:"tool_name"`
+	TaskID    string         `json:"task_id,omitempty"`
+	RunID     string         `json:"run_id,omitempty"`
+	Input     map[string]any `json:"input"`
 }
 type runOutput struct {
 	ID        string `json:"id"`
@@ -951,6 +963,40 @@ func (s *Server) gitExecute(ctx context.Context, a agent.Agent, projectID, taskI
 		return nil, toolError(err)
 	}
 	return encodedOutput, nil
+}
+
+func (s *Server) extensionExecute(ctx context.Context, _ *mcp.CallToolRequest, input extensionExecuteMCPInput) (*mcp.CallToolResult, map[string]any, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, nil, toolError(err)
+	}
+	if input.ProjectID == "" || strings.TrimSpace(input.ProjectID) != input.ProjectID ||
+		input.ToolName == "" || strings.TrimSpace(input.ToolName) != input.ToolName ||
+		s.services.ExtensionTools == nil {
+		return nil, nil, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedInput, err := json.Marshal(input.Input)
+	if err != nil || len(encodedInput) == 0 || len(encodedInput) > 64<<10 {
+		return nil, nil, toolError(governedtool.ErrInvalidInput)
+	}
+	projectIDs := []string(nil)
+	if s.hasProjectScope(ctx, a, input.ProjectID) {
+		projectIDs = []string{input.ProjectID}
+	}
+	output, err := s.services.ExtensionTools.Execute(ctx, governedtool.Request{
+		ToolName: input.ToolName, ProjectID: input.ProjectID, TaskID: input.TaskID, RunID: input.RunID,
+		ResourceType: "extension", ResourceID: input.ToolName,
+		Principal: governedtool.Principal{ID: a.ID(), Type: "agent", Capabilities: a.Capabilities(), ProjectIDs: projectIDs},
+		Input:     encodedInput,
+	})
+	if err != nil {
+		return nil, nil, toolError(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(output, &decoded); err != nil || decoded == nil {
+		return nil, nil, toolError(governedtool.ErrExecution)
+	}
+	return nil, decoded, nil
 }
 
 func (s *Server) gitRead(ctx context.Context, _ *mcp.CallToolRequest, input gitReadMCPInput) (*mcp.CallToolResult, governedtool.GitReadOutput, error) {

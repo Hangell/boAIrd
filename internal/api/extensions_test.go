@@ -14,8 +14,10 @@ import (
 
 type registrarStub struct{}
 
-func (registrarStub) RegisterTool(_ context.Context, _ extension.ToolDeclaration) error { return nil }
-func (registrarStub) UnregisterTool(_ context.Context, _ string)                        {}
+func (registrarStub) RegisterTools(_ context.Context, _ []extension.ToolDeclaration) error {
+	return nil
+}
+func (registrarStub) UnregisterTools(_ context.Context, _ []string) {}
 
 func newExtensionHandler(t *testing.T) (http.Handler, *storage.Database) {
 	t.Helper()
@@ -32,13 +34,13 @@ func newExtensionHandler(t *testing.T) (http.Handler, *storage.Database) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := extension.NewService(repository, registrarStub{}, repository)
+	service, err := extension.NewService(repository, registrarStub{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewHandlerWithSecurityNotificationsTemplatesAndExtensions(
+	handler := NewHandlerWithSecurityNotificationsTemplatesExtensionsAndUsers(
 		database, nil, nil, nil, nil, nil, nil, nil, testLocalAuthTokenBytes(), nil, nil,
-		nil, nil, nil, nil, service, SecurityPolicy{},
+		nil, nil, nil, nil, service, bootstrapTestUserManager{}, SecurityPolicy{},
 	)
 	return handler, database
 }

@@ -27,6 +27,14 @@ type Repository interface {
 	Update(context.Context, Agent) error
 }
 
+type projectScopedListRepository interface {
+	ListForUser(context.Context, string, int, int) ([]Agent, error)
+}
+
+type projectAssociationRepository interface {
+	HasProjectAssociation(context.Context, string, string) (bool, error)
+}
+
 type projectScopeRepository interface {
 	AddProject(context.Context, string, string, string) error
 	RemoveProject(context.Context, string, string, string) error
@@ -135,6 +143,39 @@ func (m *Manager) List(ctx context.Context, limit, offset int) ([]Agent, error) 
 		return nil, invalidInput(errors.New("offset must not be negative"))
 	}
 	return m.repository.List(ctx, limit, offset)
+}
+
+// ListForUser returns Agents associated with one of the user's current
+// projects. The repository applies membership scope before pagination.
+func (m *Manager) ListForUser(ctx context.Context, userID string, limit, offset int) ([]Agent, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, invalidInput(errors.New("user ID is required"))
+	}
+	if limit == 0 {
+		limit = defaultPageSize
+	}
+	if limit < 1 || limit > maximumPageSize {
+		return nil, invalidInput(fmt.Errorf("limit must be between 1 and %d", maximumPageSize))
+	}
+	if offset < 0 {
+		return nil, invalidInput(errors.New("offset must not be negative"))
+	}
+	repository, ok := m.repository.(projectScopedListRepository)
+	if !ok {
+		return nil, errors.New("agent repository does not support project-scoped listing")
+	}
+	return repository.ListForUser(ctx, userID, limit, offset)
+}
+
+func (m *Manager) HasProjectAssociation(ctx context.Context, agentID, userID string) (bool, error) {
+	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(userID) == "" {
+		return false, invalidInput(errors.New("agent and user IDs are required"))
+	}
+	repository, ok := m.repository.(projectAssociationRepository)
+	if !ok {
+		return false, errors.New("agent repository does not support project association checks")
+	}
+	return repository.HasProjectAssociation(ctx, agentID, userID)
 }
 
 func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Agent, error) {

@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"boAIrd/internal/extension"
-	"boAIrd/internal/project"
 )
 
 // ExtensionManager is the subset of the extension service exposed to the API.
@@ -39,12 +38,17 @@ func registerExtensionRoutes(mux *http.ServeMux, manager ExtensionManager) {
 		writeJSON(w, http.StatusOK, output)
 	})
 	mux.HandleFunc("POST /api/v1/extensions", func(w http.ResponseWriter, r *http.Request) {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "authentication is required")
+			return
+		}
 		var manifest extension.Manifest
 		if err := decodeJSON(w, r, &manifest); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
 			return
 		}
-		value, err := manager.Install(r.Context(), manifest, project.LocalAdministratorID)
+		value, err := manager.Install(r.Context(), manifest, actorID)
 		if err != nil {
 			writeExtensionError(w, err)
 			return
@@ -60,7 +64,12 @@ func registerExtensionRoutes(mux *http.ServeMux, manager ExtensionManager) {
 		writeJSON(w, http.StatusOK, extensionView(value))
 	})
 	mux.HandleFunc("PUT /api/v1/extensions/{name}/activate", func(w http.ResponseWriter, r *http.Request) {
-		value, err := manager.Activate(r.Context(), r.PathValue("name"), project.LocalAdministratorID)
+		actorID, ok := principalID(r)
+		if !ok {
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "authentication is required")
+			return
+		}
+		value, err := manager.Activate(r.Context(), r.PathValue("name"), actorID)
 		if err != nil {
 			writeExtensionError(w, err)
 			return
@@ -68,7 +77,12 @@ func registerExtensionRoutes(mux *http.ServeMux, manager ExtensionManager) {
 		writeJSON(w, http.StatusOK, extensionView(value))
 	})
 	mux.HandleFunc("DELETE /api/v1/extensions/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := manager.Deactivate(r.Context(), r.PathValue("name"), project.LocalAdministratorID); err != nil {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "authentication is required")
+			return
+		}
+		if err := manager.Deactivate(r.Context(), r.PathValue("name"), actorID); err != nil {
 			writeExtensionError(w, err)
 			return
 		}
@@ -86,6 +100,8 @@ func writeExtensionError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "extension not found")
 	case errors.Is(err, extension.ErrAlreadyExists):
 		writeAPIError(w, http.StatusConflict, "conflict", "extension already exists")
+	case errors.Is(err, extension.ErrToolNameConflict):
+		writeAPIError(w, http.StatusConflict, "tool_name_conflict", "an extension tool name is already reserved")
 	case errors.Is(err, extension.ErrInvalidManifest):
 		writeAPIError(w, http.StatusBadRequest, "invalid_manifest", "extension manifest is invalid")
 	case errors.Is(err, extension.ErrWrongStatus):

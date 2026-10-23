@@ -14,6 +14,10 @@ type AuditReader interface {
 	ListEvents(context.Context, string, int, int) ([]audit.Entry, error)
 }
 
+type userAuthorityAuditReader interface {
+	ListUserAuthorityEvents(context.Context, int, int) ([]audit.UserAuthorityEntry, error)
+}
+
 type auditEntryResponse struct {
 	ID           string    `json:"id"`
 	ProjectID    string    `json:"project_id"`
@@ -34,7 +38,58 @@ type auditListResponse struct {
 	Offset int                  `json:"offset"`
 }
 
+type userAuthorityAuditResponse struct {
+	ID           string    `json:"id"`
+	ActorID      string    `json:"actor_id"`
+	EventType    string    `json:"event_type"`
+	TargetUserID string    `json:"target_user_id"`
+	ProjectID    string    `json:"project_id,omitempty"`
+	PreviousRole string    `json:"previous_role,omitempty"`
+	NextRole     string    `json:"next_role,omitempty"`
+	Result       string    `json:"result"`
+	Reason       string    `json:"reason,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type userAuthorityAuditListResponse struct {
+	Items  []userAuthorityAuditResponse `json:"items"`
+	Limit  int                          `json:"limit"`
+	Offset int                          `json:"offset"`
+}
+
 func registerAuditRoutes(mux *http.ServeMux, reader AuditReader) {
+	if authorityReader, ok := reader.(userAuthorityAuditReader); ok {
+		mux.HandleFunc("GET /api/v1/audit/users", func(w http.ResponseWriter, r *http.Request) {
+			limit, err := queryInteger(r, "limit", 0)
+			if err != nil || (r.URL.Query().Has("limit") && (limit < 1 || limit > 100)) {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer between 1 and 100")
+				return
+			}
+			offset, err := queryInteger(r, "offset", 0)
+			if err != nil || offset < 0 {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", "offset must be a non-negative integer")
+				return
+			}
+			if limit == 0 {
+				limit = 50
+			}
+			values, err := authorityReader.ListUserAuthorityEvents(r.Context(), limit, offset)
+			if err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not list user authority audit events")
+				return
+			}
+			items := make([]userAuthorityAuditResponse, 0, len(values))
+			for _, value := range values {
+				items = append(items, userAuthorityAuditResponse{
+					ID: value.ID, ActorID: value.ActorID, EventType: value.EventType,
+					TargetUserID: value.TargetUserID, ProjectID: value.ProjectID,
+					PreviousRole: value.PreviousRole, NextRole: value.NextRole, Result: value.Result,
+					Reason: logging.RedactSensitiveText(value.Reason), CreatedAt: value.CreatedAt,
+				})
+			}
+			writeJSON(w, http.StatusOK, userAuthorityAuditListResponse{Items: items, Limit: limit, Offset: offset})
+		})
+	}
 	mux.HandleFunc("GET /api/v1/projects/{projectID}/audit", func(w http.ResponseWriter, r *http.Request) {
 		limit, err := queryInteger(r, "limit", 0)
 		if err != nil || (r.URL.Query().Has("limit") && (limit < 1 || limit > 100)) {

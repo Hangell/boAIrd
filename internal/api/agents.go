@@ -8,7 +8,6 @@ import (
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/heartbeat"
-	"boAIrd/internal/project"
 )
 
 type agentResponse struct {
@@ -29,6 +28,62 @@ type agentResponse struct {
 	Status              agent.Status  `json:"status"`
 	LastSeenAt          *time.Time    `json:"last_seen_at,omitempty"`
 	SessionOpen         bool          `json:"session_open"`
+}
+
+func memberProjectIDs(r *http.Request, users UserManager) (map[string]struct{}, bool) {
+	principal, ok := principalID(r)
+	if !ok || users == nil {
+		return nil, false
+	}
+	memberships, err := users.ProjectsFor(r.Context(), principal)
+	if err != nil {
+		return nil, false
+	}
+	projectIDs := make(map[string]struct{}, len(memberships))
+	for projectID := range memberships {
+		projectIDs[projectID] = struct{}{}
+	}
+	return projectIDs, true
+}
+
+func agentVisibleToRequest(w http.ResponseWriter, r *http.Request, manager AgentManager, users UserManager, value agent.Agent) (map[string]struct{}, bool) {
+	if principalIsAdministrator(r) {
+		return nil, true
+	}
+	allowedProjects, ok := memberProjectIDs(r, users)
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "not_found", "agent not found")
+		return nil, false
+	}
+	userID, _ := principalID(r)
+	checker, supported := manager.(projectAssociationChecker)
+	if supported {
+		associated, err := checker.HasProjectAssociation(r.Context(), value.ID(), userID)
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not verify agent access")
+			return nil, false
+		}
+		if associated {
+			return allowedProjects, true
+		}
+	}
+	writeAPIError(w, http.StatusNotFound, "not_found", "agent not found")
+	return nil, false
+}
+
+func toVisibleAgentResponse(value agent.Agent, observed map[string]agent.Observed, allowedProjects map[string]struct{}) agentResponse {
+	response := toAgentResponse(value, observed)
+	if allowedProjects == nil {
+		return response
+	}
+	visibleProjects := make([]string, 0, len(response.ProjectIDs))
+	for _, projectID := range response.ProjectIDs {
+		if _, allowed := allowedProjects[projectID]; allowed {
+			visibleProjects = append(visibleProjects, projectID)
+		}
+	}
+	response.ProjectIDs = visibleProjects
+	return response
 }
 
 // AgentObserver derives server-owned runtime state for Agents.
@@ -63,7 +118,15 @@ type agentListResponse struct {
 	Offset int             `json:"offset"`
 }
 
-func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects ProjectManager) {
+type projectScopedAgentLister interface {
+	ListForUser(context.Context, string, int, int) ([]agent.Agent, error)
+}
+
+type projectAssociationChecker interface {
+	HasProjectAssociation(context.Context, string, string) (bool, error)
+}
+
+func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects ProjectManager, users UserManager) {
 	mux.HandleFunc("POST /api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		var input agent.CreateInput
 		if err := decodeJSON(w, r, &input); err != nil {
@@ -82,27 +145,48 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 
 	mux.HandleFunc("GET /api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		limit, err := queryInteger(r, "limit", 0)
-		if err != nil || (r.URL.Query().Has("limit") && limit == 0) {
+		if err != nil || (r.URL.Query().Has("limit") && (limit < 1 || limit > 100)) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer between 1 and 100")
 			return
 		}
 		offset, err := queryInteger(r, "offset", 0)
-		if err != nil {
+		if err != nil || offset < 0 {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "offset must be a non-negative integer")
-			return
-		}
-		values, err := manager.List(r.Context(), limit, offset)
-		if err != nil {
-			writeAgentError(w, err)
 			return
 		}
 		if limit == 0 {
 			limit = 50
 		}
+		var values []agent.Agent
+		var allowedProjects map[string]struct{}
+		if principalIsAdministrator(r) {
+			values, err = manager.List(r.Context(), limit, offset)
+		} else {
+			userID, ok := principalID(r)
+			if !ok || users == nil {
+				writeAPIError(w, http.StatusForbidden, "forbidden", "agent access is not authorized")
+				return
+			}
+			allowedProjects, ok = memberProjectIDs(r, users)
+			if !ok {
+				writeAPIError(w, http.StatusForbidden, "forbidden", "agent access is not authorized")
+				return
+			}
+			lister, supported := manager.(projectScopedAgentLister)
+			if !supported {
+				writeAPIError(w, http.StatusForbidden, "forbidden", "agent access is not authorized")
+				return
+			}
+			values, err = lister.ListForUser(r.Context(), userID, limit, offset)
+		}
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not list agents")
+			return
+		}
 		observed := observeAgents(r, manager, values)
 		items := make([]agentResponse, 0, len(values))
 		for _, value := range values {
-			items = append(items, toAgentResponse(value, observed))
+			items = append(items, toVisibleAgentResponse(value, observed, allowedProjects))
 		}
 		writeJSON(w, http.StatusOK, agentListResponse{Items: items, Limit: limit, Offset: offset})
 	})
@@ -113,7 +197,11 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 			writeAgentError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, toAgentResponse(value, observeAgents(r, manager, []agent.Agent{value})))
+		allowedProjects, visible := agentVisibleToRequest(w, r, manager, users, value)
+		if !visible {
+			return
+		}
+		writeJSON(w, http.StatusOK, toVisibleAgentResponse(value, observeAgents(r, manager, []agent.Agent{value}), allowedProjects))
 	})
 
 	if events, ok := manager.(AgentStatusEvents); ok {
@@ -123,8 +211,12 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 				writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer between 1 and 100")
 				return
 			}
-			if _, err := manager.Get(r.Context(), r.PathValue("id")); err != nil {
+			value, err := manager.Get(r.Context(), r.PathValue("id"))
+			if err != nil {
 				writeAgentError(w, err)
+				return
+			}
+			if _, visible := agentVisibleToRequest(w, r, manager, users, value); !visible {
 				return
 			}
 			values, err := events.Events(r.Context(), r.PathValue("id"), limit)
@@ -168,6 +260,11 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 	if projects != nil && supportsProjectScope {
 		mux.HandleFunc("PUT /api/v1/projects/{projectID}/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
 			projectID, agentID := r.PathValue("projectID"), r.PathValue("agentID")
+			actorID, ok := principalID(r)
+			if !ok {
+				writeConversationUnauthorized(w)
+				return
+			}
 			if _, err := projects.Get(r.Context(), projectID); err != nil {
 				writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
 				return
@@ -176,7 +273,7 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 				writeAgentError(w, err)
 				return
 			}
-			if err := scopeManager.AddProject(r.Context(), agentID, projectID, project.LocalAdministratorID); err != nil {
+			if err := scopeManager.AddProject(r.Context(), agentID, projectID, actorID); err != nil {
 				writeAgentError(w, err)
 				return
 			}
@@ -184,6 +281,11 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 		})
 		mux.HandleFunc("DELETE /api/v1/projects/{projectID}/agents/{agentID}", func(w http.ResponseWriter, r *http.Request) {
 			projectID, agentID := r.PathValue("projectID"), r.PathValue("agentID")
+			actorID, ok := principalID(r)
+			if !ok {
+				writeConversationUnauthorized(w)
+				return
+			}
 			if _, err := projects.Get(r.Context(), projectID); err != nil {
 				writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
 				return
@@ -192,7 +294,7 @@ func registerAgentRoutes(mux *http.ServeMux, manager AgentManager, projects Proj
 				writeAgentError(w, err)
 				return
 			}
-			if err := scopeManager.RemoveProject(r.Context(), agentID, projectID, project.LocalAdministratorID); err != nil {
+			if err := scopeManager.RemoveProject(r.Context(), agentID, projectID, actorID); err != nil {
 				writeAgentError(w, err)
 				return
 			}

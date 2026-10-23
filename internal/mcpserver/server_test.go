@@ -12,6 +12,7 @@ import (
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/brain"
+	"boAIrd/internal/capability"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/heartbeat"
 	"boAIrd/internal/mcptoken"
@@ -215,6 +216,10 @@ func (s *gitExecutorStub) Execute(_ context.Context, request governedtool.Reques
 	s.calls++
 	return json.RawMessage(`{"stdout":"ok","truncated":false}`), nil
 }
+
+type mcpExtensionAuditor struct{}
+
+func (mcpExtensionAuditor) RecordToolExecution(context.Context, governedtool.Event) error { return nil }
 
 type staticVerifier map[string]string
 
@@ -642,6 +647,108 @@ func TestGitToolsAreDiscoveredAndUseAuthenticatedRepositoryScope(t *testing.T) {
 	}
 	if executor.calls != 1 {
 		t.Fatalf("git.commit reached the executor despite missing capability; calls = %d", executor.calls)
+	}
+}
+
+func TestExtensionToolUsesAuthenticatedIdentityAndEnforcedProjectScope(t *testing.T) {
+	a, err := testAgentWithCapabilities(t, "extension-agent", []string{"extension.search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err = a.AddProject("project-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectOne, err := project.Restore(project.Snapshot{ID: "project-one", Name: "One", Status: project.StatusConfiguring})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectTwo, err := project.Restore(project.Snapshot{ID: "project-two", Name: "Two", Status: project.StatusConfiguring})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var executions int
+	registry := governedtool.NewRegistry()
+	tool := governedtool.Definition[json.RawMessage, json.RawMessage]{
+		Metadata: governedtool.Contract{
+			Name: "example.search", Description: "Search", InputSchema: json.RawMessage(`{"type":"object"}`),
+			OutputSchema: json.RawMessage(`{"type":"object"}`), RequiredCapabilities: []capability.Capability{"extension.search"},
+			Limits: governedtool.Limits{Timeout: time.Second, MaxInputBytes: 1024, MaxOutputBytes: 1024},
+		},
+		Validate: func(value json.RawMessage) error { return nil }, ValidateOutput: func(json.RawMessage) error { return nil },
+		Run: func(_ context.Context, value json.RawMessage) (json.RawMessage, error) {
+			executions++
+			return json.RawMessage(`{"ok":true}`), nil
+		},
+	}
+	if err := registry.Register(tool); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := governedtool.NewEnforcer(registry, mcpExtensionAuditor{}, governedtool.ScopeAuthorizerFunc(func(_ context.Context, principal governedtool.Principal, request governedtool.Request) error {
+		for _, id := range principal.ProjectIDs {
+			if id == request.ProjectID && request.ResourceType == "extension" && request.ResourceID == request.ToolName {
+				return nil
+			}
+		}
+		return governedtool.ErrDenied
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Services{
+		Agents:   agentStub{values: map[string]agent.Agent{a.ID(): a}},
+		Projects: projectStub{values: map[string]project.Project{"project-one": projectOne, "project-two": projectTwo}},
+		Tasks:    taskStub{}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}, ExtensionTools: executor,
+	}, staticVerifier{"secret": a.ID()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+	client := mcp.NewClient(&mcp.Implementation{Name: "extension-test", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint: httpServer.URL, HTTPClient: &http.Client{Transport: bearerRoundTripper{token: func() string { return "secret" }, base: http.DefaultTransport}}, DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, value := range tools.Tools {
+		if value.Name == "boaird.extension.execute" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("extension execution gateway was not advertised")
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.extension.execute", Arguments: map[string]any{
+		"project_id": "project-one", "tool_name": "example.search", "input": map[string]any{"query": "hello"},
+	}})
+	if err != nil || result == nil || result.IsError {
+		var encoded []byte
+		isError := false
+		if result != nil {
+			encoded, _ = json.Marshal(result.Content)
+			isError = result.IsError
+		}
+		t.Fatalf("authorized extension result = %s, isError=%v, error = %v", encoded, isError, err)
+	}
+	if executions != 1 {
+		t.Fatalf("extension executions = %d, want 1", executions)
+	}
+	denied, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.extension.execute", Arguments: map[string]any{
+		"project_id": "project-two", "tool_name": "example.search", "input": map[string]any{"query": "hello"},
+	}})
+	if err != nil || denied == nil || !denied.IsError {
+		t.Fatalf("cross-project extension result = %+v, error = %v; want denial", denied, err)
+	}
+	if executions != 1 {
+		t.Fatalf("cross-project request reached extension adapter; executions = %d", executions)
 	}
 }
 

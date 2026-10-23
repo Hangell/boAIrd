@@ -30,6 +30,7 @@ import (
 	"boAIrd/internal/task"
 	"boAIrd/internal/template"
 	governedtool "boAIrd/internal/tool"
+	"boAIrd/internal/user"
 )
 
 // Run opens service dependencies and serves HTTP until the context is cancelled.
@@ -260,10 +261,29 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 			return fmt.Errorf("configure git tool enforcement: %w", err)
 		}
 	}
+	extensionRepository, err := storage.NewExtensionRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize extension repository: %w", err)
+	}
+	extensionRegistry := governedtool.NewRegistry()
+	extensionRegistrar := newExtensionToolRegistrar(extensionRegistry, endpointPolicy)
+	extensionService, err := extension.NewService(extensionRepository, extensionRegistrar)
+	if err != nil {
+		return fmt.Errorf("initialize extension service: %w", err)
+	}
+	if err := extensionService.Reconcile(ctx); err != nil {
+		return fmt.Errorf("reconcile active extensions: %w", err)
+	}
+	extensionExecutor, err := governedtool.NewEnforcer(extensionRegistry, auditRepository, extensionScopeAuthorizer{
+		agents: agentManager, projects: projectManager, brains: brainService, tasks: taskService, runs: runManager, extensions: extensionRepository,
+	})
+	if err != nil {
+		return fmt.Errorf("configure extension tool enforcement: %w", err)
+	}
 	mcp, err := mcpserver.New(mcpserver.Services{
 		Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository,
 		Conversations: conversationService, Brains: brainService, Runs: runManager,
-		Heartbeats: heartbeatService, Tools: shellExecutor, GitTools: gitExecutor,
+		Heartbeats: heartbeatService, Tools: shellExecutor, GitTools: gitExecutor, ExtensionTools: extensionExecutor,
 	}, mcpTokenService)
 	if err != nil {
 		return fmt.Errorf("initialize MCP server: %w", err)
@@ -294,18 +314,13 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize template service: %w", err)
 	}
-	extensionRepository, err := storage.NewExtensionRepository(database)
+	userRepository, err := storage.NewUserRepository(database)
 	if err != nil {
-		return fmt.Errorf("initialize extension repository: %w", err)
+		return fmt.Errorf("initialize user repository: %w", err)
 	}
-	extensionRegistry := governedtool.NewRegistry()
-	extensionRegistrar := newExtensionToolRegistrar(extensionRegistry)
-	extensionService, err := extension.NewService(extensionRepository, extensionRegistrar, extensionRepository)
+	userService, err := user.NewService(userRepository, projectRepository)
 	if err != nil {
-		return fmt.Errorf("initialize extension service: %w", err)
-	}
-	if err := extensionService.Reconcile(ctx); err != nil {
-		return fmt.Errorf("reconcile active extensions: %w", err)
+		return fmt.Errorf("initialize user service: %w", err)
 	}
 	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
@@ -324,7 +339,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("configure HTTP security policy: %w", err)
 	}
-	handler := api.NewHandlerWithSecurityNotificationsTemplatesAndExtensions(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, templateService, extensionService, policy, mcp.Handler())
+	handler := api.NewHandlerWithSecurityNotificationsTemplatesExtensionsAndUsers(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, templateService, extensionService, userService, policy, mcp.Handler())
 	if cfg.TLSCertFile != "" {
 		if err := api.ServeTLS(ctx, cfg.Address(), cfg.TLSCertFile, cfg.TLSKeyFile, handler, logger); err != nil {
 			return fmt.Errorf("run HTTPS API: %w", err)

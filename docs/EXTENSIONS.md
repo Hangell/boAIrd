@@ -48,11 +48,18 @@ An extension manifest is a JSON object:
 - `description` — required.
 - `kind` — `declarative` (contract only, not executable) or `http`.
 - `endpoint` — required for `http`; an absolute `https://` URL with no embedded
-  credentials.
-- `input_schema` / `output_schema` — required JSON object schemas.
+  credentials, query, or fragment; it must use port 443 and its exact public DNS
+  host must be configured in `BOAIRD_PROVIDER_ALLOWED_HOSTS`.
+- `input_schema` / `output_schema` — required object-root JSON schemas from the
+  bounded SDK v1 subset: `type`, `properties`, `required`,
+  `additionalProperties`, `items`, `enum`, `minLength`, `maxLength`, `minItems`,
+  `maxItems`, `minimum`, `maximum`, and `pattern`. Unsupported keywords,
+  schemas over 32 KiB, and nesting deeper than 16 are rejected. The declared
+  schemas validate each input and the redacted output before the call succeeds.
 - `required_capabilities` — required; at least one lowercase dotted capability
   identifier, enforced by the tool Enforcer on every invocation.
-- `data_access` — `none` (default) or `network:<host>`. Filesystem, secret,
+- `data_access` — `none` (default) or `network:<host>`. For `http`, the host
+  must exactly match the endpoint hostname. Filesystem, secret,
   credential, and shell/exec access are rejected.
 
 ## Boundaries
@@ -60,7 +67,11 @@ An extension manifest is a JSON object:
 Extensions are declarative manifests, never executable code. They cannot read
 arbitrary files or secrets and cannot execute arbitrary programs. An `http` tool
 performs one bounded, redacted `POST` of its validated input to its declared
-HTTPS endpoint; responses are size-limited and secret-redacted. `declarative`
+HTTPS endpoint; the shared provider endpoint policy checks the exact hostname,
+pins DNS resolution, blocks private and special-purpose addresses, disables
+proxies and redirects, and requires TLS 1.2 or later. Provider CIDR exceptions
+do not widen extension destinations. Responses are size-limited
+and secret-redacted. `declarative`
 tools expose a reviewed contract but have no execution until a core-reviewed
 adapter is added.
 
@@ -70,12 +81,21 @@ adapter is added.
 install (pending)  ->  activate (active, tools registered)  ->  deactivate (removed, tools unregistered)
 ```
 
-- Installation validates the manifest and stores it as `pending`.
-- Activation is an administrator-only (`extension.manage`) operation that
-  registers every declared executable tool with the shared tool Enforcer.
-- Deactivation unregisters the tools and removes the extension.
+- Installation validates the manifest, reserves every tool name, and stores it
+  as `pending` in one transaction with the immutable audit event.
+- Activation is an administrator-only (`extension.manage`) operation. It first
+  atomically registers all executable tools, then commits active status and its
+  audit event. Runtime calls also check persisted active status before any
+  adapter runs, so a pending or deactivated extension cannot execute during a
+  registration or removal race.
+- Deactivation removes active state and records its audit event in one
+  transaction, then unregisters the tools. Persisted active-state checks deny
+  calls immediately after the transaction commits.
 - Every lifecycle change is recorded in the immutable `extension_audit` stream
   (`extension.installed`, `extension.activated`, `extension.deactivated`).
+- Tool names are globally unique across active and pending extensions. The
+  SQLite migration is `0026_extensions.sql`; PostgreSQL uses
+  `0006_extensions.sql`.
 
 ## API
 
@@ -88,3 +108,10 @@ DELETE /api/v1/extensions/{name}
 ```
 
 All routes require the `extension.manage` capability.
+
+Activated executable tools are invoked through the authenticated MCP gateway
+`boaird.extension.execute` with `project_id`, `tool_name`, optional `task_id`
+and `run_id`, and an object-valued `input`. The authenticated Agent identity is
+derived from its MCP token. The shared Enforcer checks the declared capability,
+active extension state, project membership or active-Brain relationship, and
+the supplied task/run project scope before calling the HTTP adapter.
