@@ -41,19 +41,11 @@ func newTestService(t *testing.T) (*template.Service, *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentRepository, err := storage.NewAgentRepository(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	agentManager, err := agent.NewManager(agentRepository)
-	if err != nil {
-		t.Fatal(err)
-	}
 	templateRepository, err := storage.NewTemplateRepository(database)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := template.NewService(templateRepository, projectManager, agentManager, agentManager)
+	service, err := template.NewService(templateRepository, projectManager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,4 +205,30 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func TestInstantiateAPITemplateRequiresProviderConfiguration(t *testing.T) {
+	ctx := context.Background()
+	service, database := newTestService(t)
+	if _, err := service.Create(ctx, template.CreateInput{
+		Key: "api-worker", Name: "API Worker", Role: "backend", Instructions: "call the provider",
+		DefaultRuntime: agent.RuntimeAPI,
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO credentials(id, name, provider, secret_ciphertext) VALUES ('cred-1','Key','openai', zeroblob(28))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Instantiate(ctx, "p1", "api-worker", template.InstantiateInput{}, "admin"); err == nil {
+		t.Fatal("expected API template instantiation without provider to fail")
+	}
+	created, err := service.Instantiate(ctx, "p1", "api-worker", template.InstantiateInput{
+		Provider: "openai", Model: "gpt-x", CredentialID: "cred-1",
+	}, "admin")
+	if err != nil {
+		t.Fatalf("instantiate API template with provider: %v", err)
+	}
+	if created.Runtime() != agent.RuntimeAPI {
+		t.Fatalf("instantiated runtime = %q, want API", created.Runtime())
+	}
 }

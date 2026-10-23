@@ -23,30 +23,19 @@ const (
 
 type Repository interface {
 	CreateWithAudit(context.Context, Template, AuditEvent) error
-	UpdateWithAudit(context.Context, Template, AuditEvent) error
+	UpdateWithAudit(context.Context, Template, int, AuditEvent) error
 	Get(context.Context, string) (Template, error)
 	List(context.Context) ([]Template, error)
-	RecordInstanceWithAudit(context.Context, Instance, AuditEvent) error
+	InstantiateAgent(context.Context, agent.Agent, Instance, AuditEvent) (agent.Agent, error)
 }
 
 type ProjectReader interface {
 	Get(context.Context, string) (project.Project, error)
 }
 
-type AgentCreator interface {
-	Create(context.Context, agent.CreateInput) (agent.Agent, error)
-	Get(context.Context, string) (agent.Agent, error)
-}
-
-type AgentScoper interface {
-	AddProject(context.Context, string, string, string) error
-}
-
 type Service struct {
 	repository Repository
 	projects   ProjectReader
-	agents     AgentCreator
-	scoper     AgentScoper
 }
 
 type CreateInput struct {
@@ -71,18 +60,21 @@ type UpdateInput struct {
 }
 
 type InstantiateInput struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Instructions string   `json:"instructions"`
-	Capabilities []string `json:"capabilities"`
-	Tools        []string `json:"tools"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Instructions    string   `json:"instructions"`
+	Capabilities    []string `json:"capabilities"`
+	Provider        string   `json:"provider,omitempty"`
+	ProviderBaseURL string   `json:"provider_base_url,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	CredentialID    string   `json:"credential_id,omitempty"`
 }
 
-func NewService(repository Repository, projects ProjectReader, agents AgentCreator, scoper AgentScoper) (*Service, error) {
-	if repository == nil || projects == nil || agents == nil || scoper == nil {
-		return nil, errors.New("template repository, project reader, agent creator, and scoper are required")
+func NewService(repository Repository, projects ProjectReader) (*Service, error) {
+	if repository == nil || projects == nil {
+		return nil, errors.New("template repository and project reader are required")
 	}
-	return &Service{repository: repository, projects: projects, agents: agents, scoper: scoper}, nil
+	return &Service{repository: repository, projects: projects}, nil
 }
 
 // Create persists a new versioned template and audits the change.
@@ -156,7 +148,7 @@ func (s *Service) Update(ctx context.Context, key string, input UpdateInput, act
 	now := time.Now().UTC()
 	value.UpdatedAt = now
 	value.UpdatedBy = actorID
-	if err := s.repository.UpdateWithAudit(ctx, value, AuditEvent{ActorID: actorID, Action: "updated", TemplateKey: value.Key, Version: value.Version}); err != nil {
+	if err := s.repository.UpdateWithAudit(ctx, value, existing.Version, AuditEvent{ActorID: actorID, Action: "updated", TemplateKey: value.Key, Version: value.Version}); err != nil {
 		return Template{}, err
 	}
 	return value, nil
@@ -164,6 +156,7 @@ func (s *Service) Update(ctx context.Context, key string, input UpdateInput, act
 
 // Instantiate creates a separate project Agent from a template. Capabilities
 // are granted only from the explicit input; the source template is unchanged.
+// Agent, project scope, template provenance, and audit are written atomically.
 func (s *Service) Instantiate(ctx context.Context, projectID, key string, input InstantiateInput, actorID string) (agent.Agent, error) {
 	if actorID = strings.TrimSpace(actorID); actorID == "" {
 		return agent.Agent{}, fmt.Errorf("%w: administrator actor is required", ErrInvalidInput)
@@ -179,9 +172,6 @@ func (s *Service) Instantiate(ctx context.Context, projectID, key string, input 
 	if err != nil {
 		return agent.Agent{}, err
 	}
-	if _, err := ValidateTools(input.Tools, value.SuggestedTools); err != nil {
-		return agent.Agent{}, err
-	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		name = value.Name
@@ -190,30 +180,27 @@ func (s *Service) Instantiate(ctx context.Context, projectID, key string, input 
 	if instructions == "" {
 		instructions = value.Instructions
 	}
-	created, err := s.agents.Create(ctx, agent.CreateInput{
+	id, err := newID()
+	if err != nil {
+		return agent.Agent{}, fmt.Errorf("generate agent ID: %w", err)
+	}
+	configured, err := agent.NewConfigured(id, agent.Configuration{
 		Name: name, Role: value.Role, Runtime: value.DefaultRuntime,
-		Description: input.Description, Instructions: instructions, Capabilities: capabilities,
+		Description: input.Description, Instructions: instructions,
+		Provider: input.Provider, ProviderBaseURL: input.ProviderBaseURL,
+		Model: input.Model, CredentialID: input.CredentialID,
+		Capabilities: capabilities,
 	})
 	if err != nil {
-		return agent.Agent{}, err
-	}
-	if err := s.scoper.AddProject(ctx, created.ID(), projectID, actorID); err != nil {
-		return agent.Agent{}, err
-	}
-	created, err = s.agents.Get(ctx, created.ID())
-	if err != nil {
-		return agent.Agent{}, err
+		return agent.Agent{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	instance := Instance{
-		AgentID: created.ID(), ProjectID: projectID, TemplateKey: value.Key,
+		AgentID: id, ProjectID: projectID, TemplateKey: value.Key,
 		TemplateVersion: value.Version, CreatedAt: time.Now().UTC(),
 	}
-	if err := s.repository.RecordInstanceWithAudit(ctx, instance, AuditEvent{
+	return s.repository.InstantiateAgent(ctx, configured, instance, AuditEvent{
 		ActorID: actorID, Action: "instantiated", TemplateKey: value.Key, ProjectID: projectID, Version: value.Version,
-	}); err != nil {
-		return agent.Agent{}, err
-	}
-	return created, nil
+	})
 }
 
 func (s *Service) ensureProjectActive(ctx context.Context, projectID string) (project.Project, error) {

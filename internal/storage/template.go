@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"boAIrd/internal/agent"
 	"boAIrd/internal/template"
 )
 
@@ -86,8 +87,10 @@ func (r *TemplateRepository) CreateWithAudit(ctx context.Context, value template
 }
 
 // UpdateWithAudit replaces a template's mutable fields, bumps its version, and
-// records the audit event atomically.
-func (r *TemplateRepository) UpdateWithAudit(ctx context.Context, value template.Template, event template.AuditEvent) error {
+// records the audit event atomically. expectedVersion is a compare-and-swap
+// guard: the update is applied only if the stored version still matches, so
+// concurrent updates cannot silently overwrite each other.
+func (r *TemplateRepository) UpdateWithAudit(ctx context.Context, value template.Template, expectedVersion int, event template.AuditEvent) error {
 	tools, capabilities, err := marshalTemplateLists(value)
 	if err != nil {
 		return err
@@ -99,16 +102,18 @@ func (r *TemplateRepository) UpdateWithAudit(ctx context.Context, value template
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `UPDATE agent_templates SET name = ?, role = ?, description = ?, instructions = ?,
 		default_runtime = ?, suggested_tools = ?, suggested_capabilities = ?, version = ?, updated_by = ?, updated_at = ?
-		WHERE template_key = ?`,
+		WHERE template_key = ? AND version = ?`,
 		value.Name, value.Role, value.Description, value.Instructions, value.DefaultRuntime,
-		tools, capabilities, value.Version, value.UpdatedBy, formatDatabaseTime(value.UpdatedAt), value.Key)
+		tools, capabilities, value.Version, value.UpdatedBy, formatDatabaseTime(value.UpdatedAt), value.Key, expectedVersion)
 	if err != nil {
 		return fmt.Errorf("update agent template: %w", err)
 	}
-	if count, err := result.RowsAffected(); err != nil {
+	count, err := result.RowsAffected()
+	if err != nil {
 		return fmt.Errorf("count updated agent templates: %w", err)
-	} else if count == 0 {
-		return template.ErrNotFound
+	}
+	if count == 0 {
+		return template.ErrVersionConflict
 	}
 	if err := insertTemplateAudit(ctx, tx, event); err != nil {
 		return err
@@ -119,31 +124,70 @@ func (r *TemplateRepository) UpdateWithAudit(ctx context.Context, value template
 	return nil
 }
 
-// RecordInstanceWithAudit persists the template source/version for an Agent and
-// the instantiation audit event atomically.
-func (r *TemplateRepository) RecordInstanceWithAudit(ctx context.Context, instance template.Instance, event template.AuditEvent) error {
+// InstantiateAgent creates the Agent, its project membership, its template
+// provenance, and both audit events in one SQLite transaction so a partial
+// failure never leaves an Agent without scope, provenance, or audit.
+func (r *TemplateRepository) InstantiateAgent(ctx context.Context, value agent.Agent, instance template.Instance, event template.AuditEvent) (agent.Agent, error) {
 	if event.ProjectID != instance.ProjectID || event.TemplateKey != instance.TemplateKey || event.ActorID == "" {
-		return errors.New("template instance audit metadata does not match instance")
+		return agent.Agent{}, errors.New("template instance audit metadata does not match instance")
 	}
+	snapshot := value.Snapshot()
 	tx, err := r.database.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin template instantiation: %w", err)
+		return agent.Agent{}, fmt.Errorf("begin template instantiation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := validateAgentCredential(ctx, tx, snapshot); err != nil {
+		return agent.Agent{}, err
+	}
+	if err := insertAgent(ctx, tx, snapshot); err != nil {
+		return agent.Agent{}, fmt.Errorf("insert instantiated agent: %w", err)
+	}
+	if err := insertAgentRelations(ctx, tx, snapshot); err != nil {
+		return agent.Agent{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_projects(agent_id, project_id) VALUES (?, ?)`,
+		snapshot.ID, instance.ProjectID); err != nil {
+		return agent.Agent{}, fmt.Errorf("insert instantiated agent project membership: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
+		VALUES (?, 'administrator', ?, 'agent.project.joined', 'agent', ?, 'project scope granted')`,
+		instance.ProjectID, event.ActorID, snapshot.ID); err != nil {
+		return agent.Agent{}, fmt.Errorf("record instantiated agent membership audit: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO template_instances(agent_id, project_id, template_key, template_version, created_at)
 		VALUES (?, ?, ?, ?, ?)`,
 		instance.AgentID, instance.ProjectID, instance.TemplateKey, instance.TemplateVersion, formatDatabaseTime(instance.CreatedAt)); err != nil {
-		return fmt.Errorf("insert template instance: %w", err)
+		return agent.Agent{}, fmt.Errorf("insert template instance: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
 		VALUES (?, 'administrator', ?, 'template.instantiated', 'agent', ?, ?)`,
 		instance.ProjectID, event.ActorID, instance.AgentID, "agent instantiated from template "+instance.TemplateKey); err != nil {
-		return fmt.Errorf("record template instantiation audit: %w", err)
+		return agent.Agent{}, fmt.Errorf("record template instantiation audit: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit template instantiation: %w", err)
+		return agent.Agent{}, fmt.Errorf("commit template instantiation: %w", err)
 	}
-	return nil
+	return reloadAgent(ctx, r.database, snapshot.ID)
+}
+
+// reloadAgent loads an Agent with its relations after an atomic write.
+func reloadAgent(ctx context.Context, database *sql.DB, id string) (agent.Agent, error) {
+	snapshot, err := scanAgent(database.QueryRowContext(ctx, agentSelect+" WHERE id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return agent.Agent{}, agent.ErrNotFound
+	}
+	if err != nil {
+		return agent.Agent{}, fmt.Errorf("read instantiated agent: %w", err)
+	}
+	if err := loadAgentRelations(ctx, database, &snapshot); err != nil {
+		return agent.Agent{}, err
+	}
+	value, err := agent.Restore(snapshot)
+	if err != nil {
+		return agent.Agent{}, fmt.Errorf("restore instantiated agent: %w", err)
+	}
+	return value, nil
 }
 
 func marshalTemplateLists(value template.Template) (string, string, error) {

@@ -19,6 +19,7 @@ var (
 	ErrInvalidInput    = errors.New("invalid agent template input")
 	ErrProjectNotFound = errors.New("project not found")
 	ErrProjectArchived = errors.New("project is archived")
+	ErrVersionConflict = errors.New("agent template version conflict")
 )
 
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,63}$`)

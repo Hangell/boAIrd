@@ -46,7 +46,7 @@ func newTemplateHandler(t *testing.T) (http.Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := template.NewService(templateRepository, projectManager, agentManager, agentManager)
+	service, err := template.NewService(templateRepository, projectManager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,11 +111,11 @@ func TestTemplateAPIRejectsInvalidAndUnauthenticated(t *testing.T) {
 		t.Fatalf("create template status = %d, body = %s", create.Code, create.Body.String())
 	}
 
-	badTool := httptest.NewRecorder()
-	handler.ServeHTTP(badTool, authorizedTestRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/templates/go-senior/instantiate",
-		strings.NewReader(`{"tools":["shell"]}`)))
-	if badTool.Code != http.StatusBadRequest {
-		t.Fatalf("bad tool status = %d, want 400", badTool.Code)
+	badCapability := httptest.NewRecorder()
+	handler.ServeHTTP(badCapability, authorizedTestRequest(http.MethodPost, "/api/v1/projects/"+projectID+"/templates/go-senior/instantiate",
+		strings.NewReader(`{"capabilities":["Not-A-Cap"]}`)))
+	if badCapability.Code != http.StatusBadRequest {
+		t.Fatalf("bad capability status = %d, want 400", badCapability.Code)
 	}
 
 	unknown := httptest.NewRecorder()

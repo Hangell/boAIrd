@@ -242,7 +242,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize template repository: %w", err)
 	}
-	templateService, err := template.NewService(templateRepository, projectManager, agentManager, agentManager)
+	templateService, err := template.NewService(templateRepository, projectManager)
 	if err != nil {
 		return fmt.Errorf("initialize template service: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"boAIrd/internal/agent"
+	"boAIrd/internal/capability"
 	"boAIrd/internal/project"
 	"boAIrd/internal/template"
 )
@@ -88,12 +89,17 @@ func registerTemplateRoutes(mux *http.ServeMux, manager TemplateManager) {
 	})
 
 	mux.HandleFunc("POST /api/v1/projects/{projectID}/templates/{key}/instantiate", func(w http.ResponseWriter, r *http.Request) {
+		projectID := r.PathValue("projectID")
+		if !hasCapabilityForProject(r, "agent.create", projectID) {
+			writeAPIError(w, http.StatusForbidden, "forbidden", "operation is not authorized")
+			return
+		}
 		var input template.InstantiateInput
 		if err := decodeJSON(w, r, &input); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid instantiate request")
 			return
 		}
-		value, err := manager.Instantiate(r.Context(), r.PathValue("projectID"), r.PathValue("key"), input, project.LocalAdministratorID)
+		value, err := manager.Instantiate(r.Context(), projectID, r.PathValue("key"), input, project.LocalAdministratorID)
 		if err != nil {
 			writeTemplateError(w, err)
 			return
@@ -120,9 +126,25 @@ func writeTemplateError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
 	case errors.Is(err, template.ErrProjectArchived):
 		writeAPIError(w, http.StatusConflict, "conflict", "project is archived")
+	case errors.Is(err, template.ErrVersionConflict):
+		writeAPIError(w, http.StatusConflict, "version_conflict", "agent template was updated concurrently; retry")
 	case errors.Is(err, template.ErrInvalidInput):
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 	default:
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
+}
+
+// hasCapabilityForProject reports whether the authenticated principal holds the
+// required capability within the project boundary.
+func hasCapabilityForProject(r *http.Request, required, projectID string) bool {
+	principal, ok := r.Context().Value(principalContextKey{}).(capability.Principal)
+	if !ok {
+		return false
+	}
+	grant, err := capability.New(required)
+	if err != nil {
+		return false
+	}
+	return (capability.Authorizer{}).Authorize(principal, grant, projectID) == nil
 }
