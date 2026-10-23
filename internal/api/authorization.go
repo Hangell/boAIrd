@@ -30,6 +30,7 @@ var administratorCapabilities = []capability.Capability{
 	"brain.attach", "brain.read", "brain.replace", "brain.execute",
 	"run.read", "task.create", "task.read", "task.assign", "task.transition",
 	"task.review", "task.complete", "conversation.read", "conversation.write", "mcp.token.manage",
+	"audit.read",
 }
 
 func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, token []byte, sessions *localSessionStore) http.Handler {
@@ -186,6 +187,10 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 			case "runs":
 				if method == http.MethodGet {
 					return "run.read", projectID, true
+				}
+			case "audit":
+				if method == http.MethodGet {
+					return "audit.read", projectID, true
 				}
 			}
 		}

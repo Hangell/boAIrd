@@ -2001,6 +2001,16 @@ credential.created
 policy.changed
 ```
 
+The audit stream is append-only at the storage layer: SQL triggers reject
+UPDATE/DELETE on `audit_events`, and neither Agents nor the Brain have an API
+mutation path for audit rows. Each record carries actor, action, resource,
+project, task (optional), timestamp, result, and redacted reason metadata.
+`storage.AuditRepository.RecordEvent` / `ListEvents` provide the generic append
+and project-scoped read paths; reads are authorized by `audit.read` plus project
+membership and re-redact stored reason text on output.
+The generic tool audit writer records `tool.executed` metadata and stores the
+tool outcome in the same `result` field consumed by the audit reader.
+
 ---
 
 # 79. Security Architecture

@@ -1896,6 +1896,8 @@ Regular agents must not be able to modify or delete audit records.
 
 The Brain must not have this capability either.
 
+The project audit endpoint requires the `audit.read` capability and explicit project membership. Audit events require a non-empty result and are listed newest first with a default page size of 50, a maximum limit of 100, and a non-negative offset. Reasons are redacted before persistence and again when returned. SQLite triggers reject application-level updates and deletes; direct access to the database file remains within the trusted host boundary.
+
 ---
 
 # Run Audit
