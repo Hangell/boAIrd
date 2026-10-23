@@ -12,9 +12,9 @@ import (
 
 var ErrBrainAlreadyConfigured = brain.ErrAlreadyExists
 
-type BrainRepository struct{ database *sql.DB }
+type BrainRepository struct{ database *Database }
 
-func NewBrainRepository(database *sql.DB) (*BrainRepository, error) {
+func NewBrainRepository(database *Database) (*BrainRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}

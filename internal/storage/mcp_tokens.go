@@ -10,9 +10,9 @@ import (
 	"boAIrd/internal/mcptoken"
 )
 
-type MCPTokenRepository struct{ database *sql.DB }
+type MCPTokenRepository struct{ database *Database }
 
-func NewMCPTokenRepository(database *sql.DB) (*MCPTokenRepository, error) {
+func NewMCPTokenRepository(database *Database) (*MCPTokenRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}

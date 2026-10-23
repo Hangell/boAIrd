@@ -10,10 +10,10 @@ import (
 )
 
 type CredentialRepository struct {
-	database *sql.DB
+	database *Database
 }
 
-func NewCredentialRepository(database *sql.DB) (*CredentialRepository, error) {
+func NewCredentialRepository(database *Database) (*CredentialRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}
@@ -65,7 +65,7 @@ func (r *CredentialRepository) GetForUse(ctx context.Context, id, agentID, proje
 }
 
 func (r *CredentialRepository) List(ctx context.Context) ([]credential.Record, error) {
-	rows, err := r.database.QueryContext(ctx, `SELECT id, name, provider FROM credentials ORDER BY name COLLATE NOCASE, id`)
+	rows, err := r.database.QueryContext(ctx, `SELECT id, name, provider FROM credentials ORDER BY lower(name), id`)
 	if err != nil {
 		return nil, fmt.Errorf("query credential metadata: %w", err)
 	}

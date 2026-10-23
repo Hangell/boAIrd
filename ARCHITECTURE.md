@@ -92,17 +92,19 @@ Responsibilities:
 
 ## Database
 
-Initial implementation:
+Supported implementations:
 
 ```text
-SQLite
+SQLite (default)
+PostgreSQL (optional, explicitly configured)
 ```
 
-Future option:
-
-```text
-PostgreSQL
-```
+Both backends implement the same storage boundary. Repository query execution
+and transactions pass through the storage database wrapper, which owns
+placeholder and timestamp syntax differences. SQLite and PostgreSQL have
+separate deterministic, versioned migration tracks. PostgreSQL migrations are
+applied one version at a time in a transaction while holding a database
+advisory lock.
 
 ---
 
@@ -2174,13 +2176,7 @@ Domain Service
       ↓
 Repository Interface
       ↓
-SQLite Implementation
-```
-
-Future:
-
-```text
-PostgreSQL Implementation
+Storage Adapter (SQLite or PostgreSQL)
 ```
 
 ---
@@ -2202,7 +2198,7 @@ It keeps the local experience simple.
 
 # 87. PostgreSQL
 
-PostgreSQL may be introduced for:
+PostgreSQL is available for:
 
 ```text
 larger deployments
@@ -2211,7 +2207,12 @@ remote servers
 higher concurrency
 ```
 
-Domain logic should not depend on SQLite-specific behavior without good reason.
+SQLite remains the default. PostgreSQL is selected with
+`BOAIRD_DATABASE_DRIVER=postgres` and `BOAIRD_DATABASE_URL`. Domain and
+application services depend on repository interfaces, not driver-specific
+connections. Both implementations preserve the same transaction boundaries;
+PostgreSQL uses `READ COMMITTED` isolation and versioned compare-and-swap writes
+for concurrent updates.
 
 ---
 

@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,10 +13,10 @@ import (
 
 // AuditRepository appends immutable audit events that are not produced by domain triggers.
 type AuditRepository struct {
-	database *sql.DB
+	database *Database
 }
 
-func NewAuditRepository(database *sql.DB) (*AuditRepository, error) {
+func NewAuditRepository(database *Database) (*AuditRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}

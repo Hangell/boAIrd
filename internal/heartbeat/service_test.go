@@ -2,7 +2,6 @@ package heartbeat_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -16,7 +15,7 @@ import (
 
 type fixture struct {
 	t         *testing.T
-	database  *sql.DB
+	database  *storage.Database
 	service   *heartbeat.Service
 	agents    *agent.Manager
 	tokens    *mcptoken.Service

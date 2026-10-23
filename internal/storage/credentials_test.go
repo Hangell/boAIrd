@@ -12,7 +12,7 @@ import (
 )
 
 func TestCredentialRepositoryPersistsCiphertextAndListsMetadata(t *testing.T) {
-	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestCredentialRepositoryPersistsCiphertextAndListsMetadata(t *testing.T) {
 }
 
 func TestCredentialManagerPersistsOnlyCiphertext(t *testing.T) {
-	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,11 +68,11 @@ func TestCredentialManagerPersistsOnlyCiphertext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var persisted string
-	if err := database.QueryRow("SELECT CAST(secret_ciphertext AS TEXT) FROM credentials WHERE id = ?", metadata.ID).Scan(&persisted); err != nil {
+	var persisted []byte
+	if err := database.QueryRow("SELECT secret_ciphertext FROM credentials WHERE id = ?", metadata.ID).Scan(&persisted); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(persisted, secret) {
+	if strings.Contains(string(persisted), secret) {
 		t.Fatal("database contains plaintext credential")
 	}
 	ctx := context.Background()

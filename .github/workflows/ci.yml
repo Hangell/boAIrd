@@ -56,6 +56,20 @@ jobs:
     name: Go
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: boaird
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: boaird_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U boaird -d boaird_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -81,6 +95,11 @@ jobs:
 
       - name: Run Go tests
         run: go test ./...
+
+      - name: Run repository contracts against PostgreSQL
+        env:
+          BOAIRD_TEST_POSTGRES_URL: postgres://boaird:test-only@localhost:5432/boaird_test?sslmode=disable
+        run: go test ./internal/storage
 
       - name: Run Go race tests
         run: go test -race ./...

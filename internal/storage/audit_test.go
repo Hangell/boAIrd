@@ -13,7 +13,7 @@ import (
 
 func TestAuditRepositoryRecordsImmutableEscalation(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "audit.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestAuditRepositoryRecordsImmutableEscalation(t *testing.T) {
 
 func TestAuditRepositoryRecordsToolOutcomeAndListsImmutableEvents(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "audit.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestAuditRepositoryRecordsToolOutcomeAndListsImmutableEvents(t *testing.T) 
 
 func TestAuditRepositoryRejectsIncompleteEvent(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "audit.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

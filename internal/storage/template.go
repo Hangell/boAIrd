@@ -12,9 +12,9 @@ import (
 )
 
 // TemplateRepository persists reusable agent templates and their instances.
-type TemplateRepository struct{ database *sql.DB }
+type TemplateRepository struct{ database *Database }
 
-func NewTemplateRepository(database *sql.DB) (*TemplateRepository, error) {
+func NewTemplateRepository(database *Database) (*TemplateRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}
@@ -177,7 +177,7 @@ func (r *TemplateRepository) InstantiateAgent(ctx context.Context, value agent.A
 // lockActiveProjectForInstantiation takes SQLite's write lock before reading
 // project state, so archival either commits first and is rejected or waits
 // until the complete instantiation transaction commits.
-func lockActiveProjectForInstantiation(ctx context.Context, tx *sql.Tx, projectID string) error {
+func lockActiveProjectForInstantiation(ctx context.Context, tx *Transaction, projectID string) error {
 	result, err := tx.ExecContext(ctx, `UPDATE projects SET updated_at = updated_at WHERE id = ? AND status <> 'ARCHIVED'`, projectID)
 	if err != nil {
 		return fmt.Errorf("lock active project for template instantiation: %w", err)
@@ -203,7 +203,7 @@ func lockActiveProjectForInstantiation(ctx context.Context, tx *sql.Tx, projectI
 }
 
 // reloadAgent loads an Agent with its relations after an atomic write.
-func reloadAgent(ctx context.Context, database *sql.DB, id string) (agent.Agent, error) {
+func reloadAgent(ctx context.Context, database *Database, id string) (agent.Agent, error) {
 	snapshot, err := scanAgent(database.QueryRowContext(ctx, agentSelect+" WHERE id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return agent.Agent{}, agent.ErrNotFound
@@ -235,7 +235,7 @@ func marshalTemplateLists(value template.Template) (string, string, error) {
 
 // insertTemplateAudit records a global template create/update in the dedicated
 // immutable template_audit stream.
-func insertTemplateAudit(ctx context.Context, tx *sql.Tx, event template.AuditEvent) error {
+func insertTemplateAudit(ctx context.Context, tx *Transaction, event template.AuditEvent) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO template_audit(template_key, action, version, actor_id)
 		VALUES (?, ?, ?, ?)`,
 		event.TemplateKey, event.Action, event.Version, event.ActorID); err != nil {

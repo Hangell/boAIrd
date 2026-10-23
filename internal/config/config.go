@@ -6,16 +6,20 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const (
-	defaultHost         = "127.0.0.1"
-	defaultPort         = 3110
-	defaultDatabasePath = "./data/boaird.db"
+	defaultHost           = "127.0.0.1"
+	defaultPort           = 3110
+	defaultDatabasePath   = "./data/boaird.db"
+	defaultDatabaseDriver = "sqlite"
 
 	defaultAgentStaleAfter     = 90 * time.Second
 	defaultAgentOfflineAfter   = 5 * time.Minute
@@ -40,6 +44,8 @@ type Config struct {
 	Host                    string
 	Port                    int
 	DatabasePath            string
+	DatabaseDriver          string
+	DatabaseURL             string
 	MasterKey               MasterKey
 	LocalAuthToken          LocalAuthToken
 	MCPAgentTokens          []MCPAgentToken
@@ -92,6 +98,8 @@ func Load() (Config, error) {
 		Host:                envOrDefault("BOAIRD_HOST", defaultHost),
 		Port:                defaultPort,
 		DatabasePath:        envOrDefault("BOAIRD_DATABASE_PATH", defaultDatabasePath),
+		DatabaseDriver:      envOrDefault("BOAIRD_DATABASE_DRIVER", defaultDatabaseDriver),
+		DatabaseURL:         os.Getenv("BOAIRD_DATABASE_URL"),
 		AgentStaleAfter:     defaultAgentStaleAfter,
 		AgentOfflineAfter:   defaultAgentOfflineAfter,
 		AgentStatusInterval: defaultAgentStatusInterval,
@@ -294,8 +302,63 @@ func (c Config) Validate() error {
 	if c.Port < 1 || c.Port > 65535 {
 		return fmt.Errorf("BOAIRD_PORT must be between 1 and 65535")
 	}
-	if c.DatabasePath == "" {
-		return fmt.Errorf("BOAIRD_DATABASE_PATH must not be empty")
+	switch c.DatabaseDriver {
+	case "sqlite":
+		if c.DatabasePath == "" {
+			return fmt.Errorf("BOAIRD_DATABASE_PATH must not be empty when BOAIRD_DATABASE_DRIVER is sqlite")
+		}
+		if c.DatabaseURL != "" {
+			return fmt.Errorf("BOAIRD_DATABASE_URL is only valid when BOAIRD_DATABASE_DRIVER is postgres")
+		}
+	case "postgres":
+		parsed, err := url.Parse(c.DatabaseURL)
+		if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" || strings.Trim(parsed.Path, "/") == "" {
+			return fmt.Errorf("BOAIRD_DATABASE_URL must be a PostgreSQL URL with host and database name")
+		}
+		pgConfig, err := pgx.ParseConfig(c.DatabaseURL)
+		if err != nil {
+			return fmt.Errorf("BOAIRD_DATABASE_URL is not a valid PostgreSQL connection URL")
+		}
+		if pgConfig.Database == "" {
+			return fmt.Errorf("BOAIRD_DATABASE_URL must specify a PostgreSQL database name")
+		}
+		remoteHost := func(host string) bool {
+			ip := net.ParseIP(host)
+			return !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback())
+		}
+		type postgresTarget struct {
+			host                   string
+			tlsServer              string
+			tlsActive              bool
+			tlsSkipsDefaultVerify  bool
+			customCertificateCheck bool
+		}
+		targets := []postgresTarget{{host: pgConfig.Host, tlsActive: pgConfig.TLSConfig != nil}}
+		if pgConfig.TLSConfig != nil {
+			targets[0].tlsServer = pgConfig.TLSConfig.ServerName
+			targets[0].tlsSkipsDefaultVerify = pgConfig.TLSConfig.InsecureSkipVerify
+			targets[0].customCertificateCheck = pgConfig.TLSConfig.VerifyPeerCertificate != nil || pgConfig.TLSConfig.VerifyConnection != nil
+		}
+		for _, fallback := range pgConfig.Fallbacks {
+			target := postgresTarget{host: fallback.Host, tlsActive: fallback.TLSConfig != nil}
+			if fallback.TLSConfig != nil {
+				target.tlsServer = fallback.TLSConfig.ServerName
+				target.tlsSkipsDefaultVerify = fallback.TLSConfig.InsecureSkipVerify
+				target.customCertificateCheck = fallback.TLSConfig.VerifyPeerCertificate != nil || fallback.TLSConfig.VerifyConnection != nil
+			}
+			targets = append(targets, target)
+		}
+		urlSSLMode := parsed.Query().Get("sslmode")
+		for _, target := range targets {
+			if target.host == "" {
+				return fmt.Errorf("BOAIRD_DATABASE_URL must specify a PostgreSQL host")
+			}
+			if remoteHost(target.host) && (urlSSLMode != "verify-full" || !target.tlsActive || target.tlsServer != target.host || target.tlsSkipsDefaultVerify || target.customCertificateCheck) {
+				return fmt.Errorf("BOAIRD_DATABASE_URL must use sslmode=verify-full for every remote PostgreSQL host")
+			}
+		}
+	default:
+		return fmt.Errorf("BOAIRD_DATABASE_DRIVER must be sqlite or postgres")
 	}
 	for _, host := range c.ProviderAllowedHosts {
 		if !validProviderHost(host) {

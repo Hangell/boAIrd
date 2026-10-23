@@ -1887,13 +1887,19 @@ Motivos:
 
 ---
 
-# Future Storage
+# Optional PostgreSQL Storage
 
 ```text
-SQLite
-   ↓
-PostgreSQL
+SQLite: local default
+PostgreSQL: optional backend
 ```
+
+PostgreSQL is implemented as an optional backend. Remote PostgreSQL targets,
+including every configured fallback host, require `sslmode=verify-full` so the
+certificate chain and server hostname are verified. Protect the connection URL
+as a deployment secret and restrict database network access. The service uses
+the same database credentials for normal operations and startup migrations, so
+that role must currently have the required migration privileges. PostgreSQL-native backups must be encrypted and access-controlled; the database operator remains trusted with stored project data and audit history.
 
 ---
 
@@ -2022,7 +2028,7 @@ GET    /api/v1/logs
 
 # Healthcheck
 
-This liveness check reports whether the HTTP service is running; it does not query SQLite.
+This liveness check reports whether the HTTP service is running; it does not query the configured database.
 
 ```text
 GET /health
@@ -2044,7 +2050,7 @@ Response:
 GET /api/v1/status
 ```
 
-When the service and SQLite are available, the endpoint returns `200 OK`:
+When the service and configured database are available, the endpoint returns `200 OK`:
 
 ```json
 {
@@ -2053,7 +2059,7 @@ When the service and SQLite are available, the endpoint returns `200 OK`:
 }
 ```
 
-When SQLite is unavailable, it returns `503 Service Unavailable`:
+When the configured database is unavailable, it returns `503 Service Unavailable`:
 
 ```json
 {
@@ -2086,7 +2092,9 @@ The service reads these optional environment variables:
 | --- | --- | --- |
 | `BOAIRD_HOST` | `127.0.0.1` | HTTP listen address |
 | `BOAIRD_PORT` | `3110` | HTTP listen port |
+| `BOAIRD_DATABASE_DRIVER` | `sqlite` | Storage backend: `sqlite` or `postgres`. SQLite remains the default. |
 | `BOAIRD_DATABASE_PATH` | `./data/boaird.db` | SQLite database file |
+| `BOAIRD_DATABASE_URL` | Empty | PostgreSQL connection URL; required when the driver is `postgres`. Keep credentials in deployment secrets; every remote target and fallback requires `sslmode=verify-full`. |
 | `BOAIRD_MASTER_KEY` | Required | 32-byte encryption key encoded as 64 hexadecimal characters; never store it in SQLite or commit it. |
 | `BOAIRD_LOCAL_AUTH_TOKEN` | Required | 32-byte bearer token encoded as 64 hexadecimal characters; authenticates all versioned API routes except status and can be exchanged for a browser session. |
 | `BOAIRD_MCP_AGENT_TOKENS` | Empty | Legacy one-time bootstrap only: imported from the environment on first database startup with a 90-day expiry. Manage tokens through the authenticated MCP token API afterward. |
@@ -2103,6 +2111,8 @@ The service reads these optional environment variables:
 | `BOAIRD_SHELL_ALLOWED_EXECUTABLES` | Empty | Comma-separated executable names or paths trusted by the administrator. The tool passes structured arguments directly and does not provide an OS filesystem sandbox. |
 
 Generate each secret independently with `openssl rand -hex 32` and provide it through the deployment environment. Losing the master key makes stored provider credentials unrecoverable. The local auth token identifies the single `local-administrator` principal; do not reuse the master key as the token. Credential API responses contain metadata only; the secret is accepted only when creating a credential.
+
+SQLite is the default backend. To select PostgreSQL, set `BOAIRD_DATABASE_DRIVER=postgres` and `BOAIRD_DATABASE_URL` to a `postgres://` or `postgresql://` URL containing a host and database name. Validation uses pgx's effective parsed connection settings, including hosts supplied through `host=` and fallback hosts. Every effective remote host requires `sslmode=verify-full`, which verifies both the trusted certificate chain and the hostname; loopback PostgreSQL may use local TLS settings. Selecting a different backend does not copy data from the existing database. PostgreSQL schema migrations are versioned independently from SQLite migrations and run at service startup. The service uses the same database credentials for application operations and startup migrations, so the configured role needs the required schema-migration privileges; separate runtime/migration credentials are not currently supported. Back up PostgreSQL with PostgreSQL-native tooling such as `pg_dump --format=custom`, and restore with `pg_restore`; provide credentials through a protected PostgreSQL service or password file rather than command-line arguments. Protect the URL as a deployment secret and restrict network ingress. The database operator can read or change application data and audit history. Do not copy a live database directory. Before upgrading, take and verify a backup and stop older application versions from writing during schema changes. The application applies each migration transactionally; PostgreSQL transactions use the configured server's standard `READ COMMITTED` isolation.
 
 Custom HTTPS provider URLs are rejected unless their exact host is listed in `BOAIRD_PROVIDER_ALLOWED_HOSTS`. Every DNS answer is checked when a connection is opened and the selected validated IP is dialed directly. Loopback is allowed for explicit local development URLs. Private, link-local, metadata, and special-purpose IP ranges recognized by the endpoint policy are blocked unless they fall within `BOAIRD_PROVIDER_ALLOWED_IP_RANGES`. For IPv6, this includes the active IANA special-purpose prefixes and translation/transition ranges such as NAT64, Teredo, and 6to4; review the registry when updating this policy. Only add ranges needed by a trusted provider, because credentials are sent to the configured endpoint.
 

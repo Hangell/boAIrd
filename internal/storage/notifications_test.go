@@ -10,7 +10,7 @@ import (
 
 func TestNotificationsRedactAndDeduplicateSecurityEvents(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "notifications.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "notifications.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestNotificationsRedactAndDeduplicateSecurityEvents(t *testing.T) {
 
 func TestNotificationRetriesAreBoundedAndCannotDuplicate(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "notifications.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "notifications.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestNotificationRetriesAreBoundedAndCannotDuplicate(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `INSERT INTO audit_events(id,project_id,actor_type,actor_id,event_type,resource_type,resource_id,to_status) VALUES ('event-1','p1','system','test','task.status.changed','task','task-1','BLOCKED')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ExecContext(ctx, `INSERT OR IGNORE INTO notifications(project_id,source_key,event_type,severity,summary) VALUES ('p1','audit:event-1','BLOCKED','WARNING','duplicate')`); err != nil {
+	if _, err := database.ExecContext(ctx, `INSERT INTO notifications(project_id,source_key,event_type,severity,summary) VALUES ('p1','audit:event-1','BLOCKED','WARNING','duplicate') ON CONFLICT DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
 	repository, err := NewNotificationRepository(database)
@@ -129,7 +129,7 @@ func TestNotificationRetriesAreBoundedAndCannotDuplicate(t *testing.T) {
 
 func TestNotificationSuccessfulRetryMarksDelivered(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "notifications.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "notifications.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestNotificationSuccessfulRetryMarksDelivered(t *testing.T) {
 
 func TestTaskRunAndAgentFailuresCreateProjectNotifications(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "notifications.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "notifications.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestActiveBrainStatusCreatesProjectNotificationWithoutMembership(t *testing
 	for _, status := range []string{"OFFLINE", "ERROR"} {
 		t.Run(status, func(t *testing.T) {
 			ctx := context.Background()
-			database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "notifications.db"))
+			database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "notifications.db"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -21,10 +21,10 @@ const refreshInterval = time.Second
 
 // AgentActivityRepository persists authenticated Agent sessions and the
 // server-derived status transitions observed from them.
-type AgentActivityRepository struct{ database *sql.DB }
+type AgentActivityRepository struct{ database *Database }
 
 // NewAgentActivityRepository builds the repository.
-func NewAgentActivityRepository(database *sql.DB) (*AgentActivityRepository, error) {
+func NewAgentActivityRepository(database *Database) (*AgentActivityRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}
@@ -89,7 +89,7 @@ func (r *AgentActivityRepository) RecordActivity(ctx context.Context, identity h
 	return session, false, commitAgentActivity(tx)
 }
 
-func commitAgentActivity(tx *sql.Tx) error {
+func commitAgentActivity(tx *Transaction) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit agent activity: %w", err)
 	}
@@ -295,14 +295,10 @@ func (r *AgentActivityRepository) ApplyStatus(ctx context.Context, change heartb
 	if _, err := tx.ExecContext(ctx, "UPDATE agents SET status = ? WHERE id = ?", string(change.To), change.AgentID); err != nil {
 		return heartbeat.StatusEvent{}, false, fmt.Errorf("update agent status: %w", err)
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO agent_status_events(agent_id, session_id, from_status, to_status, reason, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, change.AgentID, change.SessionID, stored, string(change.To), change.Reason, formatDatabaseTime(change.At))
-	if err != nil {
+	var sequence int64
+	if err := tx.QueryRowContext(ctx, `INSERT INTO agent_status_events(agent_id, session_id, from_status, to_status, reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?) RETURNING sequence`, change.AgentID, change.SessionID, stored, string(change.To), change.Reason, formatDatabaseTime(change.At)).Scan(&sequence); err != nil {
 		return heartbeat.StatusEvent{}, false, fmt.Errorf("record agent status event: %w", err)
-	}
-	sequence, err := result.LastInsertId()
-	if err != nil {
-		return heartbeat.StatusEvent{}, false, fmt.Errorf("read agent status event sequence: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return heartbeat.StatusEvent{}, false, fmt.Errorf("commit agent status change: %w", err)

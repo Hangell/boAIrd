@@ -13,9 +13,9 @@ import (
 	"boAIrd/internal/run"
 )
 
-type RunRepository struct{ database *sql.DB }
+type RunRepository struct{ database *Database }
 
-func NewRunRepository(database *sql.DB) (*RunRepository, error) {
+func NewRunRepository(database *Database) (*RunRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}

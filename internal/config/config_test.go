@@ -8,7 +8,7 @@ import (
 )
 
 func TestLoadUsesLocalDefaults(t *testing.T) {
-	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES",
+	unsetEnvironment(t, "BOAIRD_HOST", "BOAIRD_PORT", "BOAIRD_DATABASE_PATH", "BOAIRD_DATABASE_DRIVER", "BOAIRD_DATABASE_URL", "BOAIRD_MCP_AGENT_TOKENS", "BOAIRD_PROVIDER_ALLOWED_HOSTS", "BOAIRD_PROVIDER_ALLOWED_IP_RANGES",
 		"BOAIRD_AGENT_STALE_AFTER", "BOAIRD_AGENT_OFFLINE_AFTER", "BOAIRD_AGENT_STATUS_INTERVAL",
 		"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS", "BOAIRD_ORCHESTRATOR_TIMEOUT")
 	unsetEnvironment(t, "BOAIRD_CONTEXT_MAX_BYTES", "BOAIRD_CONTEXT_MAX_TOKENS", "BOAIRD_SHELL_ENABLED", "BOAIRD_SHELL_ALLOWED_EXECUTABLES")
@@ -20,7 +20,7 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Host != defaultHost || cfg.Port != defaultPort || cfg.DatabasePath != defaultDatabasePath {
+	if cfg.Host != defaultHost || cfg.Port != defaultPort || cfg.DatabasePath != defaultDatabasePath || cfg.DatabaseDriver != defaultDatabaseDriver {
 		t.Fatalf("Load() = %+v, want local defaults", cfg)
 	}
 	if cfg.AgentStaleAfter != defaultAgentStaleAfter || cfg.AgentOfflineAfter != defaultAgentOfflineAfter || cfg.AgentStatusInterval != defaultAgentStatusInterval {
@@ -312,9 +312,79 @@ func TestLoadRejectsInvalidPort(t *testing.T) {
 
 func testConfig(host string) Config {
 	return Config{
-		Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, MasterKey: MasterKey{1}, LocalAuthToken: LocalAuthToken{2},
+		Host: host, Port: defaultPort, DatabasePath: defaultDatabasePath, DatabaseDriver: "sqlite", MasterKey: MasterKey{1}, LocalAuthToken: LocalAuthToken{2},
 		AgentStaleAfter: defaultAgentStaleAfter, AgentOfflineAfter: defaultAgentOfflineAfter, AgentStatusInterval: defaultAgentStatusInterval,
 		ContextMaxBytes: defaultContextMaxBytes, ContextMaxTokens: defaultContextMaxTokens,
+	}
+}
+
+func TestValidateDatabaseDriverConfiguration(t *testing.T) {
+	t.Setenv("PGSSLMODE", "")
+	t.Setenv("PGSERVICE", "")
+	tests := []struct {
+		name string
+		edit func(*Config)
+		want bool
+	}{
+		{name: "default SQLite", want: true},
+		{name: "unsupported driver", edit: func(cfg *Config) { cfg.DatabaseDriver = "mysql" }},
+		{name: "PostgreSQL missing URL", edit: func(cfg *Config) { cfg.DatabaseDriver = "postgres" }},
+		{name: "PostgreSQL valid URL", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@localhost/boaird?sslmode=disable"
+		}, want: true},
+		{name: "remote PostgreSQL requires certificate verification", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=require"
+		}},
+		{name: "remote PostgreSQL requires hostname verification", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=verify-ca"
+		}},
+		{name: "remote PostgreSQL verified TLS", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=verify-full"
+		}, want: true},
+		{name: "local URL host cannot hide remote query host", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@localhost/boaird?host=db.example.com&sslmode=disable"
+		}},
+		{name: "remote query host with hostname verification", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@localhost/boaird?host=db.example.com&sslmode=verify-full"
+		}, want: true},
+		{name: "remote host fallback cannot use plaintext", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@localhost/boaird?host=localhost,db.example.com&sslmode=disable"
+		}},
+		{name: "remote URL is not downgraded by PGSSLMODE", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird"
+		}},
+		{name: "URL with SQLite", edit: func(cfg *Config) { cfg.DatabaseURL = "postgres://localhost/boaird" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := testConfig("127.0.0.1")
+			if test.edit != nil {
+				test.edit(&cfg)
+			}
+			err := cfg.Validate()
+			if (err == nil) != test.want {
+				t.Fatalf("Validate() error = %v, want success %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidatePostgresURLTLSOverridesPGSSLMODE(t *testing.T) {
+	t.Setenv("PGSSLMODE", "disable")
+	t.Setenv("PGSERVICE", "")
+	cfg := testConfig("127.0.0.1")
+	cfg.DatabaseDriver = "postgres"
+	cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=verify-full"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected explicit verify-full URL with PGSSLMODE=disable: %v", err)
 	}
 }
 

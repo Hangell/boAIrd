@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func TestAgentRepositoryPersistsConfigurationAndRelations(t *testing.T) {
-	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +66,7 @@ func TestAgentRepositoryPersistsConfigurationAndRelations(t *testing.T) {
 }
 
 func TestAgentRepositoryEnforcesCredentialReferences(t *testing.T) {
-	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +98,7 @@ func TestAgentRepositoryEnforcesCredentialReferences(t *testing.T) {
 
 func TestAgentProjectScopePersistsAndAuditsOnlyRealChanges(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +163,7 @@ func TestAgentProjectScopePersistsAndAuditsOnlyRealChanges(t *testing.T) {
 	assertAgentProjectAuditCount(t, ctx, database, "agent.project.left", 1)
 }
 
-func assertAgentProjectAuditCount(t *testing.T, ctx context.Context, database *sql.DB, eventType string, want int) {
+func assertAgentProjectAuditCount(t *testing.T, ctx context.Context, database *Database, eventType string, want int) {
 	t.Helper()
 	var got int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events WHERE event_type = ?`, eventType).Scan(&got); err != nil {
@@ -176,7 +175,7 @@ func assertAgentProjectAuditCount(t *testing.T, ctx context.Context, database *s
 }
 
 func TestActiveBrainAgentCapabilitiesAreUpdatedDifferentially(t *testing.T) {
-	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

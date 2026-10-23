@@ -2,7 +2,6 @@ package template_test
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,7 +11,7 @@ import (
 	"boAIrd/internal/template"
 )
 
-func newTestService(t *testing.T) (*template.Service, *sql.DB) {
+func newTestService(t *testing.T) (*template.Service, *storage.Database) {
 	t.Helper()
 	ctx := context.Background()
 	database, err := storage.OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))

@@ -16,11 +16,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/*.sql
+//go:embed migrations/*.sql migrations/postgres/*.sql
 var migrationFiles embed.FS
 
 // OpenSQLite creates or opens the SQLite database and applies pending migrations.
-func OpenSQLite(ctx context.Context, path string) (*sql.DB, error) {
+func OpenSQLite(ctx context.Context, path string) (*Database, error) {
 	if path == "" {
 		return nil, fmt.Errorf("database path must not be empty")
 	}
@@ -54,7 +54,7 @@ func OpenSQLite(ctx context.Context, path string) (*sql.DB, error) {
 	if err := migrate(ctx, db); err != nil {
 		return nil, errors.Join(fmt.Errorf("apply SQLite migrations: %w", err), db.Close())
 	}
-	return db, nil
+	return &Database{connection: db, dialect: dialectSQLite}, nil
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

@@ -11,7 +11,7 @@ import (
 
 func TestProfileRepositoryUpsertAndList(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
