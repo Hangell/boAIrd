@@ -18,6 +18,7 @@ import (
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/task"
+	governedtool "boAIrd/internal/tool"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -192,6 +193,17 @@ func (brainStub) Execute(context.Context, string, string, int) (brain.Execution,
 type runStub struct{}
 
 func (runStub) Get(context.Context, string) (run.Run, error) { return run.Run{}, run.ErrNotFound }
+
+type shellExecutorStub struct {
+	request governedtool.Request
+	calls   int
+}
+
+func (s *shellExecutorStub) Execute(_ context.Context, request governedtool.Request) (json.RawMessage, error) {
+	s.request = request
+	s.calls++
+	return json.RawMessage(`{"stdout":"ok","exit_code":0}`), nil
+}
 
 type staticVerifier map[string]string
 
@@ -500,6 +512,57 @@ func TestAuthenticatedMCPBrainUsesBrainTaskPolicyActor(t *testing.T) {
 	}
 	if actor := actorRecords[readyTask.ID()]; actor.Type != task.ActorBrain || actor.ID != brainAgent.ID() {
 		t.Fatalf("transition actor = %+v, want authenticated active Brain", actorRecords[readyTask.ID()])
+	}
+}
+
+func TestShellToolIsDiscoveredOnlyWhenConfiguredAndUsesAuthenticatedScope(t *testing.T) {
+	a, err := testAgentWithCapabilities(t, "shell-agent", []string{"shell.execute"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err = a.AddProject("project-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &shellExecutorStub{}
+	server, err := New(Services{
+		Agents: agentStub{values: map[string]agent.Agent{a.ID(): a}}, Projects: projectStub{}, Tasks: taskStub{},
+		Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}, Tools: executor,
+	}, staticVerifier{"secret": a.ID()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+	client := mcp.NewClient(&mcp.Implementation{Name: "shell-test", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint: httpServer.URL, HTTPClient: &http.Client{Transport: bearerRoundTripper{token: func() string { return "secret" }, base: http.DefaultTransport}}, DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, value := range tools.Tools {
+		if value.Name == "boaird.shell.execute" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("configured shell tool was not advertised")
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.shell.execute", Arguments: map[string]any{
+		"project_id": "project-one", "executable": "go", "arguments": []string{"version"},
+	}})
+	if err != nil || result.IsError {
+		t.Fatalf("shell.execute result = %+v, error = %v", result, err)
+	}
+	if executor.calls != 1 || executor.request.Principal.ID != a.ID() || executor.request.ProjectID != "project-one" || executor.request.ToolName != "shell.execute" {
+		t.Fatalf("executor calls = %d, request = %#v", executor.calls, executor.request)
 	}
 }
 

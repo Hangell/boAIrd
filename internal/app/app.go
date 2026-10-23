@@ -26,6 +26,7 @@ import (
 	"boAIrd/internal/runtime"
 	"boAIrd/internal/storage"
 	"boAIrd/internal/task"
+	governedtool "boAIrd/internal/tool"
 )
 
 // Run opens service dependencies and serves HTTP until the context is cancelled.
@@ -152,11 +153,6 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize conversation service: %w", err)
 	}
-	mcp, err := mcpserver.New(mcpserver.Services{Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository, Conversations: conversationService, Brains: brainService, Runs: runManager, Heartbeats: heartbeatService}, mcpTokenService)
-	if err != nil {
-		return fmt.Errorf("initialize MCP server: %w", err)
-	}
-	logger.Info("MCP endpoint initialized", "path", "/mcp")
 	go reconcileAgentStatus(ctx, heartbeatService, cfg.AgentStatusInterval, logger)
 	runtimeRegistry := runtime.NewRegistry()
 	apiExecutor, err := runtime.NewAPIExecutor(agentManager, credentialManager, endpointPolicy)
@@ -190,6 +186,39 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize audit repository: %w", err)
 	}
+	var shellExecutor mcpserver.ToolExecutor
+	if cfg.ShellEnabled {
+		registry := governedtool.NewRegistry()
+		shellTool, err := governedtool.NewShellTool(governedtool.ShellConfig{
+			Enabled: true, AllowedExecutables: cfg.ShellAllowedExecutables,
+			ResolveWorkspace: func(ctx context.Context, projectID string) (string, error) {
+				value, err := projectManager.Get(ctx, projectID)
+				if err != nil {
+					return "", err
+				}
+				return value.WorkspacePath(), nil
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("configure shell tool: %w", err)
+		}
+		if err := registry.Register(shellTool); err != nil {
+			return fmt.Errorf("register shell tool: %w", err)
+		}
+		shellExecutor, err = governedtool.NewEnforcer(registry, auditRepository, shellScopeAuthorizer{projects: projectManager})
+		if err != nil {
+			return fmt.Errorf("configure shell tool enforcement: %w", err)
+		}
+	}
+	mcp, err := mcpserver.New(mcpserver.Services{
+		Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository,
+		Conversations: conversationService, Brains: brainService, Runs: runManager,
+		Heartbeats: heartbeatService, Tools: shellExecutor,
+	}, mcpTokenService)
+	if err != nil {
+		return fmt.Errorf("initialize MCP server: %w", err)
+	}
+	logger.Info("MCP endpoint initialized", "path", "/mcp")
 	profileRepository, err := storage.NewProfileRepository(database)
 	if err != nil {
 		return fmt.Errorf("initialize profile repository: %w", err)

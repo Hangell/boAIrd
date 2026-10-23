@@ -3,6 +3,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"boAIrd/internal/project"
 	"boAIrd/internal/run"
 	"boAIrd/internal/task"
+	governedtool "boAIrd/internal/tool"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -34,6 +36,11 @@ type Services struct {
 	Brains        BrainService
 	Runs          RunService
 	Heartbeats    HeartbeatService
+	Tools         ToolExecutor
+}
+
+type ToolExecutor interface {
+	Execute(context.Context, governedtool.Request) (json.RawMessage, error)
 }
 
 type TokenVerifier interface {
@@ -135,6 +142,9 @@ func (s *Server) registerTools(server *mcp.Server) {
 	mcp.AddTool[taskInput, contextOutput](server, add("boaird.context.get", "Get task context with a bounded recent conversation page when assigned to this Agent or scoped to the authenticated active Brain's project."), s.contextGet)
 	mcp.AddTool[brainRequestInput, brainOutput](server, add("boaird.brain.request", "Submit a planning request to an API-backed active Brain. An MCP Brain performs work through its authenticated tools."), s.brainRequest)
 	mcp.AddTool[runInput, runOutput](server, add("boaird.run.get", "Get a run in a project explicitly assigned to this Agent."), s.runGet)
+	if s.services.Tools != nil {
+		mcp.AddTool[shellExecuteInput, governedtool.ShellOutput](server, add("boaird.shell.execute", "Run one administrator-allowlisted executable with structured arguments inside an authorized project workspace."), s.shellExecute)
+	}
 }
 
 type emptyInput struct{}
@@ -241,6 +251,12 @@ type brainOutput struct {
 }
 type runInput struct {
 	RunID string `json:"run_id"`
+}
+type shellExecuteInput struct {
+	ProjectID        string   `json:"project_id"`
+	Executable       string   `json:"executable"`
+	Arguments        []string `json:"arguments,omitempty"`
+	WorkingDirectory string   `json:"working_directory,omitempty"`
 }
 type runOutput struct {
 	ID        string `json:"id"`
@@ -809,4 +825,40 @@ func (s *Server) runGet(ctx context.Context, _ *mcp.CallToolRequest, in runInput
 		return nil, runOutput{}, toolError(task.ErrForbidden)
 	}
 	return nil, runOutput{ID: v.ID(), ProjectID: v.ProjectID(), TaskID: v.TaskID(), AgentID: v.AgentID(), Status: string(v.Status()), Output: v.Output(), Error: v.Error()}, nil
+}
+
+func (s *Server) shellExecute(ctx context.Context, _ *mcp.CallToolRequest, input shellExecuteInput) (*mcp.CallToolResult, governedtool.ShellOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.ShellOutput{}, toolError(err)
+	}
+	projectID := strings.TrimSpace(input.ProjectID)
+	if projectID == "" || projectID != input.ProjectID || s.services.Tools == nil {
+		s.recordDenial(ctx, a, projectID, string(capability.ShellExecute), "shell_tool_unavailable_or_invalid_scope")
+		return nil, governedtool.ShellOutput{}, toolError(task.ErrForbidden)
+	}
+	if err := s.authorizeProject(ctx, a, string(capability.ShellExecute), projectID); err != nil {
+		return nil, governedtool.ShellOutput{}, toolError(task.ErrForbidden)
+	}
+	encodedInput, err := json.Marshal(governedtool.ShellInput{
+		Executable: input.Executable, Arguments: input.Arguments, WorkingDirectory: input.WorkingDirectory,
+	})
+	if err != nil {
+		return nil, governedtool.ShellOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.services.Tools.Execute(ctx, governedtool.Request{
+		ToolName: "shell.execute", ProjectID: projectID, ResourceType: "workspace", ResourceID: projectID,
+		Principal: governedtool.Principal{
+			ID: a.ID(), Type: "agent", Capabilities: a.Capabilities(), ProjectIDs: []string{projectID},
+		},
+		Input: encodedInput,
+	})
+	if err != nil {
+		return nil, governedtool.ShellOutput{}, toolError(err)
+	}
+	var output governedtool.ShellOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.ShellOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
 }

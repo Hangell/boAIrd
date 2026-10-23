@@ -1510,6 +1510,14 @@ npm
 npx
 ```
 
+Implemented for MCP as `boaird.shell.execute`: it is disabled unless the
+administrator enables it and configures an executable allowlist. Each call
+requires `shell.execute` and verified project scope, passes structured arguments
+to one executable, checks workspace paths and symlinks, applies a timeout and
+bounded/redacted output, and records metadata-only audit. This is not OS-level
+filesystem isolation; only trusted executables should be allowlisted. See the
+shell environment settings and limitations in `README.md` and `SECURITY.md`.
+
 ---
 
 # Phase 28 — Git
