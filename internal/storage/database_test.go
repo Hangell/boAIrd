@@ -22,6 +22,17 @@ func TestSQLiteBindingPreservesQuestionMarkPlaceholders(t *testing.T) {
 	}
 }
 
+func TestBindPostgresArgsConvertsSQLiteBooleanValues(t *testing.T) {
+	arguments := []any{"project", true, false}
+	converted := bindPostgresArgs(arguments)
+	if converted[0] != "project" || converted[1] != int32(1) || converted[2] != int32(0) {
+		t.Fatalf("bindPostgresArgs() = %#v, want string and int32 boolean values", converted)
+	}
+	if _, ok := arguments[1].(bool); !ok {
+		t.Fatal("bindPostgresArgs() mutated the caller's arguments")
+	}
+}
+
 func TestSplitPostgresStatementsPreservesFunctionBodiesAndComments(t *testing.T) {
 	script := `-- migration header;
 CREATE TABLE records (id TEXT);

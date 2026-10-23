@@ -36,16 +36,18 @@ func (d *Database) PingContext(ctx context.Context) error {
 
 func (d *Database) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	query = d.bind(query)
+	args = d.bindArgs(args)
 	return d.connection.ExecContext(ctx, query, args...)
 }
 
 func (d *Database) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	query = d.bind(query)
+	args = d.bindArgs(args)
 	return d.connection.QueryContext(ctx, query, args...)
 }
 
 func (d *Database) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return d.connection.QueryRowContext(ctx, d.bind(query), args...)
+	return d.connection.QueryRowContext(ctx, d.bind(query), d.bindArgs(args)...)
 }
 
 func (d *Database) Exec(query string, args ...any) (sql.Result, error) {
@@ -75,6 +77,13 @@ func (d *Database) bind(query string) string {
 	return bindPostgres(query)
 }
 
+func (d *Database) bindArgs(args []any) []any {
+	if d.dialect == dialectSQLite {
+		return args
+	}
+	return bindPostgresArgs(args)
+}
+
 // Transaction applies the same dialect rules as its parent connection.
 type Transaction struct {
 	transaction *sql.Tx
@@ -83,16 +92,18 @@ type Transaction struct {
 
 func (t *Transaction) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	query = bindForDialect(t.dialect, query)
+	args = bindArgsForDialect(t.dialect, args)
 	return t.transaction.ExecContext(ctx, query, args...)
 }
 
 func (t *Transaction) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	query = bindForDialect(t.dialect, query)
+	args = bindArgsForDialect(t.dialect, args)
 	return t.transaction.QueryContext(ctx, query, args...)
 }
 
 func (t *Transaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return t.transaction.QueryRowContext(ctx, bindForDialect(t.dialect, query), args...)
+	return t.transaction.QueryRowContext(ctx, bindForDialect(t.dialect, query), bindArgsForDialect(t.dialect, args)...)
 }
 
 func (t *Transaction) Commit() error   { return t.transaction.Commit() }
@@ -103,6 +114,38 @@ func bindForDialect(dialect databaseDialect, query string) string {
 		return query
 	}
 	return bindPostgres(query)
+}
+
+func bindArgsForDialect(dialect databaseDialect, args []any) []any {
+	if dialect == dialectSQLite {
+		return args
+	}
+	return bindPostgresArgs(args)
+}
+
+func bindPostgresArgs(args []any) []any {
+	var converted []any
+	for index, argument := range args {
+		value, ok := argument.(bool)
+		if !ok {
+			if converted != nil {
+				converted[index] = argument
+			}
+			continue
+		}
+		if converted == nil {
+			converted = append([]any(nil), args...)
+		}
+		if value {
+			converted[index] = int32(1)
+		} else {
+			converted[index] = int32(0)
+		}
+	}
+	if converted == nil {
+		return args
+	}
+	return converted
 }
 
 func bindPostgres(query string) string {
