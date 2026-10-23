@@ -2410,11 +2410,19 @@ must have restricted filesystem permissions.
 
 PostgreSQL is an optional backend selected with `BOAIRD_DATABASE_DRIVER=postgres`;
 its connection URL is supplied through `BOAIRD_DATABASE_URL`. Treat that URL as
-a secret because it can contain database credentials. Require certificate
-verification for remote PostgreSQL connections, restrict network access to the
-service host, and grant the application role only the database privileges it
-needs. PostgreSQL-native backups must be encrypted and access-controlled like
-SQLite backups. Application startup acquires an advisory lock and applies each
+a deployment secret because it can contain database credentials. Configuration
+validation uses pgx's effective parsed connection settings, including query
+overrides and all fallback hosts. Every remote target requires
+`sslmode=verify-full`, which verifies the certificate chain and hostname; a
+remote `verify-ca` connection is rejected because it does not verify the
+hostname. Restrict network access to the service host and grant the configured
+role only the privileges required by application operations and startup
+migrations; the current service does not support separate runtime and migration
+credentials. PostgreSQL-native backups must be encrypted and access-controlled
+like SQLite backups; restore tests should verify their
+usability. The database operator can read, modify, or delete application data
+and audit history and is therefore trusted. TLS protects data in transit, not
+at rest. Application startup acquires an advisory lock and applies each
 numbered PostgreSQL migration in its own transaction. Back up the database
 before upgrading and prevent older application versions from writing during a
 schema upgrade. Switching the configured backend does not transfer data.

@@ -319,6 +319,8 @@ func testConfig(host string) Config {
 }
 
 func TestValidateDatabaseDriverConfiguration(t *testing.T) {
+	t.Setenv("PGSSLMODE", "")
+	t.Setenv("PGSERVICE", "")
 	tests := []struct {
 		name string
 		edit func(*Config)
@@ -335,10 +337,30 @@ func TestValidateDatabaseDriverConfiguration(t *testing.T) {
 			cfg.DatabaseDriver = "postgres"
 			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=require"
 		}},
+		{name: "remote PostgreSQL requires hostname verification", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=verify-ca"
+		}},
 		{name: "remote PostgreSQL verified TLS", edit: func(cfg *Config) {
 			cfg.DatabaseDriver = "postgres"
 			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=verify-full"
 		}, want: true},
+		{name: "local URL host cannot hide remote query host", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@localhost/boaird?host=db.example.com&sslmode=disable"
+		}},
+		{name: "remote query host with hostname verification", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@localhost/boaird?host=db.example.com&sslmode=verify-full"
+		}, want: true},
+		{name: "remote host fallback cannot use plaintext", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@localhost/boaird?host=localhost,db.example.com&sslmode=disable"
+		}},
+		{name: "remote URL is not downgraded by PGSSLMODE", edit: func(cfg *Config) {
+			cfg.DatabaseDriver = "postgres"
+			cfg.DatabaseURL = "postgres://user:secret@db.example/boaird"
+		}},
 		{name: "URL with SQLite", edit: func(cfg *Config) { cfg.DatabaseURL = "postgres://localhost/boaird" }},
 	}
 	for _, test := range tests {
@@ -352,6 +374,17 @@ func TestValidateDatabaseDriverConfiguration(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want success %v", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidatePostgresURLTLSOverridesPGSSLMODE(t *testing.T) {
+	t.Setenv("PGSSLMODE", "disable")
+	t.Setenv("PGSERVICE", "")
+	cfg := testConfig("127.0.0.1")
+	cfg.DatabaseDriver = "postgres"
+	cfg.DatabaseURL = "postgres://user:secret@db.example/boaird?sslmode=verify-full"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected explicit verify-full URL with PGSSLMODE=disable: %v", err)
 	}
 }
 
