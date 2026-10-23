@@ -61,7 +61,10 @@ BEGIN
     FROM (
         SELECT ap.project_id FROM agent_projects ap WHERE ap.agent_id = NEW.agent_id
         UNION
-        SELECT b.project_id FROM brains b JOIN projects p ON p.id = b.project_id AND p.brain_id = b.id
-        WHERE b.id = NEW.agent_id AND b.active = 1
+        SELECT b.project_id
+        FROM brain_configuration bc
+        JOIN brains b ON b.id = bc.brain_id
+        JOIN projects p ON p.id = b.project_id AND p.brain_id = b.id
+        WHERE bc.agent_id = NEW.agent_id AND b.active = 1
     );
 END;

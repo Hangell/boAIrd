@@ -218,32 +218,44 @@ func TestTaskRunAndAgentFailuresCreateProjectNotifications(t *testing.T) {
 }
 
 func TestActiveBrainStatusCreatesProjectNotificationWithoutMembership(t *testing.T) {
-	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "notifications.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	statements := []string{
-		`INSERT INTO agents(id,name,role,runtime) VALUES ('brain-agent','External Brain','coordinator','MCP')`,
-		`INSERT INTO projects(id,name,status,brain_id,human_review_required) VALUES ('brain-project','Project','CREATED','brain-agent',0)`,
-		`INSERT INTO brains(id,project_id,active) VALUES ('brain-agent','brain-project',1)`,
-		`INSERT INTO agent_status_events(agent_id,session_id,from_status,to_status,reason,created_at) VALUES ('brain-agent','session-1','BUSY','OFFLINE','status.reconciled',CURRENT_TIMESTAMP)`,
-	}
-	for _, statement := range statements {
-		if _, err := database.ExecContext(ctx, statement); err != nil {
-			t.Fatalf("execute %q: %v", statement, err)
-		}
-	}
-	repository, err := NewNotificationRepository(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	items, err := repository.List(ctx, "brain-project", 100, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].EventType != "agent.disconnected" || items[0].ResourceID != "brain-agent" {
-		t.Fatalf("Brain status notifications = %#v, want one agent.disconnected notification", items)
+	for _, status := range []string{"OFFLINE", "ERROR"} {
+		t.Run(status, func(t *testing.T) {
+			ctx := context.Background()
+			database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "notifications.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = database.Close() })
+			// brain-b (the Brain) is configured with agent-a, whose ID differs
+			// from the Brain ID, and agent-a has no agent_projects row.
+			statements := []string{
+				`INSERT INTO agents(id,name,role,runtime) VALUES ('agent-a','External Brain','coordinator','MCP')`,
+				`INSERT INTO agent_capabilities(agent_id,capability) VALUES ('agent-a','brain.execute')`,
+				`INSERT INTO projects(id,name,status,brain_id,human_review_required) VALUES ('brain-project','Project','CREATED','brain-b',0)`,
+				`INSERT INTO brains(id,project_id,active) VALUES ('brain-b','brain-project',1)`,
+				`INSERT INTO brain_configuration(brain_id,agent_id,autonomy) VALUES ('brain-b','agent-a','MANUAL')`,
+				`INSERT INTO agent_status_events(agent_id,session_id,from_status,to_status,reason,created_at) VALUES ('agent-a','session-1','BUSY','` + status + `','status.reconciled',CURRENT_TIMESTAMP)`,
+			}
+			for _, statement := range statements {
+				if _, err := database.ExecContext(ctx, statement); err != nil {
+					t.Fatalf("execute %q: %v", statement, err)
+				}
+			}
+			repository, err := NewNotificationRepository(database)
+			if err != nil {
+				t.Fatal(err)
+			}
+			items, err := repository.List(ctx, "brain-project", 100, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantEvent := "agent.disconnected"
+			if status == "ERROR" {
+				wantEvent = "agent.failed"
+			}
+			if len(items) != 1 || items[0].EventType != wantEvent || items[0].ResourceID != "agent-a" {
+				t.Fatalf("Brain status notifications = %#v, want one %s notification for agent-a", items, wantEvent)
+			}
+		})
 	}
 }
