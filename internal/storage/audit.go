@@ -68,8 +68,9 @@ func (r *AuditRepository) RecordToolExecution(ctx context.Context, event tool.Ev
 func (r *AuditRepository) RecordEvent(ctx context.Context, event audit.Event) error {
 	if strings.TrimSpace(event.ProjectID) == "" || strings.TrimSpace(event.ActorType) == "" ||
 		strings.TrimSpace(event.ActorID) == "" || strings.TrimSpace(event.Action) == "" ||
-		strings.TrimSpace(event.ResourceType) == "" || strings.TrimSpace(event.ResourceID) == "" {
-		return errors.New("audit event project, actor, action, and resource are required")
+		strings.TrimSpace(event.ResourceType) == "" || strings.TrimSpace(event.ResourceID) == "" ||
+		strings.TrimSpace(event.Result) == "" {
+		return errors.New("audit event project, actor, action, resource, and result are required")
 	}
 	reason := logging.RedactSensitiveText(strings.TrimSpace(event.Reason))
 	if len(reason) > 2000 {

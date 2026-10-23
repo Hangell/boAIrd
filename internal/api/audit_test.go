@@ -68,6 +68,20 @@ func TestAuditAPIReadsProjectScopedRedactedEvents(t *testing.T) {
 	if len(page.Items) != 1 || page.Items[0].Action != "agent.capability.granted" {
 		t.Fatalf("audit items = %+v", page.Items)
 	}
+	for _, query := range []string{"?limit=-1", "?limit=101", "?limit=0", "?offset=-1"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/projects/"+value.ID+"/audit"+query, nil))
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("audit query %s status = %d, want %d; body = %s", query, response.Code, http.StatusBadRequest, response.Body.String())
+		}
+	}
+	for _, query := range []string{"?limit=1", "?limit=100", "?offset=0"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/projects/"+value.ID+"/audit"+query, nil))
+		if response.Code != http.StatusOK {
+			t.Errorf("audit query %s status = %d, want %d; body = %s", query, response.Code, http.StatusOK, response.Body.String())
+		}
+	}
 	if strings.Contains(page.Items[0].Reason, "must-not-persist") {
 		t.Fatalf("audit response leaked secret: %q", page.Items[0].Reason)
 	}

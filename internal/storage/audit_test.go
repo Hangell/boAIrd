@@ -165,4 +165,10 @@ func TestAuditRepositoryRejectsIncompleteEvent(t *testing.T) {
 	if err := repository.RecordEvent(ctx, audit.Event{ProjectID: "p1"}); err == nil {
 		t.Fatal("expected incomplete event to be rejected")
 	}
+	if err := repository.RecordEvent(ctx, audit.Event{
+		ProjectID: "p1", ActorType: "administrator", ActorID: "admin",
+		Action: "agent.updated", ResourceType: "agent", ResourceID: "agent-1", Result: "  ",
+	}); err == nil {
+		t.Fatal("expected event with blank result to be rejected")
+	}
 }

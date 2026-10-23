@@ -37,12 +37,12 @@ type auditListResponse struct {
 func registerAuditRoutes(mux *http.ServeMux, reader AuditReader) {
 	mux.HandleFunc("GET /api/v1/projects/{projectID}/audit", func(w http.ResponseWriter, r *http.Request) {
 		limit, err := queryInteger(r, "limit", 0)
-		if err != nil || (r.URL.Query().Has("limit") && limit == 0) {
+		if err != nil || (r.URL.Query().Has("limit") && (limit < 1 || limit > 100)) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be an integer between 1 and 100")
 			return
 		}
 		offset, err := queryInteger(r, "offset", 0)
-		if err != nil {
+		if err != nil || offset < 0 {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "offset must be a non-negative integer")
 			return
 		}
