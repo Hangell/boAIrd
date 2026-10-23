@@ -102,6 +102,9 @@ func TestOpenSQLiteAppliesMigrationsOnce(t *testing.T) {
 	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_templates'").Scan(&tableName); err != nil {
 		t.Fatalf("verify agent templates migration: %v", err)
 	}
+	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'extensions'").Scan(&tableName); err != nil {
+		t.Fatalf("verify extensions migration: %v", err)
+	}
 	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'").Scan(&tableName); err != nil {
 		t.Fatalf("verify users migration: %v", err)
 	}

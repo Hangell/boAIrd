@@ -134,6 +134,95 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Session issuance audit is unavailable. }
+  /api/v1/extensions:
+    get:
+      operationId: listExtensions
+      x-required-capability: extension.manage
+      summary: List installed tool extensions
+      responses:
+        '200':
+          description: Installed manifests and lifecycle status.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Extension' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: installExtension
+      x-required-capability: extension.manage
+      summary: Install a pending extension manifest
+      description: Installation and immutable extension.installed audit are committed atomically. Tool names are globally reserved while the extension exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExtensionManifest' }
+      responses:
+        '201':
+          description: Extension installed in pending state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Extension' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Extension name or globally reserved tool name already exists. }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/extensions/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 64 }
+    get:
+      operationId: getExtension
+      x-required-capability: extension.manage
+      summary: Get one installed extension
+      responses:
+        '200':
+          description: Installed manifest and lifecycle status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Extension' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deactivateExtension
+      x-required-capability: extension.manage
+      summary: Deactivate and remove an extension
+      description: Removal and immutable extension.deactivated audit are committed atomically; active tool calls are denied as soon as persisted state is removed.
+      responses:
+        '204': { description: Extension removed and its tools unregistered. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Extension is not active. }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/extensions/{name}/activate:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 64 }
+    put:
+      operationId: activateExtension
+      x-required-capability: extension.manage
+      summary: Activate a pending extension
+      description: Registers tools atomically, then commits active status and immutable extension.activated audit. Calls remain denied until active state is persisted.
+      responses:
+        '200':
+          description: Extension active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Extension' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Extension is not pending or a tool name is already registered. }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/audit/users:
     get:
       operationId: listUserAuthorityAuditEvents
@@ -1328,6 +1417,43 @@ components:
         id: { type: string, minLength: 1, maxLength: 200 }
         name: { type: string, minLength: 1, maxLength: 200 }
         role: { type: string, enum: [administrator, member], description: Administrator grants operation capabilities but does not bypass project membership checks. }
+    ExtensionManifest:
+      type: object
+      additionalProperties: false
+      required: [sdk_version, name, version, tools]
+      properties:
+        sdk_version: { type: integer, const: 1 }
+        name: { type: string, pattern: '^[a-z][a-z0-9._-]*$', maxLength: 64 }
+        version: { type: string, minLength: 1, maxLength: 64 }
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items: { $ref: '#/components/schemas/ExtensionToolDeclaration' }
+    ExtensionToolDeclaration:
+      type: object
+      additionalProperties: false
+      required: [name, description, kind, input_schema, output_schema, required_capabilities]
+      properties:
+        name: { type: string, pattern: '^[a-z][a-z0-9._-]*$', maxLength: 64 }
+        description: { type: string, minLength: 1 }
+        kind: { type: string, enum: [declarative, http] }
+        endpoint: { type: string, format: uri, pattern: '^https://' }
+        input_schema: { type: object, description: Bounded SDK v1 JSON Schema subset; root type must be object. }
+        output_schema: { type: object, description: Bounded SDK v1 JSON Schema subset; root type must be object. }
+        required_capabilities: { type: array, minItems: 1, items: { type: string, pattern: '^[a-z][a-z0-9._-]*$' } }
+        data_access: { type: string, pattern: '^(none|network:[a-z0-9.-]+)$', default: none }
+    Extension:
+      type: object
+      additionalProperties: false
+      required: [name, version, status, tools]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        status: { type: string, enum: [pending, active] }
+        tools:
+          type: array
+          items: { $ref: '#/components/schemas/ExtensionToolDeclaration' }
     CreateUser:
       type: object
       additionalProperties: false

@@ -42,7 +42,7 @@ func newProfileHandler(t *testing.T) (http.Handler, *profile.Service, string) {
 		t.Fatal(err)
 	}
 	handler := newHandlerWithServicesAndSecurity(fakeDatabase{}, projectManager, nil, nil, nil, nil, nil, nil,
-		testLocalAuthTokenBytes(), nil, nil, service, nil, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
+		testLocalAuthTokenBytes(), nil, nil, service, nil, nil, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
 
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Profile target"}`)))

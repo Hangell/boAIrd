@@ -64,7 +64,7 @@ func (bootstrapTestUserManager) RecordSessionIssued(context.Context, string, str
 
 func newAuthorizedTestHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, token []byte) http.Handler {
 	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations,
-		token, nil, nil, nil, nil, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
+		token, nil, nil, nil, nil, nil, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
 }
 
 func TestRESTRequiresBearerAndAuditsDenial(t *testing.T) {

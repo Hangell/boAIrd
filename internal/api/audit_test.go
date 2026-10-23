@@ -37,7 +37,7 @@ func TestAuditAPIReadsProjectScopedRedactedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := newHandlerWithServicesAndSecurity(fakeDatabase{}, projectManager, nil, nil, nil, nil, nil, nil,
-		testLocalAuthTokenBytes(), nil, nil, nil, auditRepository, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
+		testLocalAuthTokenBytes(), nil, nil, nil, auditRepository, nil, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
 
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Audit target"}`)))

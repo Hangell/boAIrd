@@ -729,6 +729,48 @@ trust, and keep kernel/container isolation as future work.
 
 ---
 
+# Tool Extension Security
+
+Extensions add tools without changing the core, and are governed by a versioned,
+declarative SDK (see `docs/EXTENSIONS.md`). The only accepted contract is
+`sdk_version: 1`; other versions are rejected. Extensions are manifests, never
+executable code, so an untrusted extension cannot read arbitrary files or
+secrets and cannot execute arbitrary programs.
+
+Every tool declaration must provide its name, description, input/output JSON
+schemas, required capabilities, and data access. Data access is limited to
+`none` or `network:<host>`; manifests requesting filesystem, secret, credential,
+or shell/exec access are rejected. An `http` tool targets one administrator
+approved `https://` endpoint with no embedded credentials, query, or fragment;
+the exact host must be in `BOAIRD_PROVIDER_ALLOWED_HOSTS`, and `data_access`
+must name that same host. The shared provider endpoint policy validates DNS
+answers at connect time, blocks private and special-purpose addresses, pins the
+selected address, disables proxies and redirects, and requires TLS 1.2 or
+later. Provider CIDR exceptions do not widen extension destinations. Invocation
+sends schema-validated input in one bounded, redacted `POST`;
+the response is size-limited, secret-redacted, and schema-validated.
+`declarative` tools are contract-only and are not executable until a
+core-reviewed adapter exists. SDK v1 accepts only a bounded JSON Schema subset;
+unsupported keywords fail manifest validation.
+
+Lifecycle is administrator-controlled and audited:
+
+```text
+install (pending) -> activate (active) -> deactivate (removed)
+```
+
+Installation validates and stores the manifest as `pending`, reserves every
+tool name, and writes its immutable audit event in one transaction. Activation
+(`extension.manage`) atomically registers executable tools before persisting
+active status and its audit event; each invocation also checks persisted active
+state, authenticated Agent identity, project scope, task/run project scope, and
+declared capabilities before an adapter runs. Deactivation removes active state
+and writes its audit event in one transaction before unregistering tools, so
+persisted state denies execution immediately. Every lifecycle event is stored
+in the immutable `extension_audit` stream.
+
+---
+
 # Filesystem Security
 
 Agents must have clear filesystem boundaries.

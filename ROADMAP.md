@@ -1972,13 +1972,41 @@ Git Manager
 
 # Phase 40 — Tool Marketplace / Extensions
 
-Future.
-
 Allow tools to be added without changing the core.
 
 ```text
 boAIrd Tool SDK
 ```
+
+## Implemented
+
+- `internal/extension` — versioned, declarative extension SDK (`sdk_version: 1`,
+  documented in `docs/EXTENSIONS.md`). Extensions are manifests, never
+  executable code; every tool declares name, description, input/output schemas,
+  required capabilities, and data access.
+- `internal/storage/extensions.go` + SQLite migration `0026_extensions.sql` and
+  PostgreSQL migration `0006_extensions.sql` persist manifests, global tool-name
+  reservations, and an immutable `extension_audit` stream (`extension.installed`
+  / `extension.activated` / `extension.deactivated`) in the same transactions
+  as lifecycle state changes.
+- Deny-by-default boundaries: manifests may only declare `none` or
+  `network:<host>` data access; filesystem, secret, credential, and shell/exec
+  access are rejected. HTTP endpoints require the exact administrator-approved
+  host, HTTPS port 443, DNS pinning, public addresses, no redirects or proxy,
+  and TLS 1.2 or later; provider CIDR exceptions do not apply. Inputs and redacted outputs are validated against the
+  bounded SDK v1 JSON Schema subset. `declarative` tools are contract-only.
+- Lifecycle: name reservations and install audit are transactional; activation
+  registers tools atomically before committing active status/audit; each call
+  checks persisted active state, authenticated MCP Agent, capability, project,
+  and optional task/run scope before adapter execution. Deactivation commits
+  removal/audit before unregistering, so active-state checks deny immediately.
+  All lifecycle routes require the `extension.manage` capability.
+- MCP exposes the static `boaird.extension.execute` gateway for activated
+  tools; caller-supplied identity or capability fields are not accepted.
+- API: `GET/POST /api/v1/extensions`, `GET /api/v1/extensions/{name}`,
+  `PUT /api/v1/extensions/{name}/activate`, `DELETE /api/v1/extensions/{name}`.
+- Tests cover invalid manifests, isolation (no fs/secret/exec access),
+  capability enforcement, unauthorized access, and lifecycle/audit.
 
 Possible integrations:
 

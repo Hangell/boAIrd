@@ -1182,6 +1182,8 @@ boaird.brain.request
 
 boaird.run.get
 
+boaird.extension.execute (for active project-scoped extensions)
+
 boaird.shell.execute (only when explicitly enabled)
 ```
 
@@ -1203,6 +1205,7 @@ Tool inputs and required capabilities:
 | `boaird.context.get` | `task_id` | Workers require `task.read` and `conversation.read` with exact assignment; the active Brain requires both capabilities and scope to its own project; at most 20 messages; project metadata is included only with effective project scope and `project.read` |
 | `boaird.brain.request` | `project_id`, `objective`, optional `max_tokens` (1–4096; default 2048) | `brain.execute`; API-backed active Brain only. An MCP Brain uses its authenticated MCP tools directly |
 | `boaird.run.get` | `run_id` | `run.read`; persisted project membership or the authenticated Agent's active Brain relationship for the run's project; run ownership alone does not grant access |
+| `boaird.extension.execute` | `project_id`, `tool_name`, object-valued `input`, optional `task_id` and `run_id` | The activated extension's declared capability; active extension status and project membership or active-Brain scope are checked before the adapter runs; supplied task and Run references must match the same project |
 | `boaird.shell.execute` | `project_id`, `executable`, optional structured `arguments`, optional `working_directory` | `shell.execute` and persisted project membership or active-Brain scope; the executable must be in the administrator allowlist |
 
 An active Brain's scope is derived from the Brain-to-project relationship and is
