@@ -3155,7 +3155,7 @@ are not part of that gate.
 
 # 112. Agent Templates
 
-Future support may allow reusable Agent templates.
+Reusable Agent templates are implemented under `internal/template`.
 
 ```text
 Global Agent Template
@@ -3170,6 +3170,15 @@ Go Backend Senior
 ```
 
 may be instantiated across multiple Projects.
+
+A template is a versioned definition (role, instructions, default runtime,
+suggested tools, and suggested capabilities). Templates never grant
+capabilities: instantiation creates a separate project Agent with only the
+explicitly configured capabilities, scopes it to the project, and records the
+template key and version on the instance for provenance. Global template
+create/update is written to the immutable `template_audit` stream;
+instantiation is recorded in the project audit stream. The source template is
+never mutated by an instance.
 
 ---
 

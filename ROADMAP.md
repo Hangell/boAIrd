@@ -1888,6 +1888,24 @@ Git Manager
 
 ---
 
+## Implemented
+
+- `internal/template` — versioned global templates (key, role, instructions,
+  default runtime, suggested tools, and suggested capabilities). Template
+  names never grant authority.
+- `internal/storage/template.go` + migration `0021_agent_templates.sql` persist
+  templates, the `template_instances` provenance table (template key + version
+  per instantiated Agent), and an immutable `template_audit` stream for global
+  create/update.
+- `Service.Instantiate` creates a separate project Agent record with only the
+  explicitly configured capabilities, scopes it to the project, records the
+  template source/version, and writes `template.instantiated` to the project
+  audit stream. The source template is never mutated.
+- API: `GET/POST /api/v1/templates`, `GET/PATCH /api/v1/templates/{key}`, and
+  `POST /api/v1/projects/{id}/templates/{key}/instantiate`.
+
+---
+
 # Phase 40 — Tool Marketplace / Extensions
 
 Future.

@@ -1049,6 +1049,112 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/templates:
+    get:
+      operationId: listAgentTemplates
+      x-required-capability: agent.read
+      summary: List reusable agent templates
+      responses:
+        '200':
+          description: Agent template catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AgentTemplate' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createAgentTemplate
+      x-required-capability: agent.create
+      summary: Create a reusable agent template
+      description: The template describes an Agent but never grants capabilities. Creation is recorded in the immutable template audit stream.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAgentTemplate' }
+      responses:
+        '201':
+          description: Created template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/templates/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getAgentTemplate
+      x-required-capability: agent.read
+      summary: Get one reusable agent template
+      responses:
+        '200':
+          description: Agent template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentTemplate' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      operationId: updateAgentTemplate
+      x-required-capability: agent.update
+      summary: Update and version a reusable agent template
+      description: The update bumps the template version and is recorded in the immutable template audit stream.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAgentTemplate' }
+      responses:
+        '200':
+          description: Updated template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentTemplate' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{projectID}/templates/{key}/instantiate:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: instantiateAgentTemplate
+      x-required-capability: agent.scope.manage
+      summary: Instantiate a project Agent from a template
+      description: Creates a separate project Agent with only the explicitly configured capabilities, scoped to the project. The template source and version are recorded on the instance; the template is not mutated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InstantiateAgentTemplate' }
+      responses:
+        '201':
+          description: Instantiated Agent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 components:
   securitySchemes:
     localBearerAuth:
@@ -1428,6 +1534,58 @@ components:
         status: { type: string, readOnly: true, description: Server-derived from authenticated sessions and observed work; clients never submit a status., enum: [ONLINE, IDLE, BUSY, WAITING, OFFLINE, STALE, ERROR] }
         last_seen_at: { type: string, format: date-time, readOnly: true, description: Most recent authenticated activity of an open session. }
         session_open: { type: boolean, readOnly: true, description: Whether an unexpired session is bound to this Agent. }
+    AgentTemplate:
+      type: object
+      required: [id, key, name, role, instructions, default_runtime, suggested_tools, suggested_capabilities, version]
+      properties:
+        id: { type: string }
+        key: { type: string }
+        name: { type: string }
+        role: { type: string, description: Descriptive label only; it grants no permissions. }
+        description: { type: string }
+        instructions: { type: string }
+        default_runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        suggested_tools:
+          type: array
+          items: { type: string }
+        suggested_capabilities:
+          type: array
+          items: { type: string }
+        version: { type: integer, minimum: 1 }
+    CreateAgentTemplate:
+      type: object
+      additionalProperties: false
+      required: [key, name, role, default_runtime]
+      properties:
+        key: { type: string, pattern: '^[a-z][a-z0-9-]{1,63}$' }
+        name: { type: string, maxLength: 200 }
+        role: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 4000 }
+        instructions: { type: string, maxLength: 16000 }
+        default_runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        suggested_tools: { type: array, items: { type: string } }
+        suggested_capabilities: { type: array, items: { type: string } }
+    UpdateAgentTemplate:
+      type: object
+      additionalProperties: false
+      required: [name, role, default_runtime]
+      properties:
+        name: { type: string, maxLength: 200 }
+        role: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 4000 }
+        instructions: { type: string, maxLength: 16000 }
+        default_runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        suggested_tools: { type: array, items: { type: string } }
+        suggested_capabilities: { type: array, items: { type: string } }
+    InstantiateAgentTemplate:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 4000 }
+        instructions: { type: string, maxLength: 16000 }
+        capabilities: { type: array, items: { type: string }, description: Explicitly configured capabilities only; never granted by the template. }
+        tools: { type: array, items: { type: string }, description: Limited to the template's suggested tools. }
     AgentStatusEvent:
       type: object
       required: [sequence, agent_id, from_status, to_status, reason, created_at]
