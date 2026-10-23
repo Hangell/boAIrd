@@ -173,7 +173,8 @@ func isNil(value any) bool {
 }
 
 func validateRequest(request Request) error {
-	if request.ToolName == "" || strings.TrimSpace(request.ProjectID) != request.ProjectID ||
+	if request.ToolName == "" || strings.TrimSpace(request.ProjectID) == "" ||
+		strings.TrimSpace(request.ProjectID) != request.ProjectID ||
 		strings.TrimSpace(request.Principal.ID) == "" || strings.TrimSpace(request.Principal.Type) == "" {
 		return fmt.Errorf("%w: tool, project, and authenticated principal are required", ErrInvalidRequest)
 	}

@@ -162,6 +162,32 @@ func TestRegistryDeniesProjectResourceEscapeBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestEnforcerRejectsEmptyProjectIDWithPermissiveScopeAuthorizer(t *testing.T) {
+	var toolCalls, scopeCalls int
+	registry := NewRegistry()
+	if err := registry.Register(testTool(t, func(context.Context, input) (output, error) {
+		toolCalls++
+		return output{Value: "unexpected"}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	enforcer, err := NewEnforcer(registry, &memoryAuditor{}, ScopeAuthorizerFunc(func(context.Context, Principal, Request) error {
+		scopeCalls++
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := authorizedRequest(`{"value":"x"}`)
+	request.ProjectID = ""
+	if _, err := enforcer.Execute(context.Background(), request); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Execute() error = %v, want ErrInvalidRequest", err)
+	}
+	if scopeCalls != 0 || toolCalls != 0 {
+		t.Fatalf("scope authorizer calls = %d, tool calls = %d; want both zero", scopeCalls, toolCalls)
+	}
+}
+
 func TestRegistryBoundsExecutionAndOutputAndFailsOnAuditFailure(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		auditor := &memoryAuditor{}
