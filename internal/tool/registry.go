@@ -196,7 +196,8 @@ func (e *Enforcer) record(ctx context.Context, request Request, outcome string) 
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditTimeout)
 	defer cancel()
 	return e.auditor.RecordToolExecution(auditCtx, Event{
-		ProjectID: request.ProjectID, ActorType: request.Principal.Type, ActorID: request.Principal.ID,
+		ProjectID: request.ProjectID, TaskID: request.TaskID, RunID: request.RunID,
+		ActorType: request.Principal.Type, ActorID: request.Principal.ID,
 		ToolName: request.ToolName, ResourceType: request.ResourceType, ResourceID: request.ResourceID, Outcome: outcome,
 	})
 }

@@ -13,7 +13,16 @@ var ErrDenied = errors.New("authorization denied")
 
 type Capability string
 
-const ShellExecute Capability = "shell.execute"
+const (
+	ShellExecute Capability = "shell.execute"
+
+	GitRead   Capability = "git.read"
+	GitDiff   Capability = "git.diff"
+	GitBranch Capability = "git.branch"
+	GitCommit Capability = "git.commit"
+	GitPush   Capability = "git.push"
+	GitMerge  Capability = "git.merge"
+)
 
 func New(identifier string) (Capability, error) {
 	if strings.TrimSpace(identifier) != identifier || !identifierPattern.MatchString(identifier) {

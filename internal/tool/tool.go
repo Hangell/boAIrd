@@ -42,6 +42,8 @@ type Principal struct {
 type Request struct {
 	ToolName     string
 	ProjectID    string
+	TaskID       string
+	RunID        string
 	ResourceType string
 	ResourceID   string
 	Principal    Principal
@@ -68,6 +70,8 @@ type Contract struct {
 // Event contains only non-sensitive metadata suitable for immutable audit.
 type Event struct {
 	ProjectID    string
+	TaskID       string
+	RunID        string
 	ActorType    string
 	ActorID      string
 	ToolName     string

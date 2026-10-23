@@ -37,6 +37,7 @@ type Services struct {
 	Runs          RunService
 	Heartbeats    HeartbeatService
 	Tools         ToolExecutor
+	GitTools      ToolExecutor
 }
 
 type ToolExecutor interface {
@@ -144,6 +145,14 @@ func (s *Server) registerTools(server *mcp.Server) {
 	mcp.AddTool[runInput, runOutput](server, add("boaird.run.get", "Get a run in a project explicitly assigned to this Agent."), s.runGet)
 	if s.services.Tools != nil {
 		mcp.AddTool[shellExecuteInput, governedtool.ShellOutput](server, add("boaird.shell.execute", "Run one administrator-allowlisted executable with structured arguments inside an authorized project workspace."), s.shellExecute)
+	}
+	if s.services.GitTools != nil {
+		mcp.AddTool[gitReadMCPInput, governedtool.GitReadOutput](server, add("boaird.git.read", "Inspect repository status, log, a ref, or tracked files inside an authorized project workspace."), s.gitRead)
+		mcp.AddTool[gitDiffMCPInput, governedtool.GitDiffOutput](server, add("boaird.git.diff", "Show bounded working-tree, staged, or reference diffs inside an authorized project workspace."), s.gitDiff)
+		mcp.AddTool[gitBranchMCPInput, governedtool.GitBranchOutput](server, add("boaird.git.branch", "List repository branches and the current branch inside an authorized project workspace."), s.gitBranch)
+		mcp.AddTool[gitCommitMCPInput, governedtool.GitCommitOutput](server, add("boaird.git.commit", "Commit staged changes with a message inside an authorized project workspace."), s.gitCommit)
+		mcp.AddTool[gitPushMCPInput, governedtool.GitPushOutput](server, add("boaird.git.push", "Push a branch to a named remote inside an authorized project workspace; denied by default and subject to Human Review."), s.gitPush)
+		mcp.AddTool[gitMergeMCPInput, governedtool.GitMergeOutput](server, add("boaird.git.merge", "Merge a reference into the current branch inside an authorized project workspace; denied by default and subject to Human Review."), s.gitMerge)
 	}
 }
 
@@ -257,6 +266,56 @@ type shellExecuteInput struct {
 	Executable       string   `json:"executable"`
 	Arguments        []string `json:"arguments,omitempty"`
 	WorkingDirectory string   `json:"working_directory,omitempty"`
+}
+
+type gitReadMCPInput struct {
+	ProjectID        string `json:"project_id"`
+	TaskID           string `json:"task_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+	Query            string `json:"query"`
+	Reference        string `json:"reference,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+}
+
+type gitDiffMCPInput struct {
+	ProjectID        string `json:"project_id"`
+	TaskID           string `json:"task_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+	Reference        string `json:"reference,omitempty"`
+	Staged           bool   `json:"staged,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+}
+
+type gitBranchMCPInput struct {
+	ProjectID        string `json:"project_id"`
+	TaskID           string `json:"task_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+}
+
+type gitCommitMCPInput struct {
+	ProjectID        string `json:"project_id"`
+	TaskID           string `json:"task_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+	Message          string `json:"message"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+}
+
+type gitPushMCPInput struct {
+	ProjectID        string `json:"project_id"`
+	TaskID           string `json:"task_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+	Remote           string `json:"remote,omitempty"`
+	Branch           string `json:"branch,omitempty"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
+}
+
+type gitMergeMCPInput struct {
+	ProjectID        string `json:"project_id"`
+	TaskID           string `json:"task_id,omitempty"`
+	RunID            string `json:"run_id,omitempty"`
+	Reference        string `json:"reference"`
+	WorkingDirectory string `json:"working_directory,omitempty"`
 }
 type runOutput struct {
 	ID        string `json:"id"`
@@ -859,6 +918,161 @@ func (s *Server) shellExecute(ctx context.Context, _ *mcp.CallToolRequest, input
 	var output governedtool.ShellOutput
 	if err := json.Unmarshal(encodedOutput, &output); err != nil {
 		return nil, governedtool.ShellOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+// gitExecute authorizes one Git operation against its capability and project
+// scope, resolves the project workspace as the repository boundary, and
+// dispatches to the governed Git tool set.
+func (s *Server) gitExecute(ctx context.Context, a agent.Agent, projectID, taskID, runID, toolName, required string, encodedInput []byte) (json.RawMessage, error) {
+	if projectID == "" || strings.TrimSpace(projectID) != projectID || s.services.GitTools == nil {
+		s.recordDenial(ctx, a, strings.TrimSpace(projectID), required, "git_tool_unavailable_or_invalid_scope")
+		return nil, toolError(task.ErrForbidden)
+	}
+	projectID = strings.TrimSpace(projectID)
+	if err := s.authorizeProject(ctx, a, required, projectID); err != nil {
+		return nil, toolError(task.ErrForbidden)
+	}
+	value, err := s.services.Projects.Get(ctx, projectID)
+	if err != nil || strings.TrimSpace(value.WorkspacePath()) == "" {
+		s.recordDenial(ctx, a, projectID, required, "repository_boundary_required")
+		return nil, toolError(task.ErrForbidden)
+	}
+	encodedOutput, err := s.services.GitTools.Execute(ctx, governedtool.Request{
+		ToolName: toolName, ProjectID: projectID, TaskID: taskID, RunID: runID,
+		ResourceType: "repository", ResourceID: value.WorkspacePath(),
+		Principal: governedtool.Principal{
+			ID: a.ID(), Type: "agent", Capabilities: a.Capabilities(), ProjectIDs: []string{projectID},
+		},
+		Input: encodedInput,
+	})
+	if err != nil {
+		return nil, toolError(err)
+	}
+	return encodedOutput, nil
+}
+
+func (s *Server) gitRead(ctx context.Context, _ *mcp.CallToolRequest, input gitReadMCPInput) (*mcp.CallToolResult, governedtool.GitReadOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitReadOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitReadInput{
+		Query: input.Query, Reference: input.Reference, WorkingDirectory: input.WorkingDirectory,
+	})
+	if err != nil {
+		return nil, governedtool.GitReadOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.gitExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "git.read", string(capability.GitRead), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitReadOutput{}, err
+	}
+	var output governedtool.GitReadOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitReadOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) gitDiff(ctx context.Context, _ *mcp.CallToolRequest, input gitDiffMCPInput) (*mcp.CallToolResult, governedtool.GitDiffOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitDiffOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitDiffInput{
+		Reference: input.Reference, Staged: input.Staged, WorkingDirectory: input.WorkingDirectory,
+	})
+	if err != nil {
+		return nil, governedtool.GitDiffOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.gitExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "git.diff", string(capability.GitDiff), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitDiffOutput{}, err
+	}
+	var output governedtool.GitDiffOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitDiffOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) gitBranch(ctx context.Context, _ *mcp.CallToolRequest, input gitBranchMCPInput) (*mcp.CallToolResult, governedtool.GitBranchOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitBranchOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitBranchInput{WorkingDirectory: input.WorkingDirectory})
+	if err != nil {
+		return nil, governedtool.GitBranchOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.gitExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "git.branch", string(capability.GitBranch), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitBranchOutput{}, err
+	}
+	var output governedtool.GitBranchOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitBranchOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) gitCommit(ctx context.Context, _ *mcp.CallToolRequest, input gitCommitMCPInput) (*mcp.CallToolResult, governedtool.GitCommitOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitCommitOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitCommitInput{Message: input.Message, WorkingDirectory: input.WorkingDirectory})
+	if err != nil {
+		return nil, governedtool.GitCommitOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.gitExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "git.commit", string(capability.GitCommit), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitCommitOutput{}, err
+	}
+	var output governedtool.GitCommitOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitCommitOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) gitPush(ctx context.Context, _ *mcp.CallToolRequest, input gitPushMCPInput) (*mcp.CallToolResult, governedtool.GitPushOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitPushOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitPushInput{Remote: input.Remote, Branch: input.Branch, WorkingDirectory: input.WorkingDirectory})
+	if err != nil {
+		return nil, governedtool.GitPushOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.gitExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "git.push", string(capability.GitPush), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitPushOutput{}, err
+	}
+	var output governedtool.GitPushOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitPushOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) gitMerge(ctx context.Context, _ *mcp.CallToolRequest, input gitMergeMCPInput) (*mcp.CallToolResult, governedtool.GitMergeOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitMergeOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitMergeInput{Reference: input.Reference, WorkingDirectory: input.WorkingDirectory})
+	if err != nil {
+		return nil, governedtool.GitMergeOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.gitExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "git.merge", string(capability.GitMerge), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitMergeOutput{}, err
+	}
+	var output governedtool.GitMergeOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitMergeOutput{}, toolError(governedtool.ErrExecution)
 	}
 	return nil, output, nil
 }

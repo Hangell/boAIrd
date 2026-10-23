@@ -212,10 +212,50 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 			return fmt.Errorf("configure shell tool enforcement: %w", err)
 		}
 	}
+	var gitExecutor mcpserver.ToolExecutor
+	if cfg.GitEnabled {
+		registry := governedtool.NewRegistry()
+		gitTools, err := governedtool.NewGitTools(governedtool.GitConfig{
+			Enabled: true, AllowPush: cfg.GitAllowPush, AllowMerge: cfg.GitAllowMerge,
+			ResolveWorkspace: func(ctx context.Context, projectID string) (string, error) {
+				value, err := projectManager.Get(ctx, projectID)
+				if err != nil {
+					return "", err
+				}
+				return value.WorkspacePath(), nil
+			},
+			HumanReviewRequired: func(ctx context.Context, projectID string) (bool, error) {
+				value, err := projectManager.Get(ctx, projectID)
+				if err != nil {
+					return false, err
+				}
+				return value.HumanReviewRequired(), nil
+			},
+			TaskApproved: func(ctx context.Context, taskID string) (bool, error) {
+				value, err := taskService.Get(ctx, taskID)
+				if err != nil {
+					return false, err
+				}
+				return value.HumanReview() && value.Status() == task.StatusDone, nil
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("configure git tools: %w", err)
+		}
+		for _, gitTool := range gitTools {
+			if err := registry.Register(gitTool); err != nil {
+				return fmt.Errorf("register git tool: %w", err)
+			}
+		}
+		gitExecutor, err = governedtool.NewEnforcer(registry, auditRepository, gitScopeAuthorizer{projects: projectManager})
+		if err != nil {
+			return fmt.Errorf("configure git tool enforcement: %w", err)
+		}
+	}
 	mcp, err := mcpserver.New(mcpserver.Services{
 		Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository,
 		Conversations: conversationService, Brains: brainService, Runs: runManager,
-		Heartbeats: heartbeatService, Tools: shellExecutor,
+		Heartbeats: heartbeatService, Tools: shellExecutor, GitTools: gitExecutor,
 	}, mcpTokenService)
 	if err != nil {
 		return fmt.Errorf("initialize MCP server: %w", err)

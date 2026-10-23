@@ -600,6 +600,74 @@ The MVP may run tools locally, but the architecture must allow for isolation lat
 
 ---
 
+# Git Security
+
+Git operations are one of the highest-risk capability groups because they
+mutate source control. They follow the same governed-tool pipeline as shell:
+capability check, project/resource scope, input validation, bounded and
+redacted output, timeout, and immutable metadata-only audit.
+
+By default the whole Git tool set is disabled:
+
+```text
+BOAIRD_GIT_ENABLED = false
+```
+
+and the two state-changing remote operations remain denied even when Git is
+enabled:
+
+```text
+BOAIRD_GIT_ALLOW_PUSH  = false
+BOAIRD_GIT_ALLOW_MERGE = false
+```
+
+Each operation carries its own capability, so read-only grants never imply
+write or remote grants:
+
+```text
+git.read    (read-only inspection)
+git.diff    (read-only diffs)
+git.branch  (read-only branch listing)
+git.commit  (local commit of staged changes)
+git.push    (denied by default + Human Review gate)
+git.merge   (denied by default + Human Review gate)
+```
+
+Before every operation the tool resolves the authenticated project workspace,
+locates the repository root via `git rev-parse --show-toplevel`, and verifies
+that the resolved repository (including symlinks) is contained in the
+workspace. Repository escape, parent traversal, and repositories outside the
+workspace are rejected.
+
+`git.push` and `git.merge` additionally require:
+
+```text
+explicit capability (git.push / git.merge)
++
+administrator enablement (BOAIRD_GIT_ALLOW_PUSH / BOAIRD_GIT_ALLOW_MERGE)
++
+Human Review gate when the project requires it
+```
+
+When the project sets `human_review_required`, push and merge must be tied to a
+task (`task_id` in the request) whose human review has been approved; an
+unapproved, missing, or unknown task denies the operation. Commands are built
+with structured arguments only — `git -C <repo> <subcommand> ...` — and never
+evaluate model text through `sh -c`. Remote names are restricted to simple
+remote identifiers, and references to plain tokens without `..`.
+
+Audit for each Git operation records actor, project, task, run, repository
+boundary, operation, and result, without credentials, command arguments, or
+output. A metadata-only `start` event is persisted before any mutating command
+runs; an audit failure aborts the call before execution.
+
+As with shell, this is not an OS-level sandbox. A repository inside the
+workspace may contain hooks, submodules, or other executable content. Only
+expose Git tools for workspaces administrators trust, and keep kernel/container
+isolation as future work.
+
+---
+
 # Filesystem Security
 
 Agents must have clear filesystem boundaries.
