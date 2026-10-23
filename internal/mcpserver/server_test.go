@@ -627,6 +627,15 @@ func TestGitToolsAreDiscoveredAndUseAuthenticatedRepositoryScope(t *testing.T) {
 	got := make(map[string]bool, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		got[tool.Name] = true
+		if strings.HasPrefix(tool.Name, "boaird.github.") {
+			schema, err := json.Marshal(tool.InputSchema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(schema), "credential_id") {
+				t.Errorf("GitHub MCP schema exposes credential selection: %s", schema)
+			}
+		}
 	}
 	for _, name := range []string{"boaird.git.read", "boaird.git.diff", "boaird.git.branch", "boaird.git.commit", "boaird.git.push", "boaird.git.merge"} {
 		if !got[name] {
@@ -701,7 +710,7 @@ func TestGitHubToolsAreDiscoveredAndUseAuthenticatedRepositoryScope(t *testing.T
 		}
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.github.issue.read", Arguments: map[string]any{
-		"project_id": "project-one", "task_id": "task-1", "run_id": "run-1", "action": "list", "credential_id": "cred-1",
+		"project_id": "project-one", "task_id": "task-1", "run_id": "run-1", "action": "list",
 	}})
 	if err != nil || result.IsError {
 		t.Fatalf("github.issue.read result = %+v, error = %v", result, err)
@@ -713,7 +722,7 @@ func TestGitHubToolsAreDiscoveredAndUseAuthenticatedRepositoryScope(t *testing.T
 	}
 	// A missing GitHub capability must be denied before reaching the executor.
 	denied, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.github.pr.merge", Arguments: map[string]any{
-		"project_id": "project-one", "number": 1, "credential_id": "cred-1",
+		"project_id": "project-one", "number": 1,
 	}})
 	if err != nil || denied == nil || !denied.IsError {
 		t.Fatalf("github.pr.merge without capability result = %+v, error = %v; want denial", denied, err)

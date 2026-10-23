@@ -19,6 +19,8 @@ var (
 	ErrCredentialUnavailable = errors.New("credential unavailable")
 )
 
+const ProviderGitHub = "github"
+
 const (
 	maxNameBytes     = 200
 	maxProviderBytes = 100
@@ -52,9 +54,18 @@ type Repository interface {
 	Delete(context.Context, string) error
 }
 
+// IntegrationRepository stores administrator-granted tool credentials apart
+// from an Agent's runtime-provider credential.
+type IntegrationRepository interface {
+	BindIntegration(context.Context, string, string, string, string, string) error
+	UnbindIntegration(context.Context, string, string, string, string) error
+	GetIntegrationForUse(context.Context, string, string, string) (Record, error)
+}
+
 type Manager struct {
-	repository Repository
-	aead       cipher.AEAD
+	repository            Repository
+	integrationRepository IntegrationRepository
+	aead                  cipher.AEAD
 }
 
 func NewManager(repository Repository, masterKey []byte) (*Manager, error) {
@@ -74,7 +85,8 @@ func NewManager(repository Repository, masterKey []byte) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize credential encryption: %w", err)
 	}
-	return &Manager{repository: repository, aead: aead}, nil
+	integrationRepository, _ := repository.(IntegrationRepository)
+	return &Manager{repository: repository, integrationRepository: integrationRepository, aead: aead}, nil
 }
 
 func (m *Manager) Create(ctx context.Context, name, provider, secret string) (Metadata, error) {
@@ -139,6 +151,56 @@ func (m *Manager) ResolveForProvider(ctx context.Context, id string, scope Scope
 		return "", ErrCredentialUnavailable
 	}
 	return m.resolve(ctx, id, scope, provider)
+}
+
+// BindGitHub grants an MCP Agent use of one GitHub credential in one project.
+// The binding operation is audited atomically by the repository.
+func (m *Manager) BindGitHub(ctx context.Context, projectID, agentID, credentialID, actorID string) error {
+	if m.integrationRepository == nil || ctx == nil || !validBindingIdentifier(projectID) ||
+		!validBindingIdentifier(agentID) || !validBindingIdentifier(credentialID) || !validBindingIdentifier(actorID) {
+		return ErrCredentialUnavailable
+	}
+	return m.integrationRepository.BindIntegration(ctx, agentID, projectID, ProviderGitHub, credentialID, actorID)
+}
+
+// UnbindGitHub removes the project's explicit GitHub credential grant.
+func (m *Manager) UnbindGitHub(ctx context.Context, projectID, agentID, actorID string) error {
+	if m.integrationRepository == nil || ctx == nil || !validBindingIdentifier(projectID) ||
+		!validBindingIdentifier(agentID) || !validBindingIdentifier(actorID) {
+		return ErrCredentialUnavailable
+	}
+	return m.integrationRepository.UnbindIntegration(ctx, agentID, projectID, ProviderGitHub, actorID)
+}
+
+// ResolveGitHub decrypts only the GitHub credential explicitly bound to this
+// MCP Agent and project. MCP input never supplies the credential identifier.
+func (m *Manager) ResolveGitHub(ctx context.Context, scope Scope) (string, error) {
+	if m.integrationRepository == nil || ctx == nil || !validBindingIdentifier(scope.AgentID) || !validBindingIdentifier(scope.ProjectID) {
+		return "", ErrCredentialUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	record, err := m.integrationRepository.GetIntegrationForUse(ctx, scope.AgentID, scope.ProjectID, ProviderGitHub)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", ErrCredentialUnavailable
+	}
+	if !strings.EqualFold(record.Provider, ProviderGitHub) {
+		return "", ErrCredentialUnavailable
+	}
+	plaintext, err := m.decrypt(record.ID, record.Provider, record.SecretCiphertext)
+	if err != nil {
+		return "", ErrCredentialUnavailable
+	}
+	return plaintext, nil
+}
+
+func validBindingIdentifier(value string) bool {
+	return strings.TrimSpace(value) != "" && strings.TrimSpace(value) == value &&
+		!strings.ContainsRune(value, '\x00') && len(value) <= 128
 }
 
 func (m *Manager) resolve(ctx context.Context, id string, scope Scope, expectedProvider string) (string, error) {

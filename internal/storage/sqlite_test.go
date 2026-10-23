@@ -33,8 +33,8 @@ func TestOpenSQLiteAppliesMigrationsOnce(t *testing.T) {
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("query migration count: %v", err)
 	}
-	if migrationCount != 24 {
-		t.Fatalf("migration count = %d, want 24", migrationCount)
+	if migrationCount != 25 {
+		t.Fatalf("migration count = %d, want 25", migrationCount)
 	}
 
 	var tableName string

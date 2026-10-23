@@ -329,63 +329,57 @@ type gitMergeMCPInput struct {
 }
 
 type githubIssueReadMCPInput struct {
-	ProjectID    string `json:"project_id"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Action       string `json:"action"`
-	Number       int    `json:"number,omitempty"`
-	State        string `json:"state,omitempty"`
-	CredentialID string `json:"credential_id"`
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Action    string `json:"action"`
+	Number    int    `json:"number,omitempty"`
+	State     string `json:"state,omitempty"`
 }
 
 type githubIssueCreateMCPInput struct {
-	ProjectID    string `json:"project_id"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Title        string `json:"title"`
-	Body         string `json:"body,omitempty"`
-	CredentialID string `json:"credential_id"`
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Title     string `json:"title"`
+	Body      string `json:"body,omitempty"`
 }
 
 type githubIssueUpdateMCPInput struct {
-	ProjectID    string `json:"project_id"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Number       int    `json:"number"`
-	Body         string `json:"body,omitempty"`
-	State        string `json:"state,omitempty"`
-	CredentialID string `json:"credential_id"`
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Number    int    `json:"number"`
+	Body      string `json:"body,omitempty"`
+	State     string `json:"state,omitempty"`
 }
 
 type githubPRReadMCPInput struct {
-	ProjectID    string `json:"project_id"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Action       string `json:"action"`
-	Number       int    `json:"number,omitempty"`
-	State        string `json:"state,omitempty"`
-	CredentialID string `json:"credential_id"`
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Action    string `json:"action"`
+	Number    int    `json:"number,omitempty"`
+	State     string `json:"state,omitempty"`
 }
 
 type githubPRCreateMCPInput struct {
-	ProjectID    string `json:"project_id"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Title        string `json:"title"`
-	Head         string `json:"head"`
-	Base         string `json:"base"`
-	Body         string `json:"body,omitempty"`
-	CredentialID string `json:"credential_id"`
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Title     string `json:"title"`
+	Head      string `json:"head"`
+	Base      string `json:"base"`
+	Body      string `json:"body,omitempty"`
 }
 
 type githubPRReviewMCPInput struct {
-	ProjectID    string `json:"project_id"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Number       int    `json:"number"`
-	Event        string `json:"event"`
-	Body         string `json:"body,omitempty"`
-	CredentialID string `json:"credential_id"`
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	Number    int    `json:"number"`
+	Event     string `json:"event"`
+	Body      string `json:"body,omitempty"`
 }
 
 type githubPRMergeMCPInput struct {
@@ -395,7 +389,6 @@ type githubPRMergeMCPInput struct {
 	Number          int    `json:"number"`
 	ExpectedHeadSHA string `json:"expected_head_sha"`
 	MergeMethod     string `json:"merge_method,omitempty"`
-	CredentialID    string `json:"credential_id"`
 }
 type runOutput struct {
 	ID        string `json:"id"`
@@ -1193,7 +1186,7 @@ func (s *Server) githubIssueRead(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, governedtool.GitHubIssueReadOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubIssueReadInput{Action: input.Action, Number: input.Number, State: input.State, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubIssueReadInput{Action: input.Action, Number: input.Number, State: input.State})
 	if err != nil {
 		return nil, governedtool.GitHubIssueReadOutput{}, toolError(governedtool.ErrInvalidInput)
 	}
@@ -1213,7 +1206,7 @@ func (s *Server) githubIssueCreate(ctx context.Context, _ *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, governedtool.GitHubIssueCreateOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubIssueCreateInput{Title: input.Title, Body: input.Body, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubIssueCreateInput{Title: input.Title, Body: input.Body})
 	if err != nil {
 		return nil, governedtool.GitHubIssueCreateOutput{}, toolError(governedtool.ErrInvalidInput)
 	}
@@ -1233,7 +1226,7 @@ func (s *Server) githubIssueUpdate(ctx context.Context, _ *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, governedtool.GitHubIssueUpdateOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubIssueUpdateInput{Number: input.Number, Body: input.Body, State: input.State, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubIssueUpdateInput{Number: input.Number, Body: input.Body, State: input.State})
 	if err != nil {
 		return nil, governedtool.GitHubIssueUpdateOutput{}, toolError(governedtool.ErrInvalidInput)
 	}
@@ -1253,7 +1246,7 @@ func (s *Server) githubPRRead(ctx context.Context, _ *mcp.CallToolRequest, input
 	if err != nil {
 		return nil, governedtool.GitHubPRReadOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubPRReadInput{Action: input.Action, Number: input.Number, State: input.State, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubPRReadInput{Action: input.Action, Number: input.Number, State: input.State})
 	if err != nil {
 		return nil, governedtool.GitHubPRReadOutput{}, toolError(governedtool.ErrInvalidInput)
 	}
@@ -1273,7 +1266,7 @@ func (s *Server) githubPRCreate(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if err != nil {
 		return nil, governedtool.GitHubPRCreateOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubPRCreateInput{Title: input.Title, Head: input.Head, Base: input.Base, Body: input.Body, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubPRCreateInput{Title: input.Title, Head: input.Head, Base: input.Base, Body: input.Body})
 	if err != nil {
 		return nil, governedtool.GitHubPRCreateOutput{}, toolError(governedtool.ErrInvalidInput)
 	}
@@ -1293,7 +1286,7 @@ func (s *Server) githubPRReview(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if err != nil {
 		return nil, governedtool.GitHubPRReviewOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubPRReviewInput{Number: input.Number, Event: input.Event, Body: input.Body, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubPRReviewInput{Number: input.Number, Event: input.Event, Body: input.Body})
 	if err != nil {
 		return nil, governedtool.GitHubPRReviewOutput{}, toolError(governedtool.ErrInvalidInput)
 	}
@@ -1313,7 +1306,7 @@ func (s *Server) githubPRMerge(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, governedtool.GitHubPRMergeOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubPRMergeInput{Number: input.Number, ExpectedHeadSHA: input.ExpectedHeadSHA, MergeMethod: input.MergeMethod, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubPRMergeInput{Number: input.Number, ExpectedHeadSHA: input.ExpectedHeadSHA, MergeMethod: input.MergeMethod})
 	if err != nil {
 		return nil, governedtool.GitHubPRMergeOutput{}, toolError(governedtool.ErrInvalidInput)
 	}

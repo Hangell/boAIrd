@@ -259,6 +259,9 @@ func validateRepositoryURL(value string) error {
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh") {
 		return errors.New("repository_url must be an absolute HTTP(S) or SSH URL")
 	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.RawFragment != "" || strings.ContainsAny(value, "?#") {
+		return errors.New("repository_url must not contain user-info, a query, or a fragment")
+	}
 	return nil
 }
 

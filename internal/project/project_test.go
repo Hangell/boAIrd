@@ -2,6 +2,22 @@ package project
 
 import "testing"
 
+func TestValidateRepositoryURLRejectsCredentialsAndDecorations(t *testing.T) {
+	for _, value := range []string{
+		"https://user:secret@github.com/acme/widgets",
+		"https://github.com/acme/widgets?token=secret",
+		"https://github.com/acme/widgets?",
+		"https://github.com/acme/widgets#branch",
+		"https://github.com/acme/widgets#",
+	} {
+		t.Run(value, func(t *testing.T) {
+			if err := validateRepositoryURL(value); err == nil {
+				t.Fatalf("validateRepositoryURL(%q) unexpectedly succeeded", value)
+			}
+		})
+	}
+}
+
 func TestNewRequiresIDAndName(t *testing.T) {
 	if _, err := New("", "Project"); err == nil {
 		t.Fatal("expected missing ID to be rejected")

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -29,16 +30,17 @@ var (
 	ErrGitHubDisabled = errors.New("github operations are disabled")
 	ErrGitHubDenied   = errors.New("github operation denied")
 	ErrGitHubPolicy   = errors.New("github policy rejected the operation")
+	githubPathSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 )
 
-// GitHubConfig bounds the governed GitHub tool set to one administrator-approved
-// repository and one managed credential.
+// GitHubConfig bounds the governed GitHub tool set to the administrator-approved
+// repository and credential binding for the authenticated Agent and project.
 type GitHubConfig struct {
 	Enabled             bool
 	AllowMerge          bool
 	APIBaseURL          string
 	ResolveRepository   func(context.Context, string) (string, error)
-	ResolveCredential   func(context.Context, string, string, string, string) (string, error)
+	ResolveCredential   func(context.Context, string, string, string) (string, error)
 	HumanReviewRequired func(context.Context, string) (bool, error)
 	TaskApproved        func(context.Context, string, string) (bool, error)
 	Timeout             time.Duration
@@ -73,10 +75,9 @@ type GitHubPullRequest struct {
 }
 
 type GitHubIssueReadInput struct {
-	Action       string `json:"action"`
-	Number       int    `json:"number,omitempty"`
-	State        string `json:"state,omitempty"`
-	CredentialID string `json:"credential_id"`
+	Action string `json:"action"`
+	Number int    `json:"number,omitempty"`
+	State  string `json:"state,omitempty"`
 }
 
 type GitHubIssueReadOutput struct {
@@ -85,9 +86,8 @@ type GitHubIssueReadOutput struct {
 }
 
 type GitHubIssueCreateInput struct {
-	Title        string `json:"title"`
-	Body         string `json:"body,omitempty"`
-	CredentialID string `json:"credential_id"`
+	Title string `json:"title"`
+	Body  string `json:"body,omitempty"`
 }
 
 type GitHubIssueCreateOutput struct {
@@ -98,10 +98,9 @@ type GitHubIssueCreateOutput struct {
 }
 
 type GitHubIssueUpdateInput struct {
-	Number       int    `json:"number"`
-	Body         string `json:"body,omitempty"`
-	State        string `json:"state,omitempty"`
-	CredentialID string `json:"credential_id"`
+	Number int    `json:"number"`
+	Body   string `json:"body,omitempty"`
+	State  string `json:"state,omitempty"`
 }
 
 type GitHubIssueUpdateOutput struct {
@@ -111,10 +110,9 @@ type GitHubIssueUpdateOutput struct {
 }
 
 type GitHubPRReadInput struct {
-	Action       string `json:"action"`
-	Number       int    `json:"number,omitempty"`
-	State        string `json:"state,omitempty"`
-	CredentialID string `json:"credential_id"`
+	Action string `json:"action"`
+	Number int    `json:"number,omitempty"`
+	State  string `json:"state,omitempty"`
 }
 
 type GitHubPRReadOutput struct {
@@ -123,11 +121,10 @@ type GitHubPRReadOutput struct {
 }
 
 type GitHubPRCreateInput struct {
-	Title        string `json:"title"`
-	Head         string `json:"head"`
-	Base         string `json:"base"`
-	Body         string `json:"body,omitempty"`
-	CredentialID string `json:"credential_id"`
+	Title string `json:"title"`
+	Head  string `json:"head"`
+	Base  string `json:"base"`
+	Body  string `json:"body,omitempty"`
 }
 
 type GitHubPRCreateOutput struct {
@@ -137,10 +134,9 @@ type GitHubPRCreateOutput struct {
 }
 
 type GitHubPRReviewInput struct {
-	Number       int    `json:"number"`
-	Event        string `json:"event"`
-	Body         string `json:"body,omitempty"`
-	CredentialID string `json:"credential_id"`
+	Number int    `json:"number"`
+	Event  string `json:"event"`
+	Body   string `json:"body,omitempty"`
 }
 
 type GitHubPRReviewOutput struct {
@@ -152,7 +148,6 @@ type GitHubPRMergeInput struct {
 	Number          int    `json:"number"`
 	ExpectedHeadSHA string `json:"expected_head_sha"`
 	MergeMethod     string `json:"merge_method,omitempty"`
-	CredentialID    string `json:"credential_id"`
 }
 
 type GitHubPRMergeOutput struct {
@@ -207,13 +202,13 @@ func NewGitHubTools(config GitHubConfig) ([]Tool, error) {
 }
 
 const (
-	githubIssueReadSchema   = `{"type":"object","additionalProperties":false,"required":["action","credential_id"],"properties":{"action":{"type":"string","enum":["get","list"]},"number":{"type":"integer"},"state":{"type":"string","enum":["open","closed","all"]},"credential_id":{"type":"string","minLength":1}}}`
-	githubIssueCreateSchema = `{"type":"object","additionalProperties":false,"required":["title","credential_id"],"properties":{"title":{"type":"string","minLength":1},"body":{"type":"string"},"credential_id":{"type":"string","minLength":1}}}`
-	githubIssueUpdateSchema = `{"type":"object","additionalProperties":false,"required":["number","credential_id"],"properties":{"number":{"type":"integer"},"body":{"type":"string"},"state":{"type":"string","enum":["open","closed"]},"credential_id":{"type":"string","minLength":1}}}`
-	githubPRReadSchema      = `{"type":"object","additionalProperties":false,"required":["action","credential_id"],"properties":{"action":{"type":"string","enum":["get","list"]},"number":{"type":"integer"},"state":{"type":"string","enum":["open","closed","all"]},"credential_id":{"type":"string","minLength":1}}}`
-	githubPRCreateSchema    = `{"type":"object","additionalProperties":false,"required":["title","head","base","credential_id"],"properties":{"title":{"type":"string","minLength":1},"head":{"type":"string","minLength":1},"base":{"type":"string","minLength":1},"body":{"type":"string"},"credential_id":{"type":"string","minLength":1}}}`
-	githubPRReviewSchema    = `{"type":"object","additionalProperties":false,"required":["number","event","credential_id"],"properties":{"number":{"type":"integer"},"event":{"type":"string","enum":["approve","request_changes","comment"]},"body":{"type":"string"},"credential_id":{"type":"string","minLength":1}}}`
-	githubPRMergeSchema     = `{"type":"object","additionalProperties":false,"required":["number","expected_head_sha","credential_id"],"properties":{"number":{"type":"integer"},"expected_head_sha":{"type":"string","minLength":40,"maxLength":64},"merge_method":{"type":"string","enum":["merge","squash","rebase"]},"credential_id":{"type":"string","minLength":1}}}`
+	githubIssueReadSchema   = `{"type":"object","additionalProperties":false,"required":["action"],"properties":{"action":{"type":"string","enum":["get","list"]},"number":{"type":"integer"},"state":{"type":"string","enum":["open","closed","all"]}}}`
+	githubIssueCreateSchema = `{"type":"object","additionalProperties":false,"required":["title"],"properties":{"title":{"type":"string","minLength":1},"body":{"type":"string"}}}`
+	githubIssueUpdateSchema = `{"type":"object","additionalProperties":false,"required":["number"],"properties":{"number":{"type":"integer"},"body":{"type":"string"},"state":{"type":"string","enum":["open","closed"]}}}`
+	githubPRReadSchema      = `{"type":"object","additionalProperties":false,"required":["action"],"properties":{"action":{"type":"string","enum":["get","list"]},"number":{"type":"integer"},"state":{"type":"string","enum":["open","closed","all"]}}}`
+	githubPRCreateSchema    = `{"type":"object","additionalProperties":false,"required":["title","head","base"],"properties":{"title":{"type":"string","minLength":1},"head":{"type":"string","minLength":1},"base":{"type":"string","minLength":1},"body":{"type":"string"}}}`
+	githubPRReviewSchema    = `{"type":"object","additionalProperties":false,"required":["number","event"],"properties":{"number":{"type":"integer"},"event":{"type":"string","enum":["approve","request_changes","comment"]},"body":{"type":"string"}}}`
+	githubPRMergeSchema     = `{"type":"object","additionalProperties":false,"required":["number","expected_head_sha"],"properties":{"number":{"type":"integer"},"expected_head_sha":{"type":"string","minLength":40,"maxLength":64},"merge_method":{"type":"string","enum":["merge","squash","rebase"]}}}`
 
 	githubIssueReadOutputSchema   = `{"type":"object","additionalProperties":false,"properties":{"issues":{"type":"array","items":{"type":"object"}},"count":{"type":"integer"}}}`
 	githubIssueCreateOutputSchema = `{"type":"object","additionalProperties":false,"properties":{"number":{"type":"integer"},"html_url":{"type":"string"},"state":{"type":"string"},"message":{"type":"string"}}}`
@@ -252,33 +247,12 @@ func githubTool[I, O any](name, description string, required capability.Capabili
 			if owner+"/"+repo != request.ResourceID {
 				return output, ErrGitHubPolicy
 			}
-			token, err := resolveGitHubToken(ctx, config, request, githubCredentialID(input))
+			token, err := resolveGitHubToken(ctx, config, request)
 			if err != nil {
 				return output, err
 			}
 			return run(ctx, request, config, owner, repo, token, input)
 		},
-	}
-}
-
-func githubCredentialID(value any) string {
-	switch input := value.(type) {
-	case GitHubIssueReadInput:
-		return input.CredentialID
-	case GitHubIssueCreateInput:
-		return input.CredentialID
-	case GitHubIssueUpdateInput:
-		return input.CredentialID
-	case GitHubPRReadInput:
-		return input.CredentialID
-	case GitHubPRCreateInput:
-		return input.CredentialID
-	case GitHubPRReviewInput:
-		return input.CredentialID
-	case GitHubPRMergeInput:
-		return input.CredentialID
-	default:
-		return ""
 	}
 }
 
@@ -294,8 +268,8 @@ func resolveGitHubRepository(ctx context.Context, config GitHubConfig, projectID
 	return owner, repo, nil
 }
 
-func resolveGitHubToken(ctx context.Context, config GitHubConfig, request Request, credentialID string) (string, error) {
-	token, err := config.ResolveCredential(ctx, request.Principal.ID, request.ProjectID, credentialID, "github")
+func resolveGitHubToken(ctx context.Context, config GitHubConfig, request Request) (string, error) {
+	token, err := config.ResolveCredential(ctx, request.Principal.ID, request.ProjectID, "github")
 	if err != nil || strings.TrimSpace(token) == "" {
 		return "", ErrGitHubDenied
 	}
@@ -310,7 +284,7 @@ func parseGitHubRepository(value string) (string, string, error) {
 	}
 	if strings.HasPrefix(value, "git@") {
 		parts := strings.SplitN(value, ":", 2)
-		if len(parts) != 2 || parts[0] != "git@github.com" {
+		if len(parts) != 2 || parts[0] != "git@github.com" || strings.ContainsAny(parts[1], "?#") {
 			return "", "", errors.New("only github.com repositories are supported")
 		}
 		return splitOwnerRepo(strings.TrimSuffix(parts[1], ".git"))
@@ -319,16 +293,23 @@ func parseGitHubRepository(value string) (string, string, error) {
 	if err != nil || parsed.Host == "" || parsed.Scheme != "https" {
 		return "", "", errors.New("repository URL must be an absolute HTTPS URL")
 	}
-	if parsed.Host != "github.com" && parsed.Host != "www.github.com" {
+	if (parsed.Host != "github.com" && parsed.Host != "www.github.com") || parsed.User != nil ||
+		parsed.Port() != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.RawFragment != "" {
 		return "", "", errors.New("only github.com repositories are supported")
 	}
-	return splitOwnerRepo(strings.TrimSuffix(strings.TrimPrefix(parsed.Path, "/"), ".git"))
+	if strings.ContainsAny(value, "?#") {
+		return "", "", errors.New("repository URL must not contain a query or fragment")
+	}
+	escapedPath := parsed.EscapedPath()
+	if strings.ContainsRune(escapedPath, '%') || !strings.HasPrefix(escapedPath, "/") {
+		return "", "", errors.New("repository URL path is invalid")
+	}
+	return splitOwnerRepo(strings.TrimSuffix(strings.TrimPrefix(escapedPath, "/"), ".git"))
 }
 
 func splitOwnerRepo(path string) (string, string, error) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" ||
-		strings.ContainsAny(parts[0]+parts[1], " \t\n\r/\\") {
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 || !githubPathSegment.MatchString(parts[0]) || !githubPathSegment.MatchString(parts[1]) {
 		return "", "", errors.New("repository path must be owner/repository")
 	}
 	return parts[0], parts[1], nil
@@ -386,13 +367,6 @@ func (g githubClient) doJSON(ctx context.Context, method, path, token string, bo
 	return nil
 }
 
-func validateGitHubCredentialID(id string) error {
-	if strings.TrimSpace(id) == "" || strings.TrimSpace(id) != id || strings.ContainsRune(id, '\x00') || len(id) > 128 {
-		return errors.New("credential_id is required and must be a plain identifier")
-	}
-	return nil
-}
-
 func validateGitHubIssueReadInput(input GitHubIssueReadInput) error {
 	if input.Action != "get" && input.Action != "list" {
 		return errors.New("github.issue.read action must be get or list")
@@ -403,14 +377,14 @@ func validateGitHubIssueReadInput(input GitHubIssueReadInput) error {
 	if input.Action == "list" && input.State != "" && input.State != "open" && input.State != "closed" && input.State != "all" {
 		return errors.New("github.issue.read state is invalid")
 	}
-	return validateGitHubCredentialID(input.CredentialID)
+	return nil
 }
 
 func validateGitHubIssueCreateInput(input GitHubIssueCreateInput) error {
 	if strings.TrimSpace(input.Title) == "" || len(input.Title) > 4000 || strings.ContainsRune(input.Title, '\x00') {
 		return errors.New("github.issue.create title is required and bounded")
 	}
-	return validateGitHubCredentialID(input.CredentialID)
+	return nil
 }
 
 func validateGitHubIssueUpdateInput(input GitHubIssueUpdateInput) error {
@@ -423,7 +397,7 @@ func validateGitHubIssueUpdateInput(input GitHubIssueUpdateInput) error {
 	if input.State != "" && input.State != "open" && input.State != "closed" {
 		return errors.New("github.issue.update state is invalid")
 	}
-	return validateGitHubCredentialID(input.CredentialID)
+	return nil
 }
 
 func validateGitHubPRReadInput(input GitHubPRReadInput) error {
@@ -436,7 +410,7 @@ func validateGitHubPRReadInput(input GitHubPRReadInput) error {
 	if input.Action == "list" && input.State != "" && input.State != "open" && input.State != "closed" && input.State != "all" {
 		return errors.New("github.pr.read state is invalid")
 	}
-	return validateGitHubCredentialID(input.CredentialID)
+	return nil
 }
 
 func validateGitHubPRCreateInput(input GitHubPRCreateInput) error {
@@ -446,7 +420,7 @@ func validateGitHubPRCreateInput(input GitHubPRCreateInput) error {
 	if !validRefName(input.Head) || !validRefName(input.Base) {
 		return errors.New("github.pr.create head and base must be plain ref names")
 	}
-	return validateGitHubCredentialID(input.CredentialID)
+	return nil
 }
 
 func validateGitHubPRReviewInput(input GitHubPRReviewInput) error {
@@ -456,7 +430,7 @@ func validateGitHubPRReviewInput(input GitHubPRReviewInput) error {
 	if input.Event != "approve" && input.Event != "request_changes" && input.Event != "comment" {
 		return errors.New("github.pr.review event is invalid")
 	}
-	return validateGitHubCredentialID(input.CredentialID)
+	return nil
 }
 
 func validateGitHubPRMergeInput(input GitHubPRMergeInput) error {
@@ -469,7 +443,7 @@ func validateGitHubPRMergeInput(input GitHubPRMergeInput) error {
 	if input.MergeMethod != "" && input.MergeMethod != "merge" && input.MergeMethod != "squash" && input.MergeMethod != "rebase" {
 		return errors.New("github.pr.merge merge_method is invalid")
 	}
-	return validateGitHubCredentialID(input.CredentialID)
+	return nil
 }
 
 func validGitHubCommitSHA(value string) bool {

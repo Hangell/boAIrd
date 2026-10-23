@@ -720,12 +720,19 @@ are not followed, so a request cannot leave the approved API origin. The caller
 cannot target a different repository — the operation always runs against the
 project's bound repository.
 
-Credentials are managed: the tool resolves the caller's credential identifier
-through the Credential Service with Agent, project, and `github` provider scope,
-so credentials for another provider cannot be sent to GitHub and plaintext
-tokens never reach Agent memory, logs, audit, or responses. HTTP calls use
-`Authorization: Bearer <token>` and are redacted; provider error bodies are
-bounded and sanitized. The API base is fixed to `https://api.github.com`.
+GitHub credentials use an explicit integration binding separate from an Agent's
+runtime-provider credential. A local administrator binds a stored credential
+whose provider is `github` to one MCP Agent and project through
+`PUT /api/v1/projects/{projectID}/agents/{agentID}/github-credential`; `DELETE`
+revokes it. Both changes and their immutable audit events commit atomically.
+The binding operation requires the Agent to be an MCP runtime with current
+scope in that non-archived project. MCP tool schemas do not accept
+`credential_id`; the server resolves the binding from the authenticated Agent
+and project and rechecks provider and scope before decryption. Missing, revoked,
+cross-project, or non-GitHub bindings fail closed. Plaintext tokens never reach
+Agent memory, logs, audit, or responses. HTTP calls use
+`Authorization: Bearer <token>`; provider error bodies are bounded and
+sanitized. The API base is fixed to `https://api.github.com`.
 
 `github.pr.merge` additionally requires:
 

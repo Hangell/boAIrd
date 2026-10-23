@@ -1600,11 +1600,15 @@ github.pr.merge
   registered through the shared tool Enforcer.
 - Repository binding: every call is bound to the project's
   administrator-approved repository URL. Only `github.com` HTTPS/SSH URLs are
-  parsed, with exact SSH host matching; any other host or a caller-specified
-  repository is rejected. HTTP redirects are disabled.
-- Credentials: tokens are resolved through the Credential Service with Agent and
-  project scope and must have provider `github`; the plaintext token never
-  reaches logs, audit, or responses.
+  parsed; user-info, ports, query strings, fragments, encoded path separators,
+  invalid path segments, and non-exact SSH hosts are rejected. HTTP redirects
+  are disabled.
+- Credentials: a local administrator explicitly binds a stored `github`
+  credential to an MCP Agent and project through the GitHub credential binding
+  API. Binding and revocation are audited atomically. MCP inputs do not accept a
+  credential ID; the server resolves the binding from authenticated identity and
+  rechecks Agent runtime, current project scope, project status, and provider
+  before decrypting. The plaintext token never reaches logs, audit, or responses.
   Requests use `Authorization: Bearer <token>` against `https://api.github.com`.
 - Safe defaults: the whole set is disabled unless `BOAIRD_GITHUB_ENABLED=true`;
   PR merge stays denied unless `BOAIRD_GITHUB_ALLOW_MERGE=true` and requires an

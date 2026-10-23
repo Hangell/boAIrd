@@ -26,6 +26,7 @@ type authorizationAuditWriter interface {
 var administratorCapabilities = []capability.Capability{
 	"project.create", "project.read", "project.update", "project.archive",
 	"credential.create", "credential.read", "credential.delete",
+	"credential.integration.manage",
 	"agent.create", "agent.read", "agent.update", "agent.scope.manage",
 	"brain.attach", "brain.read", "brain.replace", "brain.execute",
 	"run.read", "task.create", "task.read", "task.assign", "task.transition",
@@ -231,6 +232,10 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		}
 		if len(parts) == 6 && parts[4] == "agents" && (method == http.MethodPut || method == http.MethodDelete) {
 			return "agent.scope.manage", projectID, true
+		}
+		if len(parts) == 7 && parts[4] == "agents" && parts[6] == "github-credential" &&
+			(method == http.MethodPut || method == http.MethodDelete) {
+			return "credential.integration.manage", projectID, true
 		}
 		if len(parts) == 5 && parts[4] == "profiles" {
 			if method == http.MethodGet {

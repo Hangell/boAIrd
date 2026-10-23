@@ -36,8 +36,8 @@ func newGitHubEnforcer(t *testing.T, config GitHubConfig, auditor *memoryAuditor
 		}
 	}
 	if config.ResolveCredential == nil {
-		config.ResolveCredential = func(_ context.Context, agentID, projectID, credentialID, provider string) (string, error) {
-			if agentID != "agent-1" || projectID != "project-1" || credentialID != "cred-1" || provider != "github" {
+		config.ResolveCredential = func(_ context.Context, agentID, projectID, provider string) (string, error) {
+			if agentID != "agent-1" || projectID != "project-1" || provider != "github" {
 				return "", ErrDenied
 			}
 			return "ghp_test_token_1234567890", nil
@@ -106,7 +106,7 @@ func TestGitHubIssueReadCreateUpdate(t *testing.T) {
 	auditor := &memoryAuditor{}
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, auditor)
 
-	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", State: "open", CredentialID: "cred-1"}))
+	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", State: "open"}))
 	if err != nil {
 		t.Fatalf("issue.read error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestGitHubIssueReadCreateUpdate(t *testing.T) {
 		t.Fatalf("issue.read output = %#v, error = %v", readOutput, err)
 	}
 
-	encoded, err = enforcer.Execute(context.Background(), githubRequest(t, "github.issue.create", capability.GitHubIssueCreate, GitHubIssueCreateInput{Title: "second", CredentialID: "cred-1"}))
+	encoded, err = enforcer.Execute(context.Background(), githubRequest(t, "github.issue.create", capability.GitHubIssueCreate, GitHubIssueCreateInput{Title: "second"}))
 	if err != nil {
 		t.Fatalf("issue.create error = %v", err)
 	}
@@ -124,7 +124,7 @@ func TestGitHubIssueReadCreateUpdate(t *testing.T) {
 		t.Fatalf("issue.create output = %#v, error = %v", createOutput, err)
 	}
 
-	encoded, err = enforcer.Execute(context.Background(), githubRequest(t, "github.issue.update", capability.GitHubIssueUpdate, GitHubIssueUpdateInput{Number: 2, State: "closed", CredentialID: "cred-1"}))
+	encoded, err = enforcer.Execute(context.Background(), githubRequest(t, "github.issue.update", capability.GitHubIssueUpdate, GitHubIssueUpdateInput{Number: 2, State: "closed"}))
 	if err != nil {
 		t.Fatalf("issue.update error = %v", err)
 	}
@@ -156,11 +156,11 @@ func TestGitHubOperationsRequireSeparateCapabilities(t *testing.T) {
 	})
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, &memoryAuditor{})
 	// issue.read with pr.read capability must be denied.
-	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubPRRead, GitHubIssueReadInput{Action: "list", CredentialID: "cred-1"})); !errors.Is(err, ErrDenied) {
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubPRRead, GitHubIssueReadInput{Action: "list"})); !errors.Is(err, ErrDenied) {
 		t.Fatalf("issue.read with pr.read capability error = %v, want denied", err)
 	}
 	// pr.merge with pr.review capability must be denied.
-	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.merge", capability.GitHubPRReview, GitHubPRMergeInput{Number: 1, CredentialID: "cred-1"})); !errors.Is(err, ErrDenied) {
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.merge", capability.GitHubPRReview, GitHubPRMergeInput{Number: 1})); !errors.Is(err, ErrDenied) {
 		t.Fatalf("pr.merge with pr.review capability error = %v, want denied", err)
 	}
 }
@@ -173,7 +173,7 @@ func TestGitHubMergeDeniedByDefaultAndHumanReviewGate(t *testing.T) {
 	auditor := &memoryAuditor{}
 	// Default: merge denied without AllowMerge.
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, auditor)
-	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40), CredentialID: "cred-1"})); !errors.Is(err, ErrExecution) {
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40)})); !errors.Is(err, ErrExecution) {
 		t.Fatalf("pr.merge with AllowMerge=false error = %v, want denied", err)
 	}
 	// Allowed but project requires review: without a task it is denied.
@@ -184,7 +184,7 @@ func TestGitHubMergeDeniedByDefaultAndHumanReviewGate(t *testing.T) {
 			return projectID == "project-1" && taskID == "approved-task", nil
 		},
 	}, auditor)
-	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40), CredentialID: "cred-1"})
+	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40)})
 	if _, err := enforcer.Execute(context.Background(), request); !errors.Is(err, ErrExecution) {
 		t.Fatalf("pr.merge without task error = %v, want denied", err)
 	}
@@ -211,7 +211,7 @@ func TestGitHubRejectsNonGitHubRepository(t *testing.T) {
 		APIBaseURL: server.URL, Client: server.Client(),
 		ResolveRepository: func(_ context.Context, _ string) (string, error) { return "https://gitlab.com/acme/widgets", nil },
 	}, &memoryAuditor{})
-	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", CredentialID: "cred-1"})); !errors.Is(err, ErrDenied) {
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list"})); !errors.Is(err, ErrDenied) {
 		t.Fatalf("non-GitHub repository error = %v, want denied", err)
 	}
 }
@@ -223,6 +223,27 @@ func TestGitHubSSHRepositoryRequiresExactHost(t *testing.T) {
 	for _, value := range []string{"git@evilgithub.com:acme/widgets.git", "git@github.com.evil.invalid:acme/widgets.git"} {
 		if _, _, err := parseGitHubRepository(value); err == nil {
 			t.Errorf("parseGitHubRepository(%q) unexpectedly accepted a non-GitHub host", value)
+		}
+	}
+}
+
+func TestGitHubHTTPSRepositoryRejectsCredentialsAndURLDecorations(t *testing.T) {
+	if owner, repo, err := parseGitHubRepository("https://github.com/acme/widgets.git"); err != nil || owner != "acme" || repo != "widgets" {
+		t.Fatalf("parse valid HTTPS repository = (%q, %q), %v", owner, repo, err)
+	}
+	for _, value := range []string{
+		"https://user:secret@github.com/acme/widgets",
+		"https://github.com/acme/widgets?x=y",
+		"https://github.com/acme/widgets?",
+		"https://github.com/acme/widgets#fragment",
+		"https://github.com/acme/widgets#",
+		"https://github.com:443/acme/widgets",
+		"https://github.com/acme/widgets/",
+		"https://github.com/acme%2fwidgets",
+		"https://github.com/acme/../widgets",
+	} {
+		if _, _, err := parseGitHubRepository(value); err == nil {
+			t.Errorf("parseGitHubRepository(%q) unexpectedly accepted an ambiguous URL", value)
 		}
 	}
 }
@@ -263,7 +284,7 @@ func TestGitHubHumanReviewLookupErrorsFailClosed(t *testing.T) {
 			return false, nil
 		},
 	}, &memoryAuditor{})
-	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40), CredentialID: "cred-1"})
+	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40)})
 	if _, err := enforcer.Execute(context.Background(), request); !errors.Is(err, ErrExecution) {
 		t.Fatalf("merge after Human Review lookup error = %v, want denial", err)
 	}
@@ -289,7 +310,7 @@ func TestGitHubIssueCapabilitiesExcludePullRequests(t *testing.T) {
 		}
 	})
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, &memoryAuditor{})
-	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", CredentialID: "cred-1"}))
+	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list"}))
 	if err != nil {
 		t.Fatalf("list issues = %v", err)
 	}
@@ -297,10 +318,10 @@ func TestGitHubIssueCapabilitiesExcludePullRequests(t *testing.T) {
 	if err := json.Unmarshal(encoded, &output); err != nil || output.Count != 1 || output.Issues[0].Number != 1 {
 		t.Fatalf("issue list = %#v, error = %v; want PR excluded", output, err)
 	}
-	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "get", Number: 2, CredentialID: "cred-1"})); !errors.Is(err, ErrExecution) {
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "get", Number: 2})); !errors.Is(err, ErrExecution) {
 		t.Fatalf("read pull request through issue capability = %v, want denial", err)
 	}
-	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.update", capability.GitHubIssueUpdate, GitHubIssueUpdateInput{Number: 2, State: "closed", CredentialID: "cred-1"})); !errors.Is(err, ErrExecution) {
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.update", capability.GitHubIssueUpdate, GitHubIssueUpdateInput{Number: 2, State: "closed"})); !errors.Is(err, ErrExecution) {
 		t.Fatalf("update pull request through issue capability = %v, want denial", err)
 	}
 	if patchCalls != 0 {
@@ -321,13 +342,13 @@ func TestGitHubMergePinsExpectedHeadSHA(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"merged":true,"message":"merged"}`))
 	})
-	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 2, ExpectedHeadSHA: expectedSHA, CredentialID: "cred-1"})
+	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 2, ExpectedHeadSHA: expectedSHA})
 	_, err := runGitHubPRMerge(context.Background(), request, GitHubConfig{
 		AllowMerge:          true,
 		APIBaseURL:          server.URL,
 		Client:              server.Client(),
 		HumanReviewRequired: func(context.Context, string) (bool, error) { return false, nil },
-	}, "acme", "widgets", "github-token", GitHubPRMergeInput{Number: 2, ExpectedHeadSHA: expectedSHA, CredentialID: "cred-1"})
+	}, "acme", "widgets", "github-token", GitHubPRMergeInput{Number: 2, ExpectedHeadSHA: expectedSHA})
 	if err != nil {
 		t.Fatalf("merge with expected SHA = %v", err)
 	}
@@ -340,7 +361,7 @@ func TestGitHubPullRequestReadExposesExpectedHeadSHA(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"number":2,"title":"change","state":"open","head":{"ref":"feature","sha":"` + headSHA + `"},"base":{"ref":"main","sha":"fedcba9876543210fedcba9876543210fedcba98"}}`))
 	})
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, &memoryAuditor{})
-	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.read", capability.GitHubPRRead, GitHubPRReadInput{Action: "get", Number: 2, CredentialID: "cred-1"}))
+	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.read", capability.GitHubPRRead, GitHubPRReadInput{Action: "get", Number: 2}))
 	if err != nil {
 		t.Fatalf("github.pr.read = %v", err)
 	}
@@ -356,7 +377,7 @@ func TestGitHubMergeRejectsChangedHead(t *testing.T) {
 		writer.WriteHeader(http.StatusConflict)
 		_, _ = writer.Write([]byte(`{"message":"Head sha does not match"}`))
 	})
-	input := GitHubPRMergeInput{Number: 4, ExpectedHeadSHA: strings.Repeat("c", 40), CredentialID: "cred-1"}
+	input := GitHubPRMergeInput{Number: 4, ExpectedHeadSHA: strings.Repeat("c", 40)}
 	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, input)
 	_, err := runGitHubPRMerge(context.Background(), request, GitHubConfig{
 		AllowMerge:          true,
@@ -376,7 +397,7 @@ func TestGitHubRedactsCredentialFromErrors(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"message":"Bad credentials"}`))
 	})
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, &memoryAuditor{})
-	_, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", CredentialID: "cred-1"}))
+	_, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list"}))
 	if err == nil {
 		t.Fatal("github.issue.read against 401 unexpectedly succeeded")
 	}
@@ -392,7 +413,7 @@ func TestGitHubAuditIncludesTaskRunAndRepository(t *testing.T) {
 	})
 	auditor := &memoryAuditor{}
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, auditor)
-	request := githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", CredentialID: "cred-1"})
+	request := githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list"})
 	request.TaskID = "task-1"
 	request.RunID = "run-1"
 	if _, err := enforcer.Execute(context.Background(), request); err != nil {

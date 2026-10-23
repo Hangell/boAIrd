@@ -233,8 +233,11 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 				}
 				return value.RepositoryURL(), nil
 			},
-			ResolveCredential: func(ctx context.Context, agentID, projectID, credentialID, provider string) (string, error) {
-				return credentialManager.ResolveForProvider(ctx, credentialID, credential.Scope{AgentID: agentID, ProjectID: projectID}, provider)
+			ResolveCredential: func(ctx context.Context, agentID, projectID, provider string) (string, error) {
+				if provider != credential.ProviderGitHub {
+					return "", credential.ErrCredentialUnavailable
+				}
+				return credentialManager.ResolveGitHub(ctx, credential.Scope{AgentID: agentID, ProjectID: projectID})
 			},
 			HumanReviewRequired: func(ctx context.Context, projectID string) (bool, error) {
 				value, err := projectManager.Get(ctx, projectID)

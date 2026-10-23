@@ -30,6 +30,8 @@ const (
 	GitHubPRCreate    Capability = "github.pr.create"
 	GitHubPRReview    Capability = "github.pr.review"
 	GitHubPRMerge     Capability = "github.pr.merge"
+
+	CredentialIntegrationManage Capability = "credential.integration.manage"
 )
 
 func New(identifier string) (Capability, error) {
