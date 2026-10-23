@@ -13,6 +13,7 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 		"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS", "BOAIRD_ORCHESTRATOR_TIMEOUT")
 	unsetEnvironment(t, "BOAIRD_CONTEXT_MAX_BYTES", "BOAIRD_CONTEXT_MAX_TOKENS", "BOAIRD_SHELL_ENABLED", "BOAIRD_SHELL_ALLOWED_EXECUTABLES")
 	unsetEnvironment(t, "BOAIRD_GIT_ENABLED", "BOAIRD_GIT_ALLOW_PUSH", "BOAIRD_GIT_ALLOW_MERGE")
+	unsetEnvironment(t, "BOAIRD_GITHUB_ENABLED", "BOAIRD_GITHUB_ALLOW_MERGE")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -37,6 +38,9 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.GitEnabled || cfg.GitAllowPush || cfg.GitAllowMerge {
 		t.Fatalf("git defaults = enabled %t, push %t, merge %t; want disabled and denied", cfg.GitEnabled, cfg.GitAllowPush, cfg.GitAllowMerge)
+	}
+	if cfg.GitHubEnabled || cfg.GitHubAllowMerge {
+		t.Fatalf("github defaults = enabled %t, merge %t; want disabled and denied", cfg.GitHubEnabled, cfg.GitHubAllowMerge)
 	}
 }
 
@@ -96,6 +100,35 @@ func TestLoadRejectsMalformedGitEnabled(t *testing.T) {
 	t.Setenv("BOAIRD_GIT_ENABLED", "sometimes")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted a malformed git enable flag")
+	}
+}
+
+func TestLoadParsesGitHubPolicy(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_GITHUB_ENABLED", "true")
+	t.Setenv("BOAIRD_GITHUB_ALLOW_MERGE", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.GitHubEnabled || !cfg.GitHubAllowMerge {
+		t.Fatalf("github policy = enabled %t, merge %t", cfg.GitHubEnabled, cfg.GitHubAllowMerge)
+	}
+}
+
+func TestLoadRejectsGitHubMergeWithoutEnablement(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_GITHUB_ALLOW_MERGE", "true")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted github merge without github enablement")
+	}
+}
+
+func TestLoadRejectsMalformedGitHubEnabled(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_GITHUB_ENABLED", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted a malformed github enable flag")
 	}
 }
 

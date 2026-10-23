@@ -690,6 +690,64 @@ trust, and keep kernel/container isolation as future work.
 
 ---
 
+# GitHub Security
+
+GitHub tools reach an external service, so they are disabled by default:
+
+```text
+BOAIRD_GITHUB_ENABLED = false
+```
+
+and pull-request merges remain denied even when enabled:
+
+```text
+BOAIRD_GITHUB_ALLOW_MERGE = false
+```
+
+Each operation carries its own capability, and PR review never implies merge:
+
+```text
+github.issue.read    github.pr.read
+github.issue.create  github.pr.create
+github.issue.update  github.pr.review
+                     github.pr.merge
+```
+
+Every call is bound to the project's administrator-approved repository URL.
+The server parses only `github.com` HTTPS/SSH repository URLs; any other host
+is rejected. The caller cannot target a different repository — the operation
+always runs against the project's bound repository.
+
+Credentials are managed: the tool resolves the caller's credential identifier
+through the Credential Service with the Agent and project scope, so the plaintext
+token never reaches Agent memory, logs, audit, or responses. HTTP calls use
+`Authorization: Bearer <token>` and are redacted; provider error bodies are
+bounded and sanitized. The API base is fixed to `https://api.github.com`.
+
+`github.pr.merge` additionally requires:
+
+```text
+explicit capability (github.pr.merge)
++
+administrator enablement (BOAIRD_GITHUB_ALLOW_MERGE)
++
+Human Review gate when the project requires it
+```
+
+When the project sets `human_review_required`, merge must be tied to a task
+(`task_id`) whose human review has been approved.
+
+Audit records actor, project, task, run, repository, operation, and result
+without credentials, arguments, or response bodies. A metadata-only `start`
+event is persisted before any mutating request; an audit failure aborts the call.
+
+As with Git, this is not a sandbox for the remote side: the credential and the
+repository binding limit what the tool may do, but the token itself may carry
+broader GitHub scopes. Use least-privilege tokens and restrict the bound
+repository to administrators the project trusts.
+
+---
+
 # Filesystem Security
 
 Agents must have clear filesystem boundaries.

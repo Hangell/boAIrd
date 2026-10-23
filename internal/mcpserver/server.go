@@ -38,6 +38,7 @@ type Services struct {
 	Heartbeats    HeartbeatService
 	Tools         ToolExecutor
 	GitTools      ToolExecutor
+	GitHubTools   ToolExecutor
 }
 
 type ToolExecutor interface {
@@ -153,6 +154,15 @@ func (s *Server) registerTools(server *mcp.Server) {
 		mcp.AddTool[gitCommitMCPInput, governedtool.GitCommitOutput](server, add("boaird.git.commit", "Commit staged changes with a message inside an authorized project workspace."), s.gitCommit)
 		mcp.AddTool[gitPushMCPInput, governedtool.GitPushOutput](server, add("boaird.git.push", "Push a branch to a named remote inside an authorized project workspace; denied by default and subject to Human Review."), s.gitPush)
 		mcp.AddTool[gitMergeMCPInput, governedtool.GitMergeOutput](server, add("boaird.git.merge", "Merge a reference into the current branch inside an authorized project workspace; denied by default and subject to Human Review."), s.gitMerge)
+	}
+	if s.services.GitHubTools != nil {
+		mcp.AddTool[githubIssueReadMCPInput, governedtool.GitHubIssueReadOutput](server, add("boaird.github.issue.read", "Read an issue or list issues in the project's approved GitHub repository."), s.githubIssueRead)
+		mcp.AddTool[githubIssueCreateMCPInput, governedtool.GitHubIssueCreateOutput](server, add("boaird.github.issue.create", "Create an issue in the project's approved GitHub repository."), s.githubIssueCreate)
+		mcp.AddTool[githubIssueUpdateMCPInput, governedtool.GitHubIssueUpdateOutput](server, add("boaird.github.issue.update", "Update an issue in the project's approved GitHub repository."), s.githubIssueUpdate)
+		mcp.AddTool[githubPRReadMCPInput, governedtool.GitHubPRReadOutput](server, add("boaird.github.pr.read", "Read a pull request or list pull requests in the project's approved GitHub repository."), s.githubPRRead)
+		mcp.AddTool[githubPRCreateMCPInput, governedtool.GitHubPRCreateOutput](server, add("boaird.github.pr.create", "Create a pull request in the project's approved GitHub repository."), s.githubPRCreate)
+		mcp.AddTool[githubPRReviewMCPInput, governedtool.GitHubPRReviewOutput](server, add("boaird.github.pr.review", "Submit a review on a pull request in the project's approved GitHub repository."), s.githubPRReview)
+		mcp.AddTool[githubPRMergeMCPInput, governedtool.GitHubPRMergeOutput](server, add("boaird.github.pr.merge", "Merge a pull request in the project's approved GitHub repository; denied by default and subject to Human Review."), s.githubPRMerge)
 	}
 }
 
@@ -316,6 +326,75 @@ type gitMergeMCPInput struct {
 	RunID            string `json:"run_id,omitempty"`
 	Reference        string `json:"reference"`
 	WorkingDirectory string `json:"working_directory,omitempty"`
+}
+
+type githubIssueReadMCPInput struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Action       string `json:"action"`
+	Number       int    `json:"number,omitempty"`
+	State        string `json:"state,omitempty"`
+	CredentialID string `json:"credential_id"`
+}
+
+type githubIssueCreateMCPInput struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Title        string `json:"title"`
+	Body         string `json:"body,omitempty"`
+	CredentialID string `json:"credential_id"`
+}
+
+type githubIssueUpdateMCPInput struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Number       int    `json:"number"`
+	Body         string `json:"body,omitempty"`
+	State        string `json:"state,omitempty"`
+	CredentialID string `json:"credential_id"`
+}
+
+type githubPRReadMCPInput struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Action       string `json:"action"`
+	Number       int    `json:"number,omitempty"`
+	State        string `json:"state,omitempty"`
+	CredentialID string `json:"credential_id"`
+}
+
+type githubPRCreateMCPInput struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Title        string `json:"title"`
+	Head         string `json:"head"`
+	Base         string `json:"base"`
+	Body         string `json:"body,omitempty"`
+	CredentialID string `json:"credential_id"`
+}
+
+type githubPRReviewMCPInput struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Number       int    `json:"number"`
+	Event        string `json:"event"`
+	Body         string `json:"body,omitempty"`
+	CredentialID string `json:"credential_id"`
+}
+
+type githubPRMergeMCPInput struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	Number       int    `json:"number"`
+	MergeMethod  string `json:"merge_method,omitempty"`
+	CredentialID string `json:"credential_id"`
 }
 type runOutput struct {
 	ID        string `json:"id"`
@@ -1073,6 +1152,177 @@ func (s *Server) gitMerge(ctx context.Context, _ *mcp.CallToolRequest, input git
 	var output governedtool.GitMergeOutput
 	if err := json.Unmarshal(encodedOutput, &output); err != nil {
 		return nil, governedtool.GitMergeOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+// githubExecute authorizes one GitHub operation against its capability and
+// project scope, binds it to the project's approved repository, and dispatches
+// to the governed GitHub tool set.
+func (s *Server) githubExecute(ctx context.Context, a agent.Agent, projectID, taskID, runID, toolName, required string, encodedInput []byte) (json.RawMessage, error) {
+	if projectID == "" || strings.TrimSpace(projectID) != projectID || s.services.GitHubTools == nil {
+		s.recordDenial(ctx, a, strings.TrimSpace(projectID), required, "github_tool_unavailable_or_invalid_scope")
+		return nil, toolError(task.ErrForbidden)
+	}
+	projectID = strings.TrimSpace(projectID)
+	if err := s.authorizeProject(ctx, a, required, projectID); err != nil {
+		return nil, toolError(task.ErrForbidden)
+	}
+	value, err := s.services.Projects.Get(ctx, projectID)
+	if err != nil || strings.TrimSpace(value.RepositoryURL()) == "" {
+		s.recordDenial(ctx, a, projectID, required, "github_repository_binding_required")
+		return nil, toolError(task.ErrForbidden)
+	}
+	encodedOutput, err := s.services.GitHubTools.Execute(ctx, governedtool.Request{
+		ToolName: toolName, ProjectID: projectID, TaskID: taskID, RunID: runID,
+		ResourceType: "github.repository", ResourceID: value.RepositoryURL(),
+		Principal: governedtool.Principal{
+			ID: a.ID(), Type: "agent", Capabilities: a.Capabilities(), ProjectIDs: []string{projectID},
+		},
+		Input: encodedInput,
+	})
+	if err != nil {
+		return nil, toolError(err)
+	}
+	return encodedOutput, nil
+}
+
+func (s *Server) githubIssueRead(ctx context.Context, _ *mcp.CallToolRequest, input githubIssueReadMCPInput) (*mcp.CallToolResult, governedtool.GitHubIssueReadOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitHubIssueReadOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitHubIssueReadInput{Action: input.Action, Number: input.Number, State: input.State, CredentialID: input.CredentialID})
+	if err != nil {
+		return nil, governedtool.GitHubIssueReadOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.githubExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "github.issue.read", string(capability.GitHubIssueRead), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitHubIssueReadOutput{}, err
+	}
+	var output governedtool.GitHubIssueReadOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitHubIssueReadOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) githubIssueCreate(ctx context.Context, _ *mcp.CallToolRequest, input githubIssueCreateMCPInput) (*mcp.CallToolResult, governedtool.GitHubIssueCreateOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitHubIssueCreateOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitHubIssueCreateInput{Title: input.Title, Body: input.Body, CredentialID: input.CredentialID})
+	if err != nil {
+		return nil, governedtool.GitHubIssueCreateOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.githubExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "github.issue.create", string(capability.GitHubIssueCreate), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitHubIssueCreateOutput{}, err
+	}
+	var output governedtool.GitHubIssueCreateOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitHubIssueCreateOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) githubIssueUpdate(ctx context.Context, _ *mcp.CallToolRequest, input githubIssueUpdateMCPInput) (*mcp.CallToolResult, governedtool.GitHubIssueUpdateOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitHubIssueUpdateOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitHubIssueUpdateInput{Number: input.Number, Body: input.Body, State: input.State, CredentialID: input.CredentialID})
+	if err != nil {
+		return nil, governedtool.GitHubIssueUpdateOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.githubExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "github.issue.update", string(capability.GitHubIssueUpdate), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitHubIssueUpdateOutput{}, err
+	}
+	var output governedtool.GitHubIssueUpdateOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitHubIssueUpdateOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) githubPRRead(ctx context.Context, _ *mcp.CallToolRequest, input githubPRReadMCPInput) (*mcp.CallToolResult, governedtool.GitHubPRReadOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitHubPRReadOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitHubPRReadInput{Action: input.Action, Number: input.Number, State: input.State, CredentialID: input.CredentialID})
+	if err != nil {
+		return nil, governedtool.GitHubPRReadOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.githubExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "github.pr.read", string(capability.GitHubPRRead), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitHubPRReadOutput{}, err
+	}
+	var output governedtool.GitHubPRReadOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitHubPRReadOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) githubPRCreate(ctx context.Context, _ *mcp.CallToolRequest, input githubPRCreateMCPInput) (*mcp.CallToolResult, governedtool.GitHubPRCreateOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitHubPRCreateOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitHubPRCreateInput{Title: input.Title, Head: input.Head, Base: input.Base, Body: input.Body, CredentialID: input.CredentialID})
+	if err != nil {
+		return nil, governedtool.GitHubPRCreateOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.githubExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "github.pr.create", string(capability.GitHubPRCreate), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitHubPRCreateOutput{}, err
+	}
+	var output governedtool.GitHubPRCreateOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitHubPRCreateOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) githubPRReview(ctx context.Context, _ *mcp.CallToolRequest, input githubPRReviewMCPInput) (*mcp.CallToolResult, governedtool.GitHubPRReviewOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitHubPRReviewOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitHubPRReviewInput{Number: input.Number, Event: input.Event, Body: input.Body, CredentialID: input.CredentialID})
+	if err != nil {
+		return nil, governedtool.GitHubPRReviewOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.githubExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "github.pr.review", string(capability.GitHubPRReview), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitHubPRReviewOutput{}, err
+	}
+	var output governedtool.GitHubPRReviewOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitHubPRReviewOutput{}, toolError(governedtool.ErrExecution)
+	}
+	return nil, output, nil
+}
+
+func (s *Server) githubPRMerge(ctx context.Context, _ *mcp.CallToolRequest, input githubPRMergeMCPInput) (*mcp.CallToolResult, governedtool.GitHubPRMergeOutput, error) {
+	a, err := s.actor(ctx)
+	if err != nil {
+		return nil, governedtool.GitHubPRMergeOutput{}, toolError(err)
+	}
+	encodedInput, err := json.Marshal(governedtool.GitHubPRMergeInput{Number: input.Number, MergeMethod: input.MergeMethod, CredentialID: input.CredentialID})
+	if err != nil {
+		return nil, governedtool.GitHubPRMergeOutput{}, toolError(governedtool.ErrInvalidInput)
+	}
+	encodedOutput, err := s.githubExecute(ctx, a, input.ProjectID, input.TaskID, input.RunID, "github.pr.merge", string(capability.GitHubPRMerge), encodedInput)
+	if err != nil {
+		return nil, governedtool.GitHubPRMergeOutput{}, err
+	}
+	var output governedtool.GitHubPRMergeOutput
+	if err := json.Unmarshal(encodedOutput, &output); err != nil {
+		return nil, governedtool.GitHubPRMergeOutput{}, toolError(governedtool.ErrExecution)
 	}
 	return nil, output, nil
 }
