@@ -1593,6 +1593,20 @@ quality
 
 Every tool must have an explicit contract.
 
+The shared `internal/tool` Enforcer requires every registered tool to declare
+input and output JSON schemas, required capabilities, and positive timeout and
+size limits. It checks the server-derived principal's grants and project/resource
+scope through a required application-supplied resource authorizer before decoding
+input or invoking the tool. Project membership alone does not prove resource
+ownership. JSON decoding rejects unknown
+fields, and typed input and output validators run before returning execution
+results. The executor never
+discovers machine executables. Audit records contain actor, project, tool,
+resource reference, and outcome only; tool input, output, and raw errors are not
+persisted. A successful operation is not reported as successful if its audit
+write fails. Concrete filesystem, shell, Git, and GitHub adapters must use this
+contract and add their own path/command/repository validation.
+
 Example:
 
 ```go
