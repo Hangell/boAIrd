@@ -54,10 +54,8 @@ func newTemplateHandler(t *testing.T) (http.Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewHandlerWithProfilesAuditNotificationsAndTemplates(
-		fakeDatabase{}, projectManager, nil, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes(), nil, nil,
-		nil, auditRepository, nil, service,
-	)
+	handler := newHandlerWithServicesAndSecurity(fakeDatabase{}, projectManager, nil, agentManager, nil, nil, nil, nil,
+		testLocalAuthTokenBytes(), nil, nil, nil, auditRepository, nil, service, bootstrapTestUserManager{}, SecurityPolicy{})
 
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Template target"}`)))

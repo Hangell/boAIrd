@@ -75,7 +75,7 @@ func TestAgentAPIReportsObservedStatusAndEvents(t *testing.T) {
 			From: agent.StatusOnline, To: agent.StatusBusy, Reason: heartbeat.ReasonWorkChanged, CreatedAt: lastSeen,
 		}},
 	}
-	handler := newHandler(fakeDatabase{}, nil, nil, observed, nil, nil, nil, nil, testLocalAuthTokenBytes())
+	handler := newAuthorizedTestHandler(fakeDatabase{}, nil, nil, observed, nil, nil, nil, nil, testLocalAuthTokenBytes())
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/agents/"+value.ID(), nil))
@@ -152,7 +152,7 @@ func TestAgentAPIWithoutObserverKeepsConfiguredStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandler(fakeDatabase{}, nil, nil, manager, nil, nil, nil, nil, testLocalAuthTokenBytes())
+	handler := newAuthorizedTestHandler(fakeDatabase{}, nil, nil, manager, nil, nil, nil, nil, testLocalAuthTokenBytes())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/agents/"+value.ID(), nil))
 	if response.Code != http.StatusOK {

@@ -49,7 +49,7 @@ func TestAgentAPIUsesDistinctProvidersAndDoesNotGrantByRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandler(fakeDatabase{}, nil, credentialManager, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes())
+	handler := newAuthorizedTestHandler(fakeDatabase{}, nil, credentialManager, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes())
 	create := func(name, role, provider, model, credentialID string) agentResponse {
 		t.Helper()
 		body, err := json.Marshal(agent.CreateInput{Name: name, Role: role, Runtime: agent.RuntimeAPI, Provider: provider, Model: model, CredentialID: credentialID})
@@ -134,7 +134,7 @@ func TestAgentProjectScopeRoutesRequireAdministratorProjectMembership(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandler(fakeDatabase{}, projectManager, nil, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes())
+	handler := newAuthorizedTestHandler(fakeDatabase{}, projectManager, nil, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes())
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Scope target"}`)))
 	if created.Code != http.StatusCreated {
@@ -208,7 +208,7 @@ func TestAgentAPIRejectsRawSecretsAndWritableStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandler(fakeDatabase{}, nil, nil, manager, nil, nil, nil, nil, testLocalAuthTokenBytes())
+	handler := newAuthorizedTestHandler(fakeDatabase{}, nil, nil, manager, nil, nil, nil, nil, testLocalAuthTokenBytes())
 	badSecret := httptest.NewRecorder()
 	handler.ServeHTTP(badSecret, authorizedTestRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(`{"name":"x","role":"worker","runtime":"LOCAL","api_key":"do-not-echo-this"}`)))
 	if badSecret.Code != http.StatusBadRequest || strings.Contains(badSecret.Body.String(), "do-not-echo-this") {

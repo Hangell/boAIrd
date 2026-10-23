@@ -126,6 +126,33 @@ func (m *Manager) List(ctx context.Context, limit, offset int) ([]Project, error
 	return m.repository.List(ctx, limit, offset)
 }
 
+type userScopedProjectRepository interface {
+	ListForUser(context.Context, string, int, int) ([]Project, error)
+}
+
+// ListForUser returns only projects where the user has current membership.
+// Pagination is applied by the repository after membership filtering.
+func (m *Manager) ListForUser(ctx context.Context, userID string, limit, offset int) ([]Project, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, invalidInput(errors.New("user ID is required"))
+	}
+	if limit == 0 {
+		limit = defaultPageSize
+	}
+	if limit < 1 || limit > maximumPageSize {
+		return nil, invalidInput(fmt.Errorf("limit must be between 1 and %d", maximumPageSize))
+	}
+	if offset < 0 {
+		return nil, invalidInput(errors.New("offset must not be negative"))
+	}
+	repository, ok := m.repository.(userScopedProjectRepository)
+	if !ok {
+		return nil, errors.New("project repository does not support user-scoped listing")
+	}
+	return repository.ListForUser(ctx, userID, limit, offset)
+}
+
 func (m *Manager) Update(ctx context.Context, id string, input UpdateInput) (Project, error) {
 	if input.Name == nil && input.Description == nil && input.WorkspacePath == nil && input.RepositoryURL == nil && input.HumanReviewRequired == nil && input.BrainID == nil {
 		return Project{}, invalidInput(errors.New("at least one project field must be provided"))

@@ -7,7 +7,6 @@ import (
 
 	"boAIrd/internal/agent"
 	"boAIrd/internal/capability"
-	"boAIrd/internal/project"
 	"boAIrd/internal/template"
 )
 
@@ -52,12 +51,17 @@ func registerTemplateRoutes(mux *http.ServeMux, manager TemplateManager) {
 	})
 
 	mux.HandleFunc("POST /api/v1/templates", func(w http.ResponseWriter, r *http.Request) {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
 		var input template.CreateInput
 		if err := decodeJSON(w, r, &input); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid template request")
 			return
 		}
-		value, err := manager.Create(r.Context(), input, project.LocalAdministratorID)
+		value, err := manager.Create(r.Context(), input, actorID)
 		if err != nil {
 			writeTemplateError(w, err)
 			return
@@ -75,12 +79,17 @@ func registerTemplateRoutes(mux *http.ServeMux, manager TemplateManager) {
 	})
 
 	mux.HandleFunc("PATCH /api/v1/templates/{key}", func(w http.ResponseWriter, r *http.Request) {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
 		var input template.UpdateInput
 		if err := decodeJSON(w, r, &input); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid template request")
 			return
 		}
-		value, err := manager.Update(r.Context(), r.PathValue("key"), input, project.LocalAdministratorID)
+		value, err := manager.Update(r.Context(), r.PathValue("key"), input, actorID)
 		if err != nil {
 			writeTemplateError(w, err)
 			return
@@ -94,12 +103,17 @@ func registerTemplateRoutes(mux *http.ServeMux, manager TemplateManager) {
 			writeAPIError(w, http.StatusForbidden, "forbidden", "operation is not authorized")
 			return
 		}
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
 		var input template.InstantiateInput
 		if err := decodeJSON(w, r, &input); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid instantiate request")
 			return
 		}
-		value, err := manager.Instantiate(r.Context(), projectID, r.PathValue("key"), input, project.LocalAdministratorID)
+		value, err := manager.Instantiate(r.Context(), projectID, r.PathValue("key"), input, actorID)
 		if err != nil {
 			writeTemplateError(w, err)
 			return

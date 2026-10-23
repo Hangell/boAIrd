@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"boAIrd/internal/api"
+	"boAIrd/internal/storage"
 	"boAIrd/internal/task"
+	"boAIrd/internal/user"
 )
 
 const mvpAdminToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -22,9 +24,21 @@ func TestMVPWorkflowIsVisibleThroughREST(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := api.NewHandlerWithOrchestration(
+	userRepository, err := storage.NewUserRepository(f.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRepository, err := storage.NewProjectRepository(f.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userService, err := user.NewService(userRepository, projectRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := api.NewHandlerWithSecurityNotificationsTemplatesAndUsers(
 		f.database, f.projects, nil, f.agents, f.brainService, f.runs, f.tasks, f.conversations,
-		localAuthToken, nil, f.service,
+		localAuthToken, nil, f.service, nil, nil, nil, nil, userService, api.SecurityPolicy{},
 	)
 
 	unauthorized := serveMVPRequest(t, handler, http.MethodGet, "/api/v1/projects/"+f.project.ID(), "", false)

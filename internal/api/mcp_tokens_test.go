@@ -48,7 +48,8 @@ func TestMCPTokenAdministrationRequiresAdminAndReturnsSecretOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandlerWithMCP(database, nil, nil, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes(), tokenManager)
+	handler := newHandlerWithServicesAndSecurity(database, nil, nil, agentManager, nil, nil, nil, nil,
+		testLocalAuthTokenBytes(), tokenManager, nil, nil, nil, nil, nil, bootstrapTestUserManager{}, SecurityPolicy{})
 	invalidLifetime := httptest.NewRecorder()
 	handler.ServeHTTP(invalidLifetime, authorizedTestRequest(http.MethodPost, "/api/v1/mcp/tokens", strings.NewReader(`{"agent_id":"agent-1","expires_in_seconds":31536001}`)))
 	if invalidLifetime.Code != http.StatusBadRequest {

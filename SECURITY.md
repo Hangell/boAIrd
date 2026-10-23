@@ -135,6 +135,45 @@ The Brain must never be able to:
 
 ---
 
+# Multi-User Isolation
+
+Human user identity is modeled separately from Agent and Brain identity:
+
+```text
+User (id, name, role: administrator | member)
+        │
+        ├── project_members(project_id, user_id, role: ADMIN | MEMBER)
+        │
+        └── session (opaque ID → user ID, in-memory, 30 minutes)
+```
+
+The seeded bootstrap administrator `local-administrator` is an administrator and
+is auto-added as `ADMIN` to every project. Administrators manage users and
+project membership through `user.manage`-guarded REST routes:
+
+```text
+GET/POST    /api/v1/users
+GET/DELETE  /api/v1/users/{id}
+POST        /api/v1/users/{id}/sessions     (administrator-issued user session)
+PUT/DELETE  /api/v1/projects/{id}/members/{userID}
+```
+
+Members are deny-by-default: they receive a read-only capability set and can
+access only projects they are members of. They cannot manage users, grant
+membership, or escalate their own role. The bootstrap administrator cannot be
+deleted, and its project membership cannot be revoked, preserving administrator
+authority. Deleting a user removes their memberships; membership revocation and
+user deletion invalidate that user's in-memory sessions. User creation/deletion,
+membership grant/update/revocation, and successful session issuance are written
+to an immutable authority audit table in the same database transaction as the
+user or membership mutation. Session audit contains no cookie or opaque session
+identifier. Administrators can read these global authority events through
+`GET /api/v1/audit/users`; project resource audit remains project-scoped. Task,
+conversation, and Run access is checked against current project membership in the
+Go API, never by the frontend. Credential management remains administrator-only.
+
+---
+
 # Brain Security
 
 The Brain has broad operational authority, but no administrative authority.
@@ -1012,7 +1051,7 @@ BOAIRD_MASTER_KEY=...
 BOAIRD_LOCAL_AUTH_TOKEN=...
 ```
 
-`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the single local administrator for all versioned REST routes except status. `POST /api/v1/session` accepts this token only in the Authorization header, then issues a 30-minute HttpOnly, SameSite=Strict cookie containing a cryptographically random opaque session ID. The server keeps the session ID and expiry in memory; it never copies the root token into the cookie, and sessions expire on logout or service restart. Unsafe cookie-authenticated requests, including logout, require a trusted dashboard Origin. Direct Bearer authentication remains available for local API clients. Project-scoped routes also require `project_members` membership, and each operation is checked against an explicit capability in Go. Authorization denials are written to immutable SQLite records. Brain replacement requires an audit reason recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`. MCP uses separately registered Agent bearer tokens and applies deny-by-default capability and resource-scope rules.
+`BOAIRD_LOCAL_AUTH_TOKEN` must be a separate 32-byte token encoded as 64 hexadecimal characters. It authenticates the bootstrap `local-administrator`; administrators can issue opaque 30-minute sessions to registered users. `POST /api/v1/session` accepts the root token only in the Authorization header, audits issuance, and sets an HttpOnly, SameSite=Strict cookie containing a cryptographically random opaque session ID. The server keeps the session ID and expiry in memory; it never copies the root token into the cookie. Each request resolves the current user and role; deleted users are denied. Logout, user deletion, membership revocation, or service restart invalidates in-memory sessions. Unsafe cookie-authenticated requests, including logout, require a trusted dashboard Origin. Direct Bearer authentication remains available to local API clients. Project-scoped routes also require `project_members` membership, and each operation is checked against an explicit capability in Go. User and membership mutations commit with immutable authority audit records; authorization denials are also written to immutable records in the configured database. Brain replacement requires an audit reason recorded with the server-derived `local-administrator` identity. Generate the token independently with `openssl rand -hex 32`; do not reuse `BOAIRD_MASTER_KEY`. MCP uses separately registered Agent bearer tokens and applies deny-by-default capability and resource-scope rules.
 
 ---
 
@@ -1204,7 +1243,20 @@ by default.
 
 # Local Mode
 
-Loopback binding controls network exposure; it does not replace authentication. Every versioned REST route other than status requires the local administrator token or a valid browser session. Browser cookies contain opaque server-side session IDs with a 30-minute lifetime and are revoked by logout; process restart invalidates all sessions. Cookie-authenticated unsafe requests require a trusted dashboard Origin. Capabilities are evaluated in the Go API and are independent of role labels and frontend controls. Project-scoped operations require membership. Denials fail closed and are recorded in the immutable authorization denial table. The current deployment has a single administrator identity; multi-user policy management remains future work.
+Loopback binding controls network exposure; it does not replace authentication. Every versioned REST route other than status requires a currently registered user identity. The bootstrap administrator uses the configured bearer token; administrators can issue browser sessions to members. Browser cookies contain opaque server-side session IDs with a 30-minute lifetime and are revoked by logout, user deletion, or membership revocation; process restart invalidates all sessions. Cookie-authenticated unsafe requests require a trusted dashboard Origin. Capabilities are evaluated in the Go API and are independent of role labels and frontend controls. Project and Agent reads are limited to current project membership, with membership filtering applied before pagination. Denials fail closed and are recorded in the immutable authorization denial table.
+
+Human users are modeled in the `users` table, kept separate from Agent and Brain
+identity. The seeded `local-administrator` is the bootstrap administrator and is
+always a member of every project. Administrators manage users and project
+membership through `user.manage`-guarded routes. Members receive a read-only,
+deny-by-default capability set and can access only projects they are members of;
+they cannot create users, grant membership, or escalate their own authority.
+Sessions are bound to a user identity, and an administrator can issue a session
+for any user. User creation/deletion, membership grant/update/revocation, and
+session issuance are recorded in immutable authority audit. Audit failures abort
+user and membership mutations; a newly created session is revoked if its audit
+record cannot be written. Deleting a user removes their memberships, and
+revoking membership invalidates that user's active sessions immediately.
 
 Default:
 
@@ -1770,8 +1822,8 @@ capabilities and tools come only from an explicit administrator-configured
 override scoped to one active project. Tools are restricted to the profile's
 suggested tool set, and backend authorization remains mandatory when a tool is
 executed. Profile override writes and their immutable `profile.created` or
-`profile.updated` audit records commit in one SQLite transaction; an audit
-failure rolls back the configuration change. Profile instructions are
+`profile.updated` audit records commit in one transaction in the configured
+database; an audit failure rolls back the configuration change. Profile instructions are
 administrator-controlled context and do not override system, project, or
 capability policy.
 
@@ -1787,7 +1839,8 @@ project-scoped record; the source template is never mutated.
 
 Instantiation is atomic: the Agent, its capabilities, its project membership,
 its template provenance (`template_instances`), and the `template.instantiated`
-audit event commit in one SQLite transaction; a failure rolls everything back.
+audit event commit in one transaction in the configured database; a failure
+rolls everything back.
 The transaction acquires a write lock on the project row and rechecks that its
 status is not `ARCHIVED` before inserting any instance data, serializing
 instantiation against project archival. Both `template.instantiated` and
