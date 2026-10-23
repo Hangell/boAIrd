@@ -101,11 +101,13 @@ func TestRegistryExecutesAuthorizedTypedToolAndAuditsMetadataOnly(t *testing.T) 
 		t.Fatalf("output = %s", got)
 	}
 	events := auditor.snapshot()
-	if len(events) != 1 || events[0].Outcome != "success" || events[0].ToolName != "test.echo" {
+	if len(events) != 2 || events[0].Outcome != "start" || events[1].Outcome != "success" || events[0].ToolName != "test.echo" {
 		t.Fatalf("audit events = %#v", events)
 	}
-	if string(got) == events[0].ResourceID {
-		t.Fatal("audit event unexpectedly contains tool output")
+	for _, event := range events {
+		if string(got) == event.ResourceID {
+			t.Fatal("audit event unexpectedly contains tool output")
+		}
 	}
 }
 
@@ -198,7 +200,7 @@ func TestRegistryBoundsExecutionAndOutputAndFailsOnAuditFailure(t *testing.T) {
 		if _, err := enforcer.Execute(context.Background(), authorizedRequest(`{"value":"x"}`)); !errors.Is(err, ErrTimedOut) {
 			t.Fatalf("Execute() error = %v, want ErrTimedOut", err)
 		}
-		if events := auditor.snapshot(); len(events) != 1 || events[0].Outcome != "timeout" {
+		if events := auditor.snapshot(); len(events) != 2 || events[0].Outcome != "start" || events[1].Outcome != "timeout" {
 			t.Fatalf("audit events = %#v", events)
 		}
 	})
@@ -239,11 +241,16 @@ func TestRegistryBoundsExecutionAndOutputAndFailsOnAuditFailure(t *testing.T) {
 	})
 	t.Run("audit failure", func(t *testing.T) {
 		auditor := &memoryAuditor{err: errors.New("database detail")}
+		var calls int
 		enforcer := setup(t, testTool(t, func(context.Context, input) (output, error) {
+			calls++
 			return output{Value: "ok"}, nil
 		}), auditor)
 		if _, err := enforcer.Execute(context.Background(), authorizedRequest(`{"value":"x"}`)); !errors.Is(err, ErrAudit) {
 			t.Fatalf("Execute() error = %v, want ErrAudit", err)
+		}
+		if calls != 0 {
+			t.Fatalf("tool executed %d times despite pre-execution audit failure", calls)
 		}
 	})
 }

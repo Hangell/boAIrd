@@ -51,11 +51,13 @@ func TestShellToolUsesStructuredArgumentsBoundsOutputAndAudits(t *testing.T) {
 		t.Fatalf("structured argument executed as shell text; marker stat error = %v", err)
 	}
 	events := auditor.snapshot()
-	if len(events) != 1 || events[0].Outcome != "success" || events[0].ToolName != "shell.execute" || events[0].ProjectID != "project-1" {
+	if len(events) != 2 || events[0].Outcome != "start" || events[1].Outcome != "success" || events[1].ToolName != "shell.execute" || events[1].ProjectID != "project-1" {
 		t.Fatalf("audit events = %#v", events)
 	}
-	if strings.Contains(events[0].ResourceID, argument) {
-		t.Fatalf("audit event contains command arguments: %#v", events[0])
+	for _, event := range events {
+		if strings.Contains(event.ResourceID, argument) {
+			t.Fatalf("audit event contains command arguments: %#v", event)
+		}
 	}
 }
 

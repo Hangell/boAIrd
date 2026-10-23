@@ -562,7 +562,8 @@ Processes that exceed the limit must be terminated.
 The controlled MCP shell tool is disabled unless `BOAIRD_SHELL_ENABLED=true` and
 the administrator configures `BOAIRD_SHELL_ALLOWED_EXECUTABLES`. Each request
 also requires the authenticated Agent's explicit `shell.execute` capability and
-persisted project scope. The server derives the Agent identity from the verified
+project scope, satisfied by persisted project membership or the active-Brain
+project relationship. The server derives the Agent identity from the verified
 MCP token and checks the project workspace before invoking the shared tool
 enforcer. Calls execute one allowlisted executable with structured arguments;
 the service never evaluates model text through `sh -c`. Working directories and
@@ -570,6 +571,17 @@ path-like arguments are resolved against the project workspace, including
 symlinks. The child receives a reduced environment, output is bounded and
 redacted, timeouts terminate the process group on Unix, and immutable audit
 records contain metadata only.
+
+A metadata-only `start` audit event is persisted before the process is
+launched; if that write fails, execution is aborted and no process starts. A
+final outcome event (`success`/`failed`/`timeout`) is appended afterwards.
+Command arguments and output are never included in audit rows.
+
+Human Review: shell execution does not use the task Human Review gate. The
+administrative approval for this layer is the explicit `shell.execute` grant
+plus global enablement and the executable allowlist. Any future requirement for
+per-command human approval must be an explicit policy/operation gate, not a
+name-based inference.
 
 These checks are not an operating-system filesystem sandbox. An approved program
 can still read paths internally or start subprocesses by absolute path, and the

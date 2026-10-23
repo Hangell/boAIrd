@@ -126,6 +126,12 @@ func (e *Enforcer) Execute(ctx context.Context, request Request) (json.RawMessag
 		}
 		return nil, err
 	}
+	// Record an immutable metadata-only start event before any tool runs. A
+	// side-effecting tool must never begin without a prior audit trail, so an
+	// audit failure here aborts the call before execution starts.
+	if err := e.record(ctx, request, "start"); err != nil {
+		return nil, ErrAudit
+	}
 	executionCtx, cancel := context.WithTimeout(ctx, contract.Limits.Timeout)
 	defer cancel()
 	output, err := value.execute(executionCtx, request, input)
