@@ -198,6 +198,24 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		if len(parts) == 6 && parts[4] == "agents" && (method == http.MethodPut || method == http.MethodDelete) {
 			return "agent.scope.manage", projectID, true
 		}
+		if len(parts) == 5 && parts[4] == "profiles" {
+			if method == http.MethodGet {
+				return "agent.read", projectID, true
+			}
+			if method == http.MethodPut {
+				return "agent.scope.manage", projectID, true
+			}
+		}
+		if len(parts) == 6 && parts[4] == "profiles" {
+			if method == http.MethodGet {
+				return "agent.read", projectID, true
+			}
+			if method == http.MethodPut {
+				return "agent.scope.manage", projectID, true
+			}
+		}
+	case len(parts) == 3 && parts[2] == "profiles" && method == http.MethodGet:
+		return "agent.read", "", true
 	case len(parts) == 3 && parts[2] == "agents":
 		switch method {
 		case http.MethodGet:

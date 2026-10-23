@@ -471,6 +471,13 @@ git.commit
 
 The architecture must never infer security permissions solely from the role name.
 
+Reusable specialized profiles (`internal/profile`) describe task scope, default
+instructions, runtime defaults, suggested tools, and suggested capabilities.
+A profile name grants no authority: effective capabilities and tools come only
+from an administrator-configured, project-scoped override, and an override may
+expose only tools the profile suggests. Profile changes are recorded in the
+immutable audit history.
+
 ---
 
 # 14. Agent Runtime

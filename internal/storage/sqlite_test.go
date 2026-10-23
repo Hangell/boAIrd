@@ -33,8 +33,8 @@ func TestOpenSQLiteAppliesMigrationsOnce(t *testing.T) {
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("query migration count: %v", err)
 	}
-	if migrationCount != 19 {
-		t.Fatalf("migration count = %d, want 19", migrationCount)
+	if migrationCount != 20 {
+		t.Fatalf("migration count = %d, want 20", migrationCount)
 	}
 
 	var tableName string
@@ -80,6 +80,9 @@ func TestOpenSQLiteAppliesMigrationsOnce(t *testing.T) {
 	}
 	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_memory'").Scan(&tableName); err != nil {
 		t.Fatalf("verify project memory migration: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_profiles'").Scan(&tableName); err != nil {
+		t.Fatalf("verify project profiles migration: %v", err)
 	}
 }
 

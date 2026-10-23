@@ -1584,6 +1584,24 @@ Software Architect
 
 ---
 
+## Implemented
+
+- `internal/profile` — built-in profile catalog (`qa`, `security`, `devops`,
+  `git-manager`, `architect`, `product-owner`, `documentation`, `sdm`) with
+  task scope, instructions, default runtime, suggested tools, and suggested
+  capabilities.
+- Profile names never grant authority: a profile's effective capabilities and
+  tools come only from an administrator-configured, project-scoped override.
+- `internal/storage/profile.go` + migration `0020_project_profiles.sql` persist
+  per-project overrides; `internal/storage/audit.go` records immutable
+  `profile.created` / `profile.updated` events.
+- API: `GET /api/v1/profiles` lists the catalog;
+  `GET /api/v1/projects/{id}/profiles` and `PUT /api/v1/projects/{id}/profiles/{key}`
+  resolve and customize the effective profile for one project. Suggested tools
+  are the only tools an override may expose.
+
+---
+
 # Phase 31 — Observability
 
 ## Objective
