@@ -1048,6 +1048,9 @@ components:
           description: Human-review decisions use task.human_review.approved when moving to DONE and task.human_review.rejected when returning to WORKING.
         resource_type: { type: string }
         resource_id: { type: string }
+        result:
+          type: string
+          description: Outcome of the audited action when recorded by the generic audit writer.
         from_status: { type: string }
         to_status: { type: string }
         reason:
