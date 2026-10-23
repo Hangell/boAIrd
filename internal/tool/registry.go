@@ -98,6 +98,16 @@ func (e *Enforcer) Execute(ctx context.Context, request Request) (json.RawMessag
 		return nil, err
 	}
 	contract := value.Contract()
+	if err := e.scope.Authorize(ctx, request.Principal, request); err != nil {
+		// Caller-supplied task and Run references are not written to audit until
+		// the resource authorizer has verified their project scope.
+		request.TaskID = ""
+		request.RunID = ""
+		if e.record(ctx, request, "denied") != nil {
+			return nil, ErrAudit
+		}
+		return nil, fmt.Errorf("%w: resource scope rejected", ErrDenied)
+	}
 	for _, required := range contract.RequiredCapabilities {
 		principal := capability.Principal{ID: request.Principal.ID, Capabilities: request.Principal.Capabilities, ProjectIDs: request.Principal.ProjectIDs}
 		if err := e.authorizer.Authorize(principal, required, request.ProjectID); err != nil {
@@ -106,12 +116,6 @@ func (e *Enforcer) Execute(ctx context.Context, request Request) (json.RawMessag
 			}
 			return nil, fmt.Errorf("%w: required capability missing", ErrDenied)
 		}
-	}
-	if err := e.scope.Authorize(ctx, request.Principal, request); err != nil {
-		if e.record(ctx, request, "denied") != nil {
-			return nil, ErrAudit
-		}
-		return nil, fmt.Errorf("%w: resource scope rejected", ErrDenied)
 	}
 	if len(request.Input) == 0 || len(request.Input) > contract.Limits.MaxInputBytes {
 		if e.record(ctx, request, "invalid") != nil {
@@ -125,6 +129,16 @@ func (e *Enforcer) Execute(ctx context.Context, request Request) (json.RawMessag
 			return nil, ErrAudit
 		}
 		return nil, err
+	}
+	if resolver, ok := value.(auditResourceResolver); ok {
+		resourceID, err := resolver.auditResourceID(ctx, request, input)
+		if err != nil || strings.TrimSpace(resourceID) == "" || strings.TrimSpace(resourceID) != resourceID {
+			if e.record(ctx, request, "denied") != nil {
+				return nil, ErrAudit
+			}
+			return nil, fmt.Errorf("%w: audit resource resolution failed", ErrDenied)
+		}
+		request.ResourceID = resourceID
 	}
 	// Record an immutable metadata-only start event before any tool runs. A
 	// side-effecting tool must never begin without a prior audit trail, so an
@@ -181,10 +195,15 @@ func isNil(value any) bool {
 func validateRequest(request Request) error {
 	if request.ToolName == "" || strings.TrimSpace(request.ProjectID) == "" ||
 		strings.TrimSpace(request.ProjectID) != request.ProjectID ||
-		strings.TrimSpace(request.Principal.ID) == "" || strings.TrimSpace(request.Principal.Type) == "" {
+		strings.TrimSpace(request.Principal.ID) == "" || strings.TrimSpace(request.Principal.Type) == "" ||
+		!validAuditReference(request.TaskID) || !validAuditReference(request.RunID) {
 		return fmt.Errorf("%w: tool, project, and authenticated principal are required", ErrInvalidRequest)
 	}
 	return nil
+}
+
+func validAuditReference(value string) bool {
+	return value == "" || (len(value) <= 200 && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\x00\r\n"))
 }
 
 func validSchema(value json.RawMessage) bool {
@@ -196,7 +215,8 @@ func (e *Enforcer) record(ctx context.Context, request Request, outcome string) 
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditTimeout)
 	defer cancel()
 	return e.auditor.RecordToolExecution(auditCtx, Event{
-		ProjectID: request.ProjectID, ActorType: request.Principal.Type, ActorID: request.Principal.ID,
+		ProjectID: request.ProjectID, TaskID: request.TaskID, RunID: request.RunID,
+		ActorType: request.Principal.Type, ActorID: request.Principal.ID,
 		ToolName: request.ToolName, ResourceType: request.ResourceType, ResourceID: request.ResourceID, Outcome: outcome,
 	})
 }

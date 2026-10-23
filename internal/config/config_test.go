@@ -12,6 +12,7 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 		"BOAIRD_AGENT_STALE_AFTER", "BOAIRD_AGENT_OFFLINE_AFTER", "BOAIRD_AGENT_STATUS_INTERVAL",
 		"BOAIRD_ORCHESTRATOR_MAX_ATTEMPTS", "BOAIRD_ORCHESTRATOR_TIMEOUT")
 	unsetEnvironment(t, "BOAIRD_CONTEXT_MAX_BYTES", "BOAIRD_CONTEXT_MAX_TOKENS", "BOAIRD_SHELL_ENABLED", "BOAIRD_SHELL_ALLOWED_EXECUTABLES")
+	unsetEnvironment(t, "BOAIRD_GIT_ENABLED", "BOAIRD_GIT_ALLOW_PUSH", "BOAIRD_GIT_ALLOW_MERGE")
 	t.Setenv("BOAIRD_MASTER_KEY", testMasterKey())
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 
@@ -33,6 +34,9 @@ func TestLoadUsesLocalDefaults(t *testing.T) {
 	}
 	if cfg.ShellEnabled || len(cfg.ShellAllowedExecutables) != 0 {
 		t.Fatalf("shell defaults = enabled %t, allowed %v; want disabled without executables", cfg.ShellEnabled, cfg.ShellAllowedExecutables)
+	}
+	if cfg.GitEnabled || cfg.GitAllowPush || cfg.GitAllowMerge {
+		t.Fatalf("git defaults = enabled %t, push %t, merge %t; want disabled and denied", cfg.GitEnabled, cfg.GitAllowPush, cfg.GitAllowMerge)
 	}
 }
 
@@ -63,6 +67,35 @@ func TestLoadRejectsMalformedShellEnabled(t *testing.T) {
 	t.Setenv("BOAIRD_SHELL_ENABLED", "sometimes")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted a malformed shell enable flag")
+	}
+}
+
+func TestLoadParsesGitPolicy(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_GIT_ENABLED", "true")
+	t.Setenv("BOAIRD_GIT_ALLOW_PUSH", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.GitEnabled || !cfg.GitAllowPush || cfg.GitAllowMerge {
+		t.Fatalf("git policy = enabled %t, push %t, merge %t", cfg.GitEnabled, cfg.GitAllowPush, cfg.GitAllowMerge)
+	}
+}
+
+func TestLoadRejectsGitPushWithoutEnablement(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_GIT_ALLOW_PUSH", "true")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted git push without git enablement")
+	}
+}
+
+func TestLoadRejectsMalformedGitEnabled(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_GIT_ENABLED", "sometimes")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted a malformed git enable flag")
 	}
 }
 

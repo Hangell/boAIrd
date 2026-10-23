@@ -54,6 +54,9 @@ type Config struct {
 	ContextMaxTokens        int
 	ShellEnabled            bool
 	ShellAllowedExecutables []string
+	GitEnabled              bool
+	GitAllowPush            bool
+	GitAllowMerge           bool
 	RemoteMode              bool
 	TLSCertFile             string
 	TLSKeyFile              string
@@ -157,6 +160,19 @@ func Load() (Config, error) {
 		cfg.ShellEnabled = enabled
 	}
 	cfg.ShellAllowedExecutables = splitExactList(os.Getenv("BOAIRD_SHELL_ALLOWED_EXECUTABLES"))
+	var boolErr error
+	cfg.GitEnabled, boolErr = boolEnv("BOAIRD_GIT_ENABLED")
+	if boolErr != nil {
+		return Config{}, boolErr
+	}
+	cfg.GitAllowPush, boolErr = boolEnv("BOAIRD_GIT_ALLOW_PUSH")
+	if boolErr != nil {
+		return Config{}, boolErr
+	}
+	cfg.GitAllowMerge, boolErr = boolEnv("BOAIRD_GIT_ALLOW_MERGE")
+	if boolErr != nil {
+		return Config{}, boolErr
+	}
 	var durationErr error
 	if cfg.AgentStaleAfter, durationErr = envDuration("BOAIRD_AGENT_STALE_AFTER", defaultAgentStaleAfter); durationErr != nil {
 		return Config{}, durationErr
@@ -318,6 +334,12 @@ func (c Config) Validate() error {
 	if len(c.ShellAllowedExecutables) > 64 {
 		return fmt.Errorf("BOAIRD_SHELL_ALLOWED_EXECUTABLES must contain at most 64 executable names")
 	}
+	if c.GitAllowPush && !c.GitEnabled {
+		return fmt.Errorf("BOAIRD_GIT_ALLOW_PUSH requires BOAIRD_GIT_ENABLED")
+	}
+	if c.GitAllowMerge && !c.GitEnabled {
+		return fmt.Errorf("BOAIRD_GIT_ALLOW_MERGE requires BOAIRD_GIT_ENABLED")
+	}
 	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
 	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))
 	for _, entry := range c.MCPAgentTokens {
@@ -347,6 +369,18 @@ func envDuration(name string, fallback time.Duration) (time.Duration, error) {
 	value, err := time.ParseDuration(strings.TrimSpace(raw))
 	if err != nil {
 		return 0, fmt.Errorf("parse %s: %w", name, err)
+	}
+	return value, nil
+}
+
+func boolEnv(name string) (bool, error) {
+	raw, ok := os.LookupEnv(name)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return false, nil
+	}
+	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false, fmt.Errorf("parse %s: %w", name, err)
 	}
 	return value, nil
 }

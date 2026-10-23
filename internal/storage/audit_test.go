@@ -107,6 +107,19 @@ func TestAuditRepositoryRecordsToolOutcomeAndListsImmutableEvents(t *testing.T) 
 	if strings.Contains(reason, "payload") || strings.Contains(reason, "secret-value") {
 		t.Fatalf("tool audit stored caller data: %q", reason)
 	}
+	if err := repository.RecordToolExecution(ctx, tool.Event{
+		ProjectID: p.ID(), TaskID: "task-1", RunID: "run-1", ActorType: "agent", ActorID: "agent-1", ToolName: "git.read",
+		ResourceType: "repository", ResourceID: "/canonical/project/repo", Outcome: "success",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var gitReason string
+	if err := database.QueryRowContext(ctx, `SELECT reason FROM audit_events WHERE project_id=? AND resource_id='git.read'`, p.ID()).Scan(&gitReason); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gitReason, "resource=repository:/canonical/project/repo") || strings.Contains(gitReason, "workspace") {
+		t.Fatalf("Git audit repository metadata = %q, want canonical repository root", gitReason)
+	}
 	if err := repository.RecordEvent(ctx, audit.Event{
 		ProjectID: p.ID(), ActorType: "administrator", ActorID: "local-administrator",
 		Action: "agent.capability.granted", ResourceType: "agent", ResourceID: "agent-1",
@@ -126,13 +139,13 @@ func TestAuditRepositoryRecordsToolOutcomeAndListsImmutableEvents(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 3 {
-		t.Fatalf("events = %d, want 3", len(events))
+	if len(events) != 4 {
+		t.Fatalf("events = %d, want 4", len(events))
 	}
 	if events[0].Action != "agent.capability.revoked" || events[1].Result != "success" || events[1].ResourceType != "agent" || events[1].ResourceID != "agent-1" {
 		t.Fatalf("audit entries = %+v", events)
 	}
-	if strings.Contains(events[1].Reason, "must-not-persist") || events[2].Result != "success" {
+	if strings.Contains(events[1].Reason, "must-not-persist") || events[2].Result != "success" || !strings.Contains(events[2].Reason, "/canonical/project/repo") || events[3].Result != "success" {
 		t.Fatalf("stored event leaked secret or tool result was lost: %+v", events)
 	}
 	if events[1].CreatedAt.IsZero() {

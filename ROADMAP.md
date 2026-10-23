@@ -1541,6 +1541,35 @@ Also support:
 Git Manager Agent
 ```
 
+## Implemented
+
+- `internal/tool/git.go` — governed Git tool set with one operation per
+  capability (`git.read`, `git.diff`, `git.branch`, `git.commit`, `git.push`,
+  `git.merge`), registered through the shared tool Enforcer.
+- Repository boundary: the tool resolves the project workspace, locates the
+  repository root with `git rev-parse --show-toplevel`, and verifies the
+  resolved repository is contained in the workspace (symlink-safe) before any
+  operation. Parent traversal and out-of-workspace repositories are denied.
+- Safe defaults: the whole set is disabled unless `BOAIRD_GIT_ENABLED=true`;
+  `git.push` and `git.merge` remain denied unless `BOAIRD_GIT_ALLOW_PUSH` /
+  `BOAIRD_GIT_ALLOW_MERGE` are set, and both require an approved Human Review
+  task in the same project when required; a policy lookup error denies the
+  operation. Supplied task/run IDs are validated against project and task scope
+  before audit. Git subprocesses use a minimal environment, ignore system and
+  global config, disable hooks, credential helpers, and SSH, enumerate and
+  validate exactly one HTTPS push URL without embedded credentials, reject
+  zero or multiple destinations, push one existing local branch, and
+  reject external merge drivers, filters, and URL-specific transport
+  credentials. Commands use structured `git -C` arguments, never `sh -c`;
+  output is bounded and redacted; timeouts apply.
+- Audit: each operation records actor, project, task, run, canonical repository
+  root, operation, and result without credentials; a metadata-only `start`
+  event is persisted before any mutating command. Invalid task/run references
+  are omitted from scope-denial audit events.
+- MCP: `boaird.git.read`, `boaird.git.diff`, `boaird.git.branch`,
+  `boaird.git.commit`, `boaird.git.push`, and `boaird.git.merge` are advertised
+  only when Git tools are configured.
+
 ---
 
 # Phase 29 — GitHub

@@ -48,6 +48,12 @@ func (r *AuditRepository) RecordToolExecution(ctx context.Context, event tool.Ev
 		return errors.New("tool audit project, actor, tool, and outcome are required")
 	}
 	reason := "outcome=" + event.Outcome
+	if event.TaskID != "" {
+		reason += "; task=" + event.TaskID
+	}
+	if event.RunID != "" {
+		reason += "; run=" + event.RunID
+	}
 	if event.ResourceType != "" && event.ResourceID != "" {
 		reason += "; resource=" + event.ResourceType + ":" + event.ResourceID
 	}
@@ -55,9 +61,9 @@ func (r *AuditRepository) RecordToolExecution(ctx context.Context, event tool.Ev
 	if len(reason) > 2000 {
 		reason = reason[:2000]
 	}
-	if _, err := r.database.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, result, reason)
-		VALUES (?, ?, ?, 'tool.executed', 'tool', ?, ?, ?)`,
-		event.ProjectID, event.ActorType, event.ActorID, event.ToolName, event.Outcome, reason); err != nil {
+	if _, err := r.database.ExecContext(ctx, `INSERT INTO audit_events(project_id, task_id, actor_type, actor_id, event_type, resource_type, resource_id, result, reason)
+		VALUES (?, NULLIF(?, ''), ?, ?, 'tool.executed', 'tool', ?, ?, ?)`,
+		event.ProjectID, event.TaskID, event.ActorType, event.ActorID, event.ToolName, event.Outcome, reason); err != nil {
 		return fmt.Errorf("record tool execution: %w", err)
 	}
 	return nil

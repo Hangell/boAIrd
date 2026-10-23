@@ -2020,6 +2020,12 @@ and project-scoped read paths; reads are authorized by `audit.read` plus project
 membership and re-redact stored reason text on output.
 The generic tool audit writer records `tool.executed` metadata and stores the
 tool outcome in the same `result` field consumed by the audit reader.
+Git operations validate caller-supplied task and Run references against the
+project before those references enter tool audit. Git audit resource metadata
+uses the canonical repository root resolved inside the workspace. Git
+subprocesses run with a minimal environment and explicit configuration that
+disables host credential sources and repository hooks; remote pushes are HTTPS
+only and target one existing local branch.
 
 ---
 
