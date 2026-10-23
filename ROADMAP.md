@@ -1765,6 +1765,28 @@ remote MCP
 
 ---
 
+## Implemented
+
+- Local mode remains loopback-bound by default. A non-loopback `BOAIRD_HOST`
+  is accepted only with `BOAIRD_REMOTE_MODE=true`, which requires
+  `BOAIRD_TLS_CERT_FILE` and `BOAIRD_TLS_KEY_FILE`; startup fails closed
+  otherwise.
+- TLS is terminated at the listener (TLS 1.2 minimum) via `api.ServeTLS`.
+- Every response carries security headers (`X-Content-Type-Options`,
+  `X-Frame-Options`, `Referrer-Policy`); `Strict-Transport-Security` is emitted
+  only for TLS requests.
+- Remote mode enables per-client-IP rate limiting (`BOAIRD_RATE_LIMIT_REQUESTS`,
+  `BOAIRD_RATE_LIMIT_WINDOW`), defaulting to 60 requests per minute.
+- The limiter covers versioned API endpoints except `/api/v1/status`, and the
+  `/mcp` endpoint. For configured trusted proxies, client IP resolution walks
+  `X-Forwarded-For` from right to left and skips trusted proxy hops.
+- `BOAIRD_TRUSTED_PROXIES` is the only way forwarded headers (`X-Forwarded-For`)
+  are honored for client identity; unconfigured proxies are never trusted.
+- Existing authentication, session cookies (`HttpOnly`, `SameSite=Strict`), and
+  trusted-origin CORS/CSRF checks apply unchanged in remote deployments.
+
+---
+
 # Phase 36 — PostgreSQL
 
 SQLite remains the default for local use.
