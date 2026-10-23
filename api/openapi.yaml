@@ -821,6 +821,93 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/profiles:
+    get:
+      operationId: listAgentProfiles
+      x-required-capability: agent.read
+      summary: List the built-in specialized agent profiles
+      description: Returns task scope, default instructions, runtime defaults, and suggested tools and capabilities. Suggested values are hints and never grant authority.
+      responses:
+        '200':
+          description: Profile catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProfileDefinition' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{projectID}/profiles:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listEffectiveProjectProfiles
+      x-required-capability: agent.read
+      summary: Resolve every profile for a project
+      description: Effective capabilities and tools come only from administrator-configured overrides; uncustomized profiles grant nothing.
+      responses:
+        '200':
+          description: Effective profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/EffectiveProfile' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{projectID}/profiles/{key}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getEffectiveProjectProfile
+      x-required-capability: agent.read
+      summary: Resolve one profile for a project
+      responses:
+        '200':
+          description: Effective profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveProfile' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      operationId: saveProjectProfile
+      x-required-capability: agent.scope.manage
+      summary: Customize a profile for one project
+      description: Persists an administrator-configured override and records an immutable audit event. Capabilities are granted explicitly; tools must be among the profile's suggested tools.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaveProfile' }
+      responses:
+        '200':
+          description: Effective profile after the override.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
 components:
   securitySchemes:
     localBearerAuth:
@@ -1314,6 +1401,56 @@ components:
               type: string
             message:
               type: string
+    ProfileDefinition:
+      type: object
+      required: [key, name, description, instructions, default_runtime, suggested_tools, suggested_capabilities]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        instructions: { type: string }
+        default_runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        suggested_tools:
+          type: array
+          items: { type: string }
+        suggested_capabilities:
+          type: array
+          items: { type: string }
+    EffectiveProfile:
+      type: object
+      required: [key, name, description, instructions, default_runtime, capabilities, tools, suggested_tools, suggested_capabilities, customized]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        instructions: { type: string }
+        default_runtime: { type: string, enum: [API, MCP, LOCAL, REMOTE] }
+        capabilities:
+          type: array
+          items: { type: string }
+          description: Explicitly configured capabilities only; never granted by the profile name.
+        tools:
+          type: array
+          items: { type: string }
+          description: Explicitly configured tools, limited to the profile's suggested tools.
+        suggested_tools:
+          type: array
+          items: { type: string }
+        suggested_capabilities:
+          type: array
+          items: { type: string }
+        customized: { type: boolean }
+    SaveProfile:
+      type: object
+      additionalProperties: false
+      properties:
+        instructions: { type: string, maxLength: 16000 }
+        capabilities:
+          type: array
+          items: { type: string }
+        tools:
+          type: array
+          items: { type: string }
   responses:
     Unauthorized:
       description: Missing or invalid administrator bearer token or session cookie.
