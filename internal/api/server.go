@@ -138,7 +138,7 @@ func NewHandlerWithOrchestration(database DatabaseHealth, projects ProjectManage
 }
 
 // NewHandlerWithProfiles returns a handler that also exposes specialized agent profile routes.
-func NewHandlerWithProfiles(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, mcpHandlers ...http.Handler) http.Handler {
+func NewHandlerWithProfiles(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, mcpHandlers ...http.Handler) http.Handler {
 	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, nil, mcpHandlers...)
 }
 
@@ -160,7 +160,7 @@ func newHandlerWithMCP(database DatabaseHealth, projects ProjectManager, credent
 	return newHandlerWithOrchestration(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, nil, nil, nil, mcpHandlers...)
 }
 
-func newHandlerWithOrchestration(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, mcpHandlers ...http.Handler) http.Handler {
+func newHandlerWithOrchestration(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	sessions := newLocalSessionStore()
 	registerSessionRoutes(mux, database, localAuthToken, sessions)
