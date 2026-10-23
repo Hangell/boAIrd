@@ -11,12 +11,14 @@ import (
 
 // UserManager is the subset of the user service exposed to the HTTP API.
 type UserManager interface {
-	Create(context.Context, string, string, user.Role) (user.User, error)
+	Create(context.Context, string, string, string, user.Role) (user.User, error)
 	List(context.Context) ([]user.User, error)
 	Get(context.Context, string) (user.User, error)
-	Delete(context.Context, string) error
-	GrantProject(context.Context, string, string, user.MembershipRole) error
-	RevokeProject(context.Context, string, string) error
+	Delete(context.Context, string, string) error
+	GrantProject(context.Context, string, string, string, user.MembershipRole) error
+	RevokeProject(context.Context, string, string, string) error
+	ProjectsFor(context.Context, string) (map[string]user.MembershipRole, error)
+	RecordSessionIssued(context.Context, string, string) error
 }
 
 type userOutput struct {
@@ -58,7 +60,12 @@ func registerUserRoutes(mux *http.ServeMux, manager UserManager, sessions *local
 		if role == "" {
 			role = user.RoleMember
 		}
-		value, err := manager.Create(r.Context(), input.ID, input.Name, role)
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
+		value, err := manager.Create(r.Context(), actorID, input.ID, input.Name, role)
 		if err != nil {
 			writeUserError(w, err)
 			return
@@ -74,10 +81,16 @@ func registerUserRoutes(mux *http.ServeMux, manager UserManager, sessions *local
 		writeJSON(w, http.StatusOK, userOutput{ID: value.ID(), Name: value.Name(), Role: string(value.Role())})
 	})
 	mux.HandleFunc("DELETE /api/v1/users/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if err := manager.Delete(r.Context(), r.PathValue("id")); err != nil {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
+		if err := manager.Delete(r.Context(), actorID, r.PathValue("id")); err != nil {
 			writeUserError(w, err)
 			return
 		}
+		sessions.revokeUser(r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("PUT /api/v1/projects/{id}/members/{userID}", func(w http.ResponseWriter, r *http.Request) {
@@ -91,17 +104,28 @@ func registerUserRoutes(mux *http.ServeMux, manager UserManager, sessions *local
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "role must be ADMIN or MEMBER")
 			return
 		}
-		if err := manager.GrantProject(r.Context(), r.PathValue("id"), r.PathValue("userID"), role); err != nil {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
+		if err := manager.GrantProject(r.Context(), actorID, r.PathValue("id"), r.PathValue("userID"), role); err != nil {
 			writeUserError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("DELETE /api/v1/projects/{id}/members/{userID}", func(w http.ResponseWriter, r *http.Request) {
-		if err := manager.RevokeProject(r.Context(), r.PathValue("id"), r.PathValue("userID")); err != nil {
+		actorID, ok := principalID(r)
+		if !ok {
+			writeConversationUnauthorized(w)
+			return
+		}
+		if err := manager.RevokeProject(r.Context(), actorID, r.PathValue("id"), r.PathValue("userID")); err != nil {
 			writeUserError(w, err)
 			return
 		}
+		sessions.revokeUser(r.PathValue("userID"))
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/v1/users/{id}/sessions", func(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +137,17 @@ func registerUserRoutes(mux *http.ServeMux, manager UserManager, sessions *local
 		identifier, expiresAt, err := sessions.create(value.ID())
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "could not create a user session")
+			return
+		}
+		actorID, ok := principalID(r)
+		if !ok {
+			sessions.revoke(identifier)
+			writeConversationUnauthorized(w)
+			return
+		}
+		if err := manager.RecordSessionIssued(r.Context(), actorID, value.ID()); err != nil {
+			sessions.revoke(identifier)
+			writeAPIError(w, http.StatusServiceUnavailable, "audit_unavailable", "could not audit user session issuance")
 			return
 		}
 		cookie := &http.Cookie{Name: localAuthCookieName, Value: identifier, Path: "/api/v1", Expires: expiresAt, MaxAge: int(localSessionLifetime.Seconds()), HttpOnly: true, SameSite: http.SameSiteStrictMode}
@@ -129,11 +164,13 @@ func writeUserError(w http.ResponseWriter, err error) {
 	case errors.Is(err, user.ErrNotFound):
 		writeAPIError(w, http.StatusNotFound, "not_found", "user not found")
 	case errors.Is(err, user.ErrAlreadyExists):
-		writeAPIError(w, http.StatusConflict, "conflict", "user already exists")
+		writeAPIError(w, http.StatusConflict, "conflict", "user ID is unavailable")
 	case errors.Is(err, user.ErrInvalidInput):
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "user input is invalid")
 	case errors.Is(err, user.ErrBootstrapAdministrator):
 		writeAPIError(w, http.StatusForbidden, "forbidden", "the bootstrap administrator cannot be modified")
+	case errors.Is(err, user.ErrForbidden):
+		writeAPIError(w, http.StatusForbidden, "forbidden", "administrator role is required")
 	case errors.Is(err, user.ErrProjectNotFound):
 		writeAPIError(w, http.StatusNotFound, "not_found", "project not found")
 	default:

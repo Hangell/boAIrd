@@ -11,6 +11,7 @@ import (
 
 	"boAIrd/internal/project"
 	"boAIrd/internal/storage"
+	"boAIrd/internal/user"
 )
 
 func TestProjectLifecycleEndpoints(t *testing.T) {
@@ -171,5 +172,17 @@ func newProjectHandler(t *testing.T) (http.Handler, *storage.Database) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newHandler(database, manager, nil, nil, nil, nil, nil, nil, testLocalAuthTokenBytes()), database
+	userRepository, err := storage.NewUserRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userService, err := user.NewService(userRepository, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandlerWithSecurityNotificationsTemplatesAndUsers(
+		database, manager, nil, nil, nil, nil, nil, nil, testLocalAuthTokenBytes(), nil, nil,
+		nil, nil, nil, nil, userService, SecurityPolicy{},
+	)
+	return handler, database
 }

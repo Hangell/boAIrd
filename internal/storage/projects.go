@@ -68,6 +68,34 @@ func (r *ProjectRepository) List(ctx context.Context, limit, offset int) ([]proj
 	return projects, nil
 }
 
+// ListForUser applies membership filtering before pagination so callers never
+// receive projects outside the user's current project scope.
+func (r *ProjectRepository) ListForUser(ctx context.Context, userID string, limit, offset int) ([]project.Project, error) {
+	query := `SELECT projects.id, projects.name, projects.description, projects.status, COALESCE(projects.brain_id, ''),
+		projects.workspace_path, projects.repository_url, projects.human_review_required
+		FROM projects JOIN project_members ON project_members.project_id = projects.id
+		WHERE project_members.user_id = ? ORDER BY lower(projects.name), projects.id LIMIT ? OFFSET ?`
+	rows, err := r.database.QueryContext(ctx, query, userID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list user projects: %w", err)
+	}
+	projects := make([]project.Project, 0)
+	for rows.Next() {
+		value, err := scanProject(rows)
+		if err != nil {
+			return nil, closeRowsAfter(rows, "user projects", fmt.Errorf("scan user project: %w", err))
+		}
+		projects = append(projects, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, closeRowsAfter(rows, "user projects", fmt.Errorf("iterate user projects: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close user project rows: %w", err)
+	}
+	return projects, nil
+}
+
 func (r *ProjectRepository) Update(ctx context.Context, value project.Project) error {
 	snapshot := value.Snapshot()
 	result, err := r.database.ExecContext(ctx, `UPDATE projects SET

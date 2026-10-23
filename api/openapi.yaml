@@ -3,15 +3,23 @@ info:
   title: boAIrd API
   version: 1.0.0
   description: >-
-    Versioned local-first API for managing boAIrd projects. Until authenticated
-    remote mode exists, the server binds only to a loopback IP address. Every
-    operation requires the local administrator bearer token unless an endpoint
-    explicitly documents otherwise. After POST /api/v1/session, same-origin
+    Versioned local-first API for managing boAIrd projects and human users. The
+    local administrator exchanges the configured bearer token for an opaque
+    browser session and can issue sessions to registered members. Each request
+    resolves the session identity and current role. Project-specific routes
+    require current project membership even for administrator-role users;
+    administrator capabilities do not grant project scope. The bootstrap
+    administrator is seeded into every project, while other administrators
+    must be granted membership. Administrators can list all projects and
+    Agents, while member lists are restricted to current project membership.
+    Until authenticated remote mode exists, the server binds only to a loopback IP address. After
+    POST /api/v1/session, same-origin
     browser clients may use a short-lived opaque HttpOnly session cookie instead
     of retaining the token in application storage. Session identifiers are stored
     in memory by the server, expire after 30 minutes, and are revoked at logout
     or service restart. The server evaluates a required
-    capability and project membership for each operation.
+    capability and project membership for each operation. User, membership,
+    and session issuance changes are recorded in immutable authority audit.
 servers:
   - url: http://127.0.0.1:3110
 security:
@@ -22,21 +30,23 @@ paths:
     post:
       operationId: createLocalSession
       summary: Exchange the local administrator token for a browser session cookie
-      description: Accepts the configured token in the Authorization header and sets an HttpOnly, SameSite=Strict cookie containing a random opaque session identifier. The identifier is stored server-side, expires after 30 minutes, and is not the administrator token.
+      description: Accepts the configured token in the Authorization header, records issuance in immutable authority audit, and sets an HttpOnly, SameSite=Strict cookie containing a random opaque session identifier. The identifier is stored server-side, expires after 30 minutes, and is not the administrator token.
       security:
         - localBearerAuth: []
       responses:
-        '204': { description: A 30-minute browser session cookie was created. }
+        '204': { description: A 30-minute administrator browser session cookie was created and audited. }
         '401': { description: Missing or invalid local administrator bearer token. }
+        '503': { description: Session issuance audit is unavailable; no session remains active. }
     get:
       operationId: getLocalSession
-      summary: Validate the current local administrator session
+      summary: Validate the current user session
+      description: Confirms that the bearer identity or opaque session belongs to a currently registered user. Deleted users and revoked sessions are rejected.
       security:
         - localBearerAuth: []
         - localSessionCookie: []
       responses:
-        '204': { description: The bearer token or session cookie is valid. }
-        '401': { description: Missing or invalid local administrator credentials. }
+        '204': { description: The bearer token or session cookie belongs to a current user. }
+        '401': { description: Missing, invalid, or revoked user credentials. }
     delete:
       operationId: deleteLocalSession
       summary: Revoke the current browser session and clear its cookie
@@ -44,6 +54,107 @@ paths:
       description: If a browser session cookie is present, a trusted dashboard Origin is required and that session is revoked. This endpoint clears the client cookie; it does not revoke the configured direct Bearer credential.
       responses:
         '204': { description: Session cookie cleared. }
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      x-required-capability: user.manage
+      summary: List registered human users
+      responses:
+        '200':
+          description: User identities, without session identifiers or credentials.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createUser
+      x-required-capability: user.manage
+      summary: Create a human user
+      description: The actor and result are recorded atomically in immutable authority audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUser' }
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: The ID is already in use or was retired after deletion to prevent stale membership reuse. }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getUser
+      x-required-capability: user.manage
+      summary: Get a human user
+      responses:
+        '200':
+          description: User identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteUser
+      x-required-capability: user.manage
+      summary: Delete a human user
+      description: Deletes memberships, records the authority change atomically, and immediately revokes the user's in-memory browser sessions. The bootstrap administrator cannot be deleted.
+      responses:
+        '204': { description: User deleted and active browser sessions revoked. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/users/{id}/sessions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: issueUserSession
+      x-required-capability: user.manage
+      summary: Issue a browser session for a human user
+      description: Sets a random opaque HttpOnly cookie and records issuance before returning it. Audit failure revokes the newly created session and returns an error.
+      responses:
+        '204': { description: Session cookie issued and authority event recorded. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Session issuance audit is unavailable. }
+  /api/v1/audit/users:
+    get:
+      operationId: listUserAuthorityAuditEvents
+      x-required-capability: user.manage
+      summary: List immutable user and membership authority events
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Global user authority events, newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserAuthorityAuditPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/projects:
     post:
       operationId: createProject
@@ -74,7 +185,8 @@ paths:
     get:
       operationId: listProjects
       x-required-capability: project.read
-      summary: List projects
+      summary: List projects visible to the caller
+      description: Administrators receive the global project list. Members receive only projects where they currently have membership; filtering is applied before pagination. Project-specific routes, including project detail, still require current membership for every user role.
       parameters:
         - name: limit
           in: query
@@ -100,6 +212,42 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/projects/{id}/members/{userID}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: userID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: grantProjectMembership
+      x-required-capability: user.manage
+      summary: Grant or update user project membership
+      description: The membership mutation and immutable authority audit record are committed atomically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectMembershipGrant' }
+      responses:
+        '204': { description: Membership granted or updated. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: revokeProjectMembership
+      x-required-capability: user.manage
+      summary: Revoke user project membership
+      description: The membership removal and immutable authority audit record are committed atomically. The user's active in-memory browser sessions are immediately revoked.
+      responses:
+        '204': { description: Membership revoked and active browser sessions revoked. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/projects/{id}:
     parameters:
       - name: id
@@ -111,6 +259,7 @@ paths:
       operationId: getProject
       x-required-capability: project.read
       summary: Get a project
+      description: Requires current project membership even when the caller has the administrator role; global role capabilities do not bypass project scope.
       responses:
         '200':
           description: Project found.
@@ -120,6 +269,8 @@ paths:
                 $ref: '#/components/schemas/Project'
         '404':
           $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
     patch:
@@ -250,7 +401,7 @@ paths:
       operationId: replaceProjectBrain
       x-required-capability: brain.replace
       summary: Replace the project's active Brain configuration
-      description: Requires an authenticated local administrator bearer token or browser session. The replacement must use a registered API or MCP Agent with the explicit brain.execute capability and include an audit reason. Autonomy changes are recorded as brain.autonomy.changed.
+      description: Requires an administrator role and current membership in the project. The configured bearer token authenticates the bootstrap administrator; a registered administrator browser session is also accepted. The replacement must use a registered API or MCP Agent with the explicit brain.execute capability and include an audit reason. Autonomy changes are recorded as brain.autonomy.changed.
       security:
         - localBearerAuth: []
         - localSessionCookie: []
@@ -266,7 +417,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Brain' }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { description: Missing or invalid local administrator bearer token. }
+        '401': { description: Missing or invalid bootstrap bearer token or registered user session. }
         '403': { description: Replacement agent is not authorized to execute as Brain. }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Brain configuration changed concurrently. }
@@ -371,7 +522,7 @@ paths:
       operationId: streamProjectNotifications
       x-required-capability: notification.read
       summary: Receive best-effort live project notifications
-      description: Server-Sent Events require the local administrator session and project membership. The persisted REST inbox remains authoritative when clients are disconnected.
+      description: Server-Sent Events require an authenticated administrator or member session with current membership in this project. Administrator capabilities do not bypass project scope. The persisted REST inbox remains authoritative when clients are disconnected.
       security:
         - localSessionCookie: []
       responses:
@@ -381,7 +532,7 @@ paths:
             text/event-stream:
               schema: { type: string }
               example: 'data: {"id":"notice-id","event_type":"HUMAN_REVIEW"}'
-        '401': { description: Missing or invalid administrator session cookie. }
+        '401': { description: Missing or invalid user session cookie. }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/projects/{id}/notifications/{notification_id}/read:
     parameters:
@@ -639,7 +790,7 @@ paths:
       operationId: listTaskMessages
       x-required-capability: conversation.read
       summary: Retrieve the task conversation history
-      description: Requires the authenticated local administrator session and project membership. Returns the newest bounded page in chronological order; use next_before as before to fetch older messages. Message content and metadata are redacted before persistence and return.
+      description: Requires an authenticated administrator or member session with current membership in the task's project. Administrator capabilities do not bypass project scope. Returns the newest bounded page in chronological order; use next_before as before to fetch older messages. Message content and metadata are redacted before persistence and return.
       security:
         - localBearerAuth: []
         - localSessionCookie: []
@@ -658,7 +809,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Conversation' }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { description: Missing or invalid local bearer token. }
+        '401': { description: Missing or invalid bootstrap bearer token or registered user session. }
         '403': { description: Caller is not a member of the project. }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -666,7 +817,7 @@ paths:
       operationId: createTaskMessage
       x-required-capability: conversation.write
       summary: Add a message to a task conversation
-      description: Requires the authenticated local administrator session and project membership. The server derives sender identity from the authenticated local principal; caller-supplied sender identity is rejected.
+      description: Requires an administrator role and current project membership through either the bootstrap bearer identity or a registered user session. The server derives sender identity from the authenticated user; caller-supplied sender identity is rejected.
       security:
         - localBearerAuth: []
         - localSessionCookie: []
@@ -682,7 +833,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ConversationMessage' }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { description: Missing or invalid local bearer token. }
+        '401': { description: Missing or invalid bootstrap bearer token or registered user session. }
         '403': { description: Sender is not authorized for this task. }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: The project is archived and cannot accept messages. }
@@ -732,7 +883,8 @@ paths:
     get:
       operationId: listAgents
       x-required-capability: agent.read
-      summary: List agents
+      summary: List agents visible to the caller
+      description: Administrators receive all Agents. Members receive only Agents explicitly scoped to a current member project or serving as that project's active Brain. Scope filtering is applied before pagination and foreign project IDs are omitted.
       parameters:
         - name: limit
           in: query
@@ -838,7 +990,8 @@ paths:
     get:
       operationId: getAgent
       x-required-capability: agent.read
-      summary: Get an agent
+      summary: Get an agent visible to the caller
+      description: Administrators can read any Agent. Members can read an Agent only when it is explicitly scoped to one of their current projects or is the active Brain for one of those projects. Out-of-scope Agents return 404.
       responses:
         '200':
           description: Agent configuration plus server-derived runtime status and session liveness.
@@ -884,7 +1037,7 @@ paths:
       operationId: listAgentStatusEvents
       x-required-capability: agent.read
       summary: List observed Agent status transitions
-      description: Immutable transitions derived from authenticated sessions and work signals, newest first.
+      description: Immutable transitions derived from authenticated sessions and work signals, newest first. Administrators can read all Agent events; members can read events only for Agents visible in one of their current projects.
       responses:
         '200':
           description: Agent status events.
@@ -1167,6 +1320,49 @@ components:
       name: boaird_local_auth
       description: Random opaque session identifier issued for 30 minutes and validated against server-side in-memory state.
   schemas:
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, name, role]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 200 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        role: { type: string, enum: [administrator, member], description: Administrator grants operation capabilities but does not bypass project membership checks. }
+    CreateUser:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 200 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        role: { type: string, enum: [administrator, member], default: member, description: Administrator grants operation capabilities but does not bypass project membership checks. }
+    ProjectMembershipGrant:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: { type: string, enum: [ADMIN, MEMBER] }
+    UserAuthorityAuditEvent:
+      type: object
+      required: [id, actor_id, event_type, target_user_id, result, created_at]
+      properties:
+        id: { type: string }
+        actor_id: { type: string }
+        event_type: { type: string }
+        target_user_id: { type: string }
+        project_id: { type: string }
+        previous_role: { type: string }
+        next_role: { type: string }
+        result: { type: string, minLength: 1 }
+        reason: { type: string, description: Secret-redacted event details. }
+        created_at: { type: string, format: date-time }
+    UserAuthorityAuditPage:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/UserAuthorityAuditEvent' } }
+        limit: { type: integer }
+        offset: { type: integer }
     CreateBrain:
       type: object
       additionalProperties: false
@@ -1782,12 +1978,12 @@ components:
           items: { type: string }
   responses:
     Unauthorized:
-      description: Missing or invalid administrator bearer token or session cookie.
+      description: Missing or invalid bootstrap bearer token or registered user session cookie.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Forbidden:
-      description: The administrator is not authorized for this operation or project.
+      description: The authenticated user lacks the required capability or current project membership.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

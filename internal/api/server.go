@@ -222,7 +222,7 @@ func newHandlerWithServices(database DatabaseHealth, projects ProjectManager, cr
 func newHandlerWithServicesAndSecurity(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, templates TemplateManager, users UserManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	sessions := newLocalSessionStore()
-	registerSessionRoutes(mux, database, localAuthToken, sessions)
+	registerSessionRoutes(mux, database, localAuthToken, sessions, users)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -243,13 +243,13 @@ func newHandlerWithServicesAndSecurity(database DatabaseHealth, projects Project
 		})
 	})
 	if projects != nil {
-		registerProjectRoutes(mux, projects)
+		registerProjectRoutes(mux, projects, users)
 	}
 	if credentials != nil {
 		registerCredentialRoutes(mux, credentials)
 	}
 	if agents != nil {
-		registerAgentRoutes(mux, agents, projects)
+		registerAgentRoutes(mux, agents, projects, users)
 	}
 	if brains != nil {
 		registerBrainRoutes(mux, brains, localAuthToken, sessions)

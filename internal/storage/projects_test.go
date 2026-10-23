@@ -53,6 +53,49 @@ func TestProjectExecutionRequiresExactlyOneActiveBrain(t *testing.T) {
 	}
 }
 
+func TestProjectRepositoryListForUserScopesBeforePagination(t *testing.T) {
+	ctx := context.Background()
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "projects.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
+	for _, project := range []struct{ id, name string }{
+		{"project-a", "Alpha"}, {"project-private", "Bravo"}, {"project-c", "Charlie"},
+	} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO projects(id, name, status, human_review_required) VALUES (?, ?, 'CREATED', 0)`, project.id, project.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, projectID := range []string{"project-a", "project-c"} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO project_members(project_id, user_id, role) VALUES (?, 'alice', 'MEMBER')`, projectID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository, err := NewProjectRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := repository.ListForUser(ctx, "alice", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].ID() != "project-c" {
+		t.Fatalf("second scoped page = %#v, want only project-c", values)
+	}
+	values, err = repository.ListForUser(ctx, "alice", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0].ID() != "project-a" || values[1].ID() != "project-c" {
+		t.Fatalf("scoped projects = %#v, want project-a and project-c", values)
+	}
+}
+
 func TestProjectExecutionAcceptsMCPBrain(t *testing.T) {
 	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {

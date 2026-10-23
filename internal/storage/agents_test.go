@@ -65,6 +65,76 @@ func TestAgentRepositoryPersistsConfigurationAndRelations(t *testing.T) {
 	}
 }
 
+func TestAgentRepositoryScopesMemberListsAndDetailsAcrossProjects(t *testing.T) {
+	ctx := context.Background()
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
+	for _, project := range []struct{ id, name string }{{"project-a", "Alpha"}, {"project-b", "Beta"}} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO projects(id, name, status, human_review_required) VALUES (?, ?, 'CREATED', 0)`, project.id, project.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, membership := range []struct{ projectID, userID string }{{"project-a", "alice"}, {"project-b", "bob"}} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO project_members(project_id, user_id, role) VALUES (?, ?, 'MEMBER')`, membership.projectID, membership.userID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []struct {
+		id, name, projectID string
+		brain               bool
+	}{
+		{"agent-a", "Visible agent", "project-a", false},
+		{"agent-b", "Foreign agent", "project-b", false},
+		{"brain-a", "Visible brain", "project-a", true},
+	} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO agents(id, name, role, runtime) VALUES (?, ?, 'worker', 'MCP')`, value.id, value.name); err != nil {
+			t.Fatal(err)
+		}
+		if value.brain {
+			if _, err := database.ExecContext(ctx, `INSERT INTO agent_capabilities(agent_id, capability) VALUES (?, 'brain.execute')`, value.id); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.ExecContext(ctx, `INSERT INTO brains(id, project_id, active) VALUES ('brain-a-id', ?, 1)`, value.projectID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.ExecContext(ctx, `INSERT INTO brain_configuration(brain_id, agent_id, autonomy) VALUES ('brain-a-id', ?, 'MANUAL')`, value.id); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.ExecContext(ctx, `UPDATE projects SET brain_id = 'brain-a-id' WHERE id = ?`, value.projectID); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if _, err := database.ExecContext(ctx, `INSERT INTO agent_projects(agent_id, project_id) VALUES (?, ?)`, value.id, value.projectID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	repository, err := NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := repository.ListForUser(ctx, "alice", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0].ID() != "agent-a" || values[1].ID() != "brain-a" {
+		t.Fatalf("Alice's Agents = %#v, want direct Agent and active Brain from project-a", values)
+	}
+	for agentID, want := range map[string]bool{"agent-a": true, "brain-a": true, "agent-b": false} {
+		got, err := repository.HasProjectAssociation(ctx, agentID, "alice")
+		if err != nil || got != want {
+			t.Fatalf("HasProjectAssociation(%q, alice) = %t, %v; want %t", agentID, got, err, want)
+		}
+	}
+}
+
 func TestAgentRepositoryEnforcesCredentialReferences(t *testing.T) {
 	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {

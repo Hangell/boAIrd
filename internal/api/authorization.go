@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -63,14 +64,21 @@ func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManag
 				return
 			}
 		}
+		capabilities, err := capabilitiesForUser(r.Context(), users, userID)
+		if err != nil {
+			recordAuthorizationDenial(r.Context(), database, userID, "", "", authorizationResource(r), "principal_unavailable")
+			writeConversationUnauthorized(w)
+			return
+		}
 		required, projectID, recognized := requiredAPICapability(r, projects, tasks, runs)
 		if !recognized {
+			r = r.WithContext(context.WithValue(r.Context(), principalContextKey{}, capability.Principal{ID: userID, Capabilities: capabilities}))
 			next.ServeHTTP(w, r)
 			return
 		}
 		principal := capability.Principal{
 			ID:           userID,
-			Capabilities: capabilitiesForUser(r.Context(), users, userID),
+			Capabilities: capabilities,
 		}
 		if projectID != "" {
 			membership, ok := projects.(projectMembershipChecker)
@@ -82,7 +90,7 @@ func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManag
 			member, err := membership.IsMember(r.Context(), projectID, principal.ID)
 			if err != nil || !member {
 				recordAuthorizationDenial(r.Context(), database, principal.ID, projectID, required, authorizationResource(r), "project_membership_required")
-				writeAPIError(w, http.StatusForbidden, "forbidden", "project access is not authorized")
+				writeAPIError(w, http.StatusForbidden, "forbidden", "access is not authorized")
 				return
 			}
 			principal.ProjectIDs = []string{projectID}
@@ -90,7 +98,7 @@ func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManag
 		value, err := capability.New(required)
 		if err != nil || authorizer.Authorize(principal, value, projectID) != nil {
 			recordAuthorizationDenial(r.Context(), database, principal.ID, projectID, required, authorizationResource(r), "capability_denied")
-			writeAPIError(w, http.StatusForbidden, "forbidden", "operation is not authorized")
+			writeAPIError(w, http.StatusForbidden, "forbidden", "access is not authorized")
 			return
 		}
 		r = r.WithContext(context.WithValue(r.Context(), principalContextKey{}, principal))
@@ -107,15 +115,49 @@ type userRoleResolver interface {
 	Get(context.Context, string) (user.User, error)
 }
 
-func capabilitiesForUser(ctx context.Context, users userRoleResolver, userID string) []capability.Capability {
-	if users == nil || userID == project.LocalAdministratorID {
-		return append([]capability.Capability(nil), administratorCapabilities...)
+func capabilitiesForUser(ctx context.Context, users userRoleResolver, userID string) ([]capability.Capability, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, errors.New("principal ID is required")
+	}
+	if users == nil {
+		return nil, errors.New("user resolver is unavailable")
 	}
 	value, err := users.Get(ctx, userID)
-	if err != nil || value.Role() != user.RoleAdministrator {
-		return append([]capability.Capability(nil), memberCapabilities...)
+	if err != nil {
+		return nil, fmt.Errorf("resolve user %s: %w", userID, err)
 	}
-	return append([]capability.Capability(nil), administratorCapabilities...)
+	if value.ID() != userID {
+		return nil, errors.New("user resolver returned a different identity")
+	}
+	if userID == project.LocalAdministratorID && value.Role() != user.RoleAdministrator {
+		return nil, errors.New("bootstrap administrator role is invalid")
+	}
+	if value.Role() == user.RoleMember {
+		return append([]capability.Capability(nil), memberCapabilities...), nil
+	}
+	if value.Role() == user.RoleAdministrator {
+		return append([]capability.Capability(nil), administratorCapabilities...), nil
+	}
+	return nil, errors.New("user role is invalid")
+}
+
+func principalID(r *http.Request) (string, bool) {
+	principal, ok := r.Context().Value(principalContextKey{}).(capability.Principal)
+	return principal.ID, ok && strings.TrimSpace(principal.ID) != ""
+}
+
+func principalIsAdministrator(r *http.Request) bool {
+	principal, ok := r.Context().Value(principalContextKey{}).(capability.Principal)
+	return ok && capabilitySetContains(principal.Capabilities, "user.manage")
+}
+
+func capabilitySetContains(values []capability.Capability, expected string) bool {
+	for _, value := range values {
+		if string(value) == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func authorizationResource(r *http.Request) string {
@@ -194,6 +236,8 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 			return "user.manage", "", true
 		}
 	case len(parts) == 5 && parts[2] == "users" && parts[4] == "sessions" && method == http.MethodPost:
+		return "user.manage", "", true
+	case len(parts) == 4 && parts[2] == "audit" && parts[3] == "users" && method == http.MethodGet:
 		return "user.manage", "", true
 	case len(parts) == 3 && parts[2] == "projects" && method == http.MethodPost:
 		return "project.create", "", true

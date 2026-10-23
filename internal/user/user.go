@@ -16,6 +16,7 @@ var (
 	ErrInvalidInput           = errors.New("invalid user input")
 	ErrBootstrapAdministrator = errors.New("the bootstrap administrator cannot be modified")
 	ErrProjectNotFound        = errors.New("project not found")
+	ErrForbidden              = errors.New("administrator role required")
 )
 
 // Role is a global user role.
@@ -66,13 +67,14 @@ func Restore(id, name string, role Role) (User, error) {
 
 // Repository persists users and project membership.
 type Repository interface {
-	Create(context.Context, User) error
+	Create(context.Context, string, User) error
 	List(context.Context) ([]User, error)
 	Get(context.Context, string) (User, error)
-	Delete(context.Context, string) error
-	SetProjectMembership(context.Context, string, string, MembershipRole) error
-	RemoveProjectMembership(context.Context, string, string) error
+	Delete(context.Context, string, string) error
+	SetProjectMembership(context.Context, string, string, string, MembershipRole) error
+	RemoveProjectMembership(context.Context, string, string, string) error
 	ProjectMemberships(context.Context, string) (map[string]MembershipRole, error)
+	RecordSessionIssued(context.Context, string, string) error
 }
 
 // ProjectReader validates that a project exists before membership changes.
@@ -97,12 +99,15 @@ func NewService(repository Repository, projects ProjectReader) (*Service, error)
 }
 
 // Create validates and persists a new user identity.
-func (s *Service) Create(ctx context.Context, id, name string, role Role) (User, error) {
+func (s *Service) Create(ctx context.Context, actorID, id, name string, role Role) (User, error) {
+	if err := s.ensureAdministrator(ctx, actorID); err != nil {
+		return User{}, err
+	}
 	value, err := Restore(id, name, role)
 	if err != nil {
 		return User{}, err
 	}
-	if err := s.repository.Create(ctx, value); err != nil {
+	if err := s.repository.Create(ctx, actorID, value); err != nil {
 		return User{}, err
 	}
 	return value, nil
@@ -121,7 +126,10 @@ func (s *Service) Get(ctx context.Context, id string) (User, error) {
 
 // Delete removes a user identity and its memberships. The bootstrap
 // administrator cannot be removed, preserving administrator authority.
-func (s *Service) Delete(ctx context.Context, id string) error {
+func (s *Service) Delete(ctx context.Context, actorID, id string) error {
+	if err := s.ensureAdministrator(ctx, actorID); err != nil {
+		return err
+	}
 	id = strings.TrimSpace(id)
 	if id == BootstrapAdministratorID {
 		return ErrBootstrapAdministrator
@@ -129,11 +137,14 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if id == "" {
 		return ErrInvalidInput
 	}
-	return s.repository.Delete(ctx, id)
+	return s.repository.Delete(ctx, actorID, id)
 }
 
 // GrantProject assigns or updates a user's project membership.
-func (s *Service) GrantProject(ctx context.Context, projectID, userID string, role MembershipRole) error {
+func (s *Service) GrantProject(ctx context.Context, actorID, projectID, userID string, role MembershipRole) error {
+	if err := s.ensureAdministrator(ctx, actorID); err != nil {
+		return err
+	}
 	if role != MembershipOwner && role != MembershipMember {
 		return ErrInvalidInput
 	}
@@ -143,12 +154,15 @@ func (s *Service) GrantProject(ctx context.Context, projectID, userID string, ro
 	if err := s.ensureUser(ctx, userID); err != nil {
 		return err
 	}
-	return s.repository.SetProjectMembership(ctx, projectID, userID, role)
+	return s.repository.SetProjectMembership(ctx, actorID, projectID, userID, role)
 }
 
 // RevokeProject removes a user's membership from a project. The bootstrap
 // administrator's membership cannot be revoked.
-func (s *Service) RevokeProject(ctx context.Context, projectID, userID string) error {
+func (s *Service) RevokeProject(ctx context.Context, actorID, projectID, userID string) error {
+	if err := s.ensureAdministrator(ctx, actorID); err != nil {
+		return err
+	}
 	userID = strings.TrimSpace(userID)
 	if userID == BootstrapAdministratorID {
 		return ErrBootstrapAdministrator
@@ -156,7 +170,33 @@ func (s *Service) RevokeProject(ctx context.Context, projectID, userID string) e
 	if err := s.ensureProject(ctx, projectID); err != nil {
 		return err
 	}
-	return s.repository.RemoveProjectMembership(ctx, projectID, userID)
+	return s.repository.RemoveProjectMembership(ctx, actorID, projectID, userID)
+}
+
+// RecordSessionIssued appends a non-secret audit record for an issued session.
+func (s *Service) RecordSessionIssued(ctx context.Context, actorID, userID string) error {
+	if err := s.ensureAdministrator(ctx, actorID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(userID) == "" {
+		return ErrInvalidInput
+	}
+	return s.repository.RecordSessionIssued(ctx, actorID, userID)
+}
+
+func (s *Service) ensureAdministrator(ctx context.Context, actorID string) error {
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return ErrInvalidInput
+	}
+	actor, err := s.repository.Get(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if actor.Role() != RoleAdministrator {
+		return ErrForbidden
+	}
+	return nil
 }
 
 // ProjectsFor returns the user's current project memberships.
