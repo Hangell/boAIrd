@@ -651,20 +651,40 @@ Human Review gate when the project requires it
 
 When the project sets `human_review_required`, push and merge must be tied to a
 task (`task_id` in the request) whose human review has been approved; an
-unapproved, missing, or unknown task denies the operation. Commands are built
-with structured arguments only — `git -C <repo> <subcommand> ...` — and never
-evaluate model text through `sh -c`. Remote names are restricted to simple
-remote identifiers, and references to plain tokens without `..`.
+unapproved, missing, or unknown task denies the operation. A failure to read
+the project's Human Review policy also denies the operation. The task must
+belong to the requested project, have Human Review enabled, and be `DONE`; if a
+Run ID is supplied, its project and linked task must also match. Scope validation
+happens before those caller-supplied IDs are included in tool audit; denied
+scope attempts omit task and Run IDs from that audit event.
+
+Commands use structured arguments only — `git -C <repo> <subcommand> ...` —
+and never evaluate model text through `sh -c`. Git subprocesses receive a
+minimal environment, ignore system/global Git configuration, disable hooks,
+credential helpers, GPG signing, fsmonitor, proxy settings, inherited HTTP
+headers, client certificates, and cookie files, and do not inherit SSH
+agent/configuration or other host environment variables. URL-specific HTTP
+credential/proxy settings in repository config are rejected. Only HTTPS remote
+transport is enabled; credential-bearing remote URLs are rejected, and
+terminal prompting is disabled. Push targets exactly one checked-out local
+branch. Git operations therefore cannot reuse host Git/SSH credentials;
+authenticated remote operations require a future dedicated credential
+integration. Diff/show disable external diff and text conversion, and merge
+rejects repositories with configured external merge drivers or
+clean/smudge/process filters. Remote names are restricted to simple
+identifiers, and references to plain tokens without `..`.
 
 Audit for each Git operation records actor, project, task, run, repository
-boundary, operation, and result, without credentials, command arguments, or
-output. A metadata-only `start` event is persisted before any mutating command
-runs; an audit failure aborts the call before execution.
+canonical root, operation, and result, without credentials, command arguments,
+or output. The canonical root is resolved by Git and must remain contained in
+the authenticated workspace; the workspace path is not substituted for the
+repository in audit. A metadata-only `start` event is persisted before any
+mutating command runs; an audit failure aborts the call before execution.
 
-As with shell, this is not an OS-level sandbox. A repository inside the
-workspace may contain hooks, submodules, or other executable content. Only
-expose Git tools for workspaces administrators trust, and keep kernel/container
-isolation as future work.
+As with shell, this is not an OS-level sandbox. Git reads repository content
+and may contact administrator-configured HTTPS remotes when explicitly enabled
+and approved. Only expose Git tools for workspaces and remotes administrators
+trust, and keep kernel/container isolation as future work.
 
 ---
 

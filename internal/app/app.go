@@ -231,12 +231,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 				}
 				return value.HumanReviewRequired(), nil
 			},
-			TaskApproved: func(ctx context.Context, taskID string) (bool, error) {
-				value, err := taskService.Get(ctx, taskID)
-				if err != nil {
-					return false, err
-				}
-				return value.HumanReview() && value.Status() == task.StatusDone, nil
+			TaskApproved: func(ctx context.Context, projectID, taskID string) (bool, error) {
+				return gitTaskReviewApproved(ctx, taskService, projectID, taskID)
 			},
 		})
 		if err != nil {
@@ -247,7 +243,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 				return fmt.Errorf("register git tool: %w", err)
 			}
 		}
-		gitExecutor, err = governedtool.NewEnforcer(registry, auditRepository, gitScopeAuthorizer{projects: projectManager})
+		gitExecutor, err = governedtool.NewEnforcer(registry, auditRepository, gitScopeAuthorizer{
+			projects: projectManager, tasks: taskService, runs: runManager,
+		})
 		if err != nil {
 			return fmt.Errorf("configure git tool enforcement: %w", err)
 		}

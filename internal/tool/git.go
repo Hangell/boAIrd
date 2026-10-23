@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -37,7 +39,7 @@ type GitConfig struct {
 	AllowMerge          bool
 	ResolveWorkspace    WorkspaceResolver
 	HumanReviewRequired func(context.Context, string) (bool, error)
-	TaskApproved        func(context.Context, string) (bool, error)
+	TaskApproved        func(context.Context, string, string) (bool, error)
 	Timeout             time.Duration
 	MaxOutputBytes      int
 }
@@ -136,9 +138,9 @@ func NewGitTools(config GitConfig) ([]Tool, error) {
 			capability.GitBranch, gitBranchSchema, gitBranchOutputSchema, validateGitBranchInput, runGitBranch, config),
 		gitTool("git.commit", "Commit staged changes with a message inside the authorized workspace.",
 			capability.GitCommit, gitCommitSchema, gitCommitOutputSchema, validateGitCommitInput, runGitCommit, config),
-		gitTool("git.push", "Push a branch to a named remote inside the authorized workspace; denied by default and subject to Human Review.",
+		gitTool("git.push", "Push one existing local branch to an HTTPS remote inside the authorized workspace; host credentials are not reused, and the operation is denied by default and subject to Human Review.",
 			capability.GitPush, gitPushSchema, gitPushOutputSchema, validateGitPushInput, runGitPush, config),
-		gitTool("git.merge", "Merge a reference into the current branch inside the authorized workspace; denied by default and subject to Human Review.",
+		gitTool("git.merge", "Merge a reference into the current branch inside the authorized workspace; custom merge drivers and filters are rejected, and the operation is denied by default and subject to Human Review.",
 			capability.GitMerge, gitMergeSchema, gitMergeOutputSchema, validateGitMergeInput, runGitMerge, config),
 	}
 	return tools, nil
@@ -172,12 +174,18 @@ func gitTool[I, O any](name, description string, required capability.Capability,
 		},
 		Validate:       validate,
 		ValidateOutput: func(O) error { return nil },
+		AuditResourceID: func(ctx context.Context, request Request, input I) (string, error) {
+			return resolveGitRepoRoot(ctx, config, request, gitWorkingDirectory(input))
+		},
 		RunWithRequest: func(ctx context.Context, request Request, input I) (O, error) {
 			var output O
 			workingDirectory := gitWorkingDirectory(input)
 			repoRoot, err := resolveGitRepoRoot(ctx, config, request, workingDirectory)
 			if err != nil {
 				return output, err
+			}
+			if repoRoot != request.ResourceID {
+				return output, ErrGitPolicy
 			}
 			return run(ctx, request, config, repoRoot, input)
 		},
@@ -304,7 +312,10 @@ func resolveGitRepoRoot(ctx context.Context, config GitConfig, request Request, 
 }
 
 func gitToplevel(ctx context.Context, directory string) (string, error) {
-	command := exec.CommandContext(ctx, "git", "-C", directory, "rev-parse", "--show-toplevel")
+	command, err := newGitCommand(ctx, "", "-C", directory, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
 	output, err := command.Output()
 	if err != nil {
 		return "", err
@@ -317,8 +328,10 @@ func gitToplevel(ctx context.Context, directory string) (string, error) {
 }
 
 func runGitCommand(ctx context.Context, repoRoot string, maxOutput int, args ...string) (string, string, bool, error) {
-	full := append([]string{"-C", repoRoot}, args...)
-	command := exec.CommandContext(ctx, "git", full...)
+	command, err := newGitCommand(ctx, repoRoot, args...)
+	if err != nil {
+		return "", "", false, fmt.Errorf("%w: git command is unavailable", ErrExecution)
+	}
 	capture := newShellOutputCapture(maxOutput)
 	command.Stdout = shellOutputWriter{capture: capture, stderr: false}
 	command.Stderr = shellOutputWriter{capture: capture, stderr: true}
@@ -335,6 +348,48 @@ func runGitCommand(ctx context.Context, repoRoot string, maxOutput int, args ...
 	return logging.RedactSensitiveText(stdout), logging.RedactSensitiveText(stderr), truncated, nil
 }
 
+func newGitCommand(ctx context.Context, repoRoot string, args ...string) (*exec.Cmd, error) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		return nil, err
+	}
+	config := []string{
+		"--no-pager",
+		"-c", "core.hooksPath=" + os.DevNull,
+		"-c", "core.fsmonitor=false",
+		"-c", "core.pager=cat",
+		"-c", "credential.helper=",
+		"-c", "credential.interactive=never",
+		"-c", "commit.gpgsign=false",
+		"-c", "core.askPass=",
+		"-c", "http.extraHeader=",
+		"-c", "http.sslCert=",
+		"-c", "http.sslKey=",
+		"-c", "http.cookieFile=",
+		"-c", "http.saveCookies=false",
+		"-c", "http.proxy=",
+		"-c", "http.sslVerify=true",
+		"-c", "protocol.allow=never",
+		"-c", "protocol.https.allow=always",
+	}
+	if repoRoot != "" {
+		config = append(config, "-C", repoRoot)
+	}
+	command := exec.CommandContext(ctx, gitPath, append(config, args...)...)
+	command.Env = []string{
+		"PATH=" + filepath.Dir(gitPath),
+		"HOME=" + os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=" + os.DevNull,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_OPTIONAL_LOCKS=0",
+	}
+	if systemRoot := os.Getenv("SystemRoot"); systemRoot != "" {
+		command.Env = append(command.Env, "SystemRoot="+systemRoot)
+	}
+	return command, nil
+}
+
 func runGitRead(ctx context.Context, _ Request, config GitConfig, repoRoot string, input GitReadInput) (GitReadOutput, error) {
 	var args []string
 	switch input.Query {
@@ -346,7 +401,7 @@ func runGitRead(ctx context.Context, _ Request, config GitConfig, repoRoot strin
 			args = append(args, input.Reference)
 		}
 	case "show":
-		args = []string{"show", "--stat", "--oneline"}
+		args = []string{"show", "--stat", "--oneline", "--no-ext-diff", "--no-textconv"}
 		if input.Reference != "" {
 			args = append(args, input.Reference)
 		}
@@ -361,7 +416,7 @@ func runGitRead(ctx context.Context, _ Request, config GitConfig, repoRoot strin
 }
 
 func runGitDiff(ctx context.Context, _ Request, config GitConfig, repoRoot string, input GitDiffInput) (GitDiffOutput, error) {
-	args := []string{"diff"}
+	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
 	if input.Staged {
 		args = append(args, "--cached")
 	}
@@ -395,7 +450,7 @@ func runGitBranch(ctx context.Context, _ Request, config GitConfig, repoRoot str
 }
 
 func runGitCommit(ctx context.Context, _ Request, config GitConfig, repoRoot string, input GitCommitInput) (GitCommitOutput, error) {
-	stdout, _, _, err := runGitCommand(ctx, repoRoot, config.MaxOutputBytes, "commit", "-m", input.Message)
+	stdout, _, _, err := runGitCommand(ctx, repoRoot, config.MaxOutputBytes, "commit", "--no-verify", "-m", input.Message)
 	if err != nil {
 		return GitCommitOutput{}, err
 	}
@@ -413,13 +468,17 @@ func runGitPush(ctx context.Context, request Request, config GitConfig, repoRoot
 	if err := requireHumanReviewGate(ctx, config, request); err != nil {
 		return GitPushOutput{}, err
 	}
+	remote, err := resolveGitPushRemote(ctx, repoRoot, input.Remote)
+	if err != nil {
+		return GitPushOutput{}, err
+	}
+	branch, err := resolveGitPushBranch(ctx, repoRoot, input.Branch)
+	if err != nil {
+		return GitPushOutput{}, err
+	}
 	args := []string{"push"}
-	if input.Remote != "" {
-		args = append(args, input.Remote)
-	}
-	if input.Branch != "" {
-		args = append(args, input.Branch)
-	}
+	args = append(args, remote)
+	args = append(args, branch+":refs/heads/"+branch)
 	stdout, _, truncated, err := runGitCommand(ctx, repoRoot, config.MaxOutputBytes, args...)
 	if err != nil {
 		return GitPushOutput{}, err
@@ -434,7 +493,10 @@ func runGitMerge(ctx context.Context, request Request, config GitConfig, repoRoo
 	if err := requireHumanReviewGate(ctx, config, request); err != nil {
 		return GitMergeOutput{}, err
 	}
-	stdout, _, _, err := runGitCommand(ctx, repoRoot, config.MaxOutputBytes, "merge", input.Reference)
+	if err := rejectExternalGitDrivers(ctx, repoRoot); err != nil {
+		return GitMergeOutput{}, err
+	}
+	stdout, _, _, err := runGitCommand(ctx, repoRoot, config.MaxOutputBytes, "merge", "--strategy=ort", "--no-verify", "--no-edit", input.Reference)
 	if err != nil {
 		return GitMergeOutput{}, err
 	}
@@ -453,7 +515,10 @@ func requireHumanReviewGate(ctx context.Context, config GitConfig, request Reque
 		return ErrGitDenied
 	}
 	required, err := config.HumanReviewRequired(ctx, request.ProjectID)
-	if err != nil || !required {
+	if err != nil {
+		return ErrGitDenied
+	}
+	if !required {
 		return nil
 	}
 	if request.TaskID == "" {
@@ -462,9 +527,103 @@ func requireHumanReviewGate(ctx context.Context, config GitConfig, request Reque
 	if config.TaskApproved == nil {
 		return ErrGitDenied
 	}
-	approved, err := config.TaskApproved(ctx, request.TaskID)
+	approved, err := config.TaskApproved(ctx, request.ProjectID, request.TaskID)
 	if err != nil || !approved {
 		return ErrGitDenied
+	}
+	return nil
+}
+
+func resolveGitPushRemote(ctx context.Context, repoRoot, requested string) (string, error) {
+	if err := rejectLocalGitTransportCredentials(ctx, repoRoot); err != nil {
+		return "", err
+	}
+	remote := requested
+	if remote == "" {
+		branch, _, _, err := runGitCommand(ctx, repoRoot, 4096, "symbolic-ref", "--short", "-q", "HEAD")
+		if err != nil || strings.TrimSpace(branch) == "" {
+			return "", ErrGitPolicy
+		}
+		branch = strings.TrimSpace(branch)
+		for _, key := range []string{"branch." + branch + ".pushRemote", "remote.pushDefault", "branch." + branch + ".remote"} {
+			value, _, _, lookupErr := runGitCommand(ctx, repoRoot, 4096, "config", "--get", key)
+			if lookupErr == nil && strings.TrimSpace(value) != "" {
+				remote = strings.TrimSpace(value)
+				break
+			}
+		}
+		if remote == "" {
+			remote = "origin"
+		}
+	}
+	if !gitRemotePattern.MatchString(remote) {
+		return "", ErrGitPolicy
+	}
+	remoteURL, _, _, err := runGitCommand(ctx, repoRoot, 4096, "remote", "get-url", "--push", remote)
+	if err != nil {
+		return "", ErrGitPolicy
+	}
+	parsed, err := url.Parse(strings.TrimSpace(remoteURL))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", ErrGitPolicy
+	}
+	return remote, nil
+}
+
+func rejectLocalGitTransportCredentials(ctx context.Context, repoRoot string) error {
+	pattern := `^(http\..*\.(proxy|extraheader|sslcert|sslkey|cookiefile)|remote\..*\.proxy)$`
+	command, err := newGitCommand(ctx, repoRoot, "config", "--local", "--get-regexp", pattern)
+	if err != nil {
+		return ErrGitPolicy
+	}
+	output, err := command.Output()
+	if err == nil && len(strings.TrimSpace(string(output))) > 0 {
+		return ErrGitPolicy
+	}
+	if err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) || exitError.ExitCode() != 1 {
+			return ErrGitPolicy
+		}
+	}
+	return nil
+}
+
+func resolveGitPushBranch(ctx context.Context, repoRoot, requested string) (string, error) {
+	branch := requested
+	if branch == "" {
+		value, _, _, err := runGitCommand(ctx, repoRoot, 4096, "symbolic-ref", "--short", "-q", "HEAD")
+		if err != nil {
+			return "", ErrGitPolicy
+		}
+		branch = strings.TrimSpace(value)
+	}
+	if err := validateGitReference(branch, false); err != nil {
+		return "", ErrGitPolicy
+	}
+	if _, _, _, err := runGitCommand(ctx, repoRoot, 4096, "check-ref-format", "--branch", branch); err != nil {
+		return "", ErrGitPolicy
+	}
+	if _, _, _, err := runGitCommand(ctx, repoRoot, 4096, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return "", ErrGitPolicy
+	}
+	return branch, nil
+}
+
+func rejectExternalGitDrivers(ctx context.Context, repoRoot string) error {
+	command, err := newGitCommand(ctx, repoRoot, "config", "--local", "--get-regexp", `^(merge\..*\.driver|filter\..*\.(clean|smudge|process))$`)
+	if err != nil {
+		return ErrGitPolicy
+	}
+	output, err := command.Output()
+	if err == nil && len(strings.TrimSpace(string(output))) > 0 {
+		return ErrGitPolicy
+	}
+	if err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) || exitError.ExitCode() != 1 {
+			return ErrGitPolicy
+		}
 	}
 	return nil
 }

@@ -196,8 +196,8 @@ func TestGitPushRequiresApprovedHumanReviewWhenConfigured(t *testing.T) {
 		HumanReviewRequired: func(_ context.Context, projectID string) (bool, error) {
 			return projectID == "project-1", nil
 		},
-		TaskApproved: func(_ context.Context, taskID string) (bool, error) {
-			return taskID == "approved-task", nil
+		TaskApproved: func(_ context.Context, projectID, taskID string) (bool, error) {
+			return projectID == "project-1" && taskID == "approved-task", nil
 		},
 	})
 	// Without a task, push must be denied.
@@ -235,8 +235,8 @@ func TestGitRejectsRepositoryOutsideWorkspace(t *testing.T) {
 	}
 	// The workspace itself is not a repository, so even in-workspace resolution fails.
 	enforcer := newGitEnforcer(t, workspace, auditor, config)
-	if _, err := enforcer.Execute(context.Background(), gitRequest(t, "git.read", capability.GitRead, GitReadInput{Query: "status"})); !errors.Is(err, ErrExecution) {
-		t.Fatalf("git.read outside repo error = %v, want execution failure", err)
+	if _, err := enforcer.Execute(context.Background(), gitRequest(t, "git.read", capability.GitRead, GitReadInput{Query: "status"})); !errors.Is(err, ErrDenied) {
+		t.Fatalf("git.read outside repo error = %v, want denied", err)
 	}
 	// An explicit working directory that escapes to another repository is denied.
 	escapeInput := GitReadInput{Query: "status", WorkingDirectory: filepath.Join("..", filepath.Base(outside))}
@@ -266,9 +266,133 @@ func TestGitAuditIncludesTaskRunAndRepository(t *testing.T) {
 		if event.TaskID != "task-1" || event.RunID != "run-1" || event.ToolName != "git.read" {
 			t.Fatalf("audit event missing task/run/tool: %#v", event)
 		}
-		if event.ResourceType != "repository" || event.ResourceID != "workspace" {
-			t.Fatalf("audit event missing repository: %#v", event)
+		if event.ResourceType != "repository" || event.ResourceID != root {
+			t.Fatalf("audit event repository = %#v, want canonical repository %q", event, root)
 		}
+	}
+}
+
+func TestGitHumanReviewPolicyErrorsFailClosed(t *testing.T) {
+	err := requireHumanReviewGate(context.Background(), GitConfig{
+		HumanReviewRequired: func(context.Context, string) (bool, error) {
+			return false, errors.New("project lookup failed")
+		},
+		TaskApproved: func(context.Context, string, string) (bool, error) {
+			t.Fatal("task approval must not be queried after policy lookup fails")
+			return false, nil
+		},
+	}, Request{ProjectID: "project-1", TaskID: "task-1"})
+	if !errors.Is(err, ErrGitDenied) {
+		t.Fatalf("review gate error = %v, want deny", err)
+	}
+}
+
+func TestGitReviewApprovalIsBoundToRequestProject(t *testing.T) {
+	var approvedProject, approvedTask string
+	config := GitConfig{
+		HumanReviewRequired: func(context.Context, string) (bool, error) { return true, nil },
+		TaskApproved: func(_ context.Context, projectID, taskID string) (bool, error) {
+			approvedProject, approvedTask = projectID, taskID
+			return projectID == "project-1" && taskID == "task-1", nil
+		},
+	}
+	err := requireHumanReviewGate(context.Background(), config, Request{ProjectID: "project-2", TaskID: "task-1"})
+	if !errors.Is(err, ErrGitDenied) {
+		t.Fatalf("cross-project review gate error = %v, want deny", err)
+	}
+	if approvedProject != "project-2" || approvedTask != "task-1" {
+		t.Fatalf("approval scope = (%q, %q), want (project-2, task-1)", approvedProject, approvedTask)
+	}
+}
+
+func TestGitCommandIgnoresHostEnvironmentAndRepositoryHooks(t *testing.T) {
+	root := gitWorkspace(t)
+	hookDir := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(hookDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := "#!/bin/sh\ntouch " + marker + "\n"
+	if err := os.WriteFile(filepath.Join(hookDir, "post-commit"), []byte(hook), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGitFixture(t, root, "config", "core.hooksPath", hookDir)
+	runGitFixture(t, root, "config", "credential.helper", "!touch "+marker)
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("two\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitFixture(t, root, "add", "f.txt")
+
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), ".git"))
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", hookDir)
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "agent.sock"))
+	t.Setenv("GIT_SSH_COMMAND", "touch "+marker)
+	enforcer := newGitEnforcer(t, root, &memoryAuditor{}, GitConfig{})
+	if _, err := enforcer.Execute(context.Background(), gitRequest(t, "git.commit", capability.GitCommit, GitCommitInput{Message: "safe commit"})); err != nil {
+		t.Fatalf("git.commit error = %v", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("repository hook ran or host environment escaped, marker stat error = %v", err)
+	}
+	credentialCommand, err := newGitCommand(context.Background(), root, "credential", "fill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialCommand.Stdin = strings.NewReader("protocol=https\nhost=example.invalid\n\n")
+	_ = credentialCommand.Run()
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("repository credential helper ran, marker stat error = %v", err)
+	}
+	command, err := newGitCommand(context.Background(), root, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range command.Env {
+		if strings.HasPrefix(entry, "SSH_AUTH_SOCK=") || strings.HasPrefix(entry, "GIT_SSH_COMMAND=") || strings.HasPrefix(entry, "GIT_CONFIG_COUNT=") || strings.HasPrefix(entry, "GIT_DIR=") {
+			t.Fatalf("host Git environment leaked into subprocess: %q", entry)
+		}
+	}
+}
+
+func TestGitMergeRejectsConfiguredExternalDrivers(t *testing.T) {
+	root := gitWorkspace(t)
+	marker := filepath.Join(t.TempDir(), "merge-driver-ran")
+	runGitFixture(t, root, "config", "merge.hostile.driver", "touch "+marker)
+	if err := rejectExternalGitDrivers(context.Background(), root); !errors.Is(err, ErrGitPolicy) {
+		t.Fatalf("custom merge driver check = %v, want policy denial", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("merge driver ran during policy check, marker stat error = %v", err)
+	}
+}
+
+func TestGitPushRejectsNonHTTPSOrCredentialBearingRemote(t *testing.T) {
+	root := gitWorkspace(t)
+	runGitFixture(t, root, "remote", "add", "origin", "https://user:secret@example.invalid/repo.git")
+	if _, err := resolveGitPushRemote(context.Background(), root, "origin"); !errors.Is(err, ErrGitPolicy) {
+		t.Fatalf("credential-bearing remote error = %v, want policy rejection", err)
+	}
+	runGitFixture(t, root, "remote", "set-url", "origin", "https://example.invalid/repo.git")
+	runGitFixture(t, root, "config", "http.https://example.invalid/.extraHeader", "Authorization: Bearer secret")
+	if _, err := resolveGitPushRemote(context.Background(), root, "origin"); !errors.Is(err, ErrGitPolicy) {
+		t.Fatalf("URL-specific credential config error = %v, want policy rejection", err)
+	}
+	runGitFixture(t, root, "config", "--unset", "http.https://example.invalid/.extraHeader")
+	runGitFixture(t, root, "remote", "set-url", "origin", "ssh://example.invalid/repo.git")
+	if _, err := resolveGitPushRemote(context.Background(), root, "origin"); !errors.Is(err, ErrGitPolicy) {
+		t.Fatalf("SSH remote error = %v, want policy rejection", err)
+	}
+}
+
+func TestGitPushTargetsOnlyOneExistingLocalBranch(t *testing.T) {
+	root := gitWorkspace(t)
+	if branch, err := resolveGitPushBranch(context.Background(), root, ""); err != nil || branch != "main" {
+		t.Fatalf("default push branch = %q, error = %v; want main", branch, err)
+	}
+	if _, err := resolveGitPushBranch(context.Background(), root, "missing"); !errors.Is(err, ErrGitPolicy) {
+		t.Fatalf("missing local push branch error = %v, want policy denial", err)
 	}
 }
 

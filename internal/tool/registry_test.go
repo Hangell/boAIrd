@@ -129,6 +129,25 @@ func TestRegistryRejectsMalformedInputBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestRegistryOmitsUnvalidatedTaskAndRunFromScopeDenialAudit(t *testing.T) {
+	auditor := &memoryAuditor{}
+	enforcer := setup(t, testTool(t, func(context.Context, input) (output, error) {
+		t.Fatal("tool executed despite failed scope validation")
+		return output{}, nil
+	}), auditor)
+	request := authorizedRequest(`{"value":"hello"}`)
+	request.TaskID = "cross-project-task"
+	request.RunID = "cross-project-run"
+	request.ResourceID = "outside-scope"
+	if _, err := enforcer.Execute(context.Background(), request); !errors.Is(err, ErrDenied) {
+		t.Fatalf("scope-denied execution error = %v, want ErrDenied", err)
+	}
+	events := auditor.snapshot()
+	if len(events) != 1 || events[0].Outcome != "denied" || events[0].TaskID != "" || events[0].RunID != "" {
+		t.Fatalf("scope denial audit contains unchecked task/run metadata: %#v", events)
+	}
+}
+
 func TestRegistryDeniesMissingCapability(t *testing.T) {
 	var calls int
 	auditor := &memoryAuditor{}

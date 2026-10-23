@@ -1553,11 +1553,18 @@ Git Manager Agent
 - Safe defaults: the whole set is disabled unless `BOAIRD_GIT_ENABLED=true`;
   `git.push` and `git.merge` remain denied unless `BOAIRD_GIT_ALLOW_PUSH` /
   `BOAIRD_GIT_ALLOW_MERGE` are set, and both require an approved Human Review
-  task when the project demands it. Commands use structured `git -C` arguments,
-  never `sh -c`; output is bounded and redacted; timeouts apply.
-- Audit: each operation records actor, project, task, run, repository boundary,
-  operation, and result without credentials; a metadata-only `start` event is
-  persisted before any mutating command.
+  task in the same project when required; a policy lookup error denies the
+  operation. Supplied task/run IDs are validated against project and task scope
+  before audit. Git subprocesses use a minimal environment, ignore system and
+  global config, disable hooks, credential helpers, and SSH, permit only HTTPS
+  remotes without embedded credentials, push one existing local branch, and
+  reject external merge drivers, filters, and URL-specific transport
+  credentials. Commands use structured `git -C` arguments, never `sh -c`;
+  output is bounded and redacted; timeouts apply.
+- Audit: each operation records actor, project, task, run, canonical repository
+  root, operation, and result without credentials; a metadata-only `start`
+  event is persisted before any mutating command. Invalid task/run references
+  are omitted from scope-denial audit events.
 - MCP: `boaird.git.read`, `boaird.git.diff`, `boaird.git.branch`,
   `boaird.git.commit`, `boaird.git.push`, and `boaird.git.merge` are advertised
   only when Git tools are configured.

@@ -106,13 +106,18 @@ type Tool interface {
 	execute(context.Context, Request, any) (json.RawMessage, error)
 }
 
+type auditResourceResolver interface {
+	auditResourceID(context.Context, Request, any) (string, error)
+}
+
 // Definition adapts a typed input/output tool to the registry contract.
 type Definition[I, O any] struct {
-	Metadata       Contract
-	Validate       func(I) error
-	ValidateOutput func(O) error
-	Run            func(context.Context, I) (O, error)
-	RunWithRequest func(context.Context, Request, I) (O, error)
+	Metadata        Contract
+	Validate        func(I) error
+	ValidateOutput  func(O) error
+	AuditResourceID func(context.Context, Request, I) (string, error)
+	Run             func(context.Context, I) (O, error)
+	RunWithRequest  func(context.Context, Request, I) (O, error)
 }
 
 func (d Definition[I, O]) Contract() Contract { return cloneContract(d.Metadata) }
@@ -142,6 +147,17 @@ func (d Definition[I, O]) decodeAndValidate(raw json.RawMessage) (any, error) {
 		}
 	}
 	return input, nil
+}
+
+func (d Definition[I, O]) auditResourceID(ctx context.Context, request Request, value any) (string, error) {
+	if d.AuditResourceID == nil {
+		return request.ResourceID, nil
+	}
+	input, ok := value.(I)
+	if !ok {
+		return "", ErrInvalidInput
+	}
+	return d.AuditResourceID(ctx, request, input)
 }
 
 func (d Definition[I, O]) execute(ctx context.Context, request Request, value any) (json.RawMessage, error) {
