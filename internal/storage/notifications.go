@@ -27,9 +27,9 @@ type Notification struct {
 	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
 }
 
-type NotificationRepository struct{ database *sql.DB }
+type NotificationRepository struct{ database *Database }
 
-func NewNotificationRepository(database *sql.DB) (*NotificationRepository, error) {
+func NewNotificationRepository(database *Database) (*NotificationRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}
@@ -156,7 +156,7 @@ func (r *NotificationRepository) Retry(ctx context.Context, projectID, id string
 	return recordNotificationAction(ctx, tx, projectID, id, "notification.delivery.retried", "administrator_requested_delivery_retry")
 }
 
-func recordNotificationAction(ctx context.Context, tx *sql.Tx, projectID, id, eventType, reason string) error {
+func recordNotificationAction(ctx context.Context, tx *Transaction, projectID, id, eventType, reason string) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id,actor_type,actor_id,event_type,resource_type,resource_id,reason)
 		VALUES (?, 'administrator', 'local-administrator', ?, 'notification', ?, ?)`, projectID, eventType, id, reason); err != nil {
 		return fmt.Errorf("record notification audit event: %w", err)

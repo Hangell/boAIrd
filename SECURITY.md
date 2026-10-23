@@ -2408,6 +2408,19 @@ data/boaird.db
 
 must have restricted filesystem permissions.
 
+PostgreSQL is an optional backend selected with `BOAIRD_DATABASE_DRIVER=postgres`;
+its connection URL is supplied through `BOAIRD_DATABASE_URL`. Treat that URL as
+a secret because it can contain database credentials. Require certificate
+verification for remote PostgreSQL connections, restrict network access to the
+service host, and grant the application role only the database privileges it
+needs. PostgreSQL-native backups must be encrypted and access-controlled like
+SQLite backups. Application startup acquires an advisory lock and applies each
+numbered PostgreSQL migration in its own transaction. Back up the database
+before upgrading and prevent older application versions from writing during a
+schema upgrade. Switching the configured backend does not transfer data.
+Supply backup credentials through a protected PostgreSQL service or password
+file, not command-line arguments.
+
 ---
 
 # Database Injection

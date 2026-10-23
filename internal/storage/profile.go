@@ -11,9 +11,9 @@ import (
 )
 
 // ProfileRepository persists project-scoped profile overrides.
-type ProfileRepository struct{ database *sql.DB }
+type ProfileRepository struct{ database *Database }
 
-func NewProfileRepository(database *sql.DB) (*ProfileRepository, error) {
+func NewProfileRepository(database *Database) (*ProfileRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}

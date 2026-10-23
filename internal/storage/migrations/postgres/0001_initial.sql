@@ -1,0 +1,927 @@
+-- PostgreSQL schema baseline equivalent to SQLite migrations 0001-0023.
+-- Keep subsequent schema changes versioned in this directory and in SQLite migrations.
+
+CREATE TABLE app_metadata (
+
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE projects (
+
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 200),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK(status IN ('CREATED', 'CONFIGURING', 'READY', 'RUNNING', 'PAUSED', 'ARCHIVED')),
+    brain_id TEXT,
+    workspace_path TEXT NOT NULL DEFAULT '',
+    repository_url TEXT NOT NULL DEFAULT '',
+    human_review_required INTEGER NOT NULL CHECK(human_review_required IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+    updated_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+    CHECK(status NOT IN ('READY', 'RUNNING') OR brain_id IS NOT NULL)
+);
+
+CREATE INDEX projects_status_name_idx ON projects(status, name );
+
+CREATE TABLE brains (
+
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+    UNIQUE(id, project_id)
+);
+
+CREATE UNIQUE INDEX brains_one_active_per_project_idx ON brains(project_id) WHERE active = 1;
+
+CREATE TABLE credentials (
+
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 200),
+    provider TEXT NOT NULL CHECK(length(trim(provider)) BETWEEN 1 AND 100),
+    secret_ciphertext BYTEA NOT NULL CHECK(length(secret_ciphertext) >= 28),
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+);
+
+CREATE INDEX credentials_provider_name_idx ON credentials(provider, name );
+
+CREATE TABLE agents (
+
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 200),
+    avatar TEXT NOT NULL DEFAULT '' CHECK(length(avatar) <= 1000),
+    description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 4000),
+    role TEXT NOT NULL CHECK(length(trim(role)) BETWEEN 1 AND 100),
+    runtime TEXT NOT NULL CHECK(runtime IN ('API', 'MCP', 'LOCAL', 'REMOTE')),
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    credential_id TEXT REFERENCES credentials(id) ON DELETE RESTRICT,
+    instructions TEXT NOT NULL DEFAULT '' CHECK(length(instructions) <= 16000),
+    status TEXT NOT NULL DEFAULT 'IDLE' CHECK(status IN ('ONLINE', 'IDLE', 'BUSY', 'WAITING', 'OFFLINE', 'STALE', 'ERROR')),
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+    updated_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')), provider_base_url TEXT NOT NULL DEFAULT '',
+    CHECK(
+        (runtime = 'API' AND length(trim(provider)) > 0 AND length(trim(model)) > 0 AND credential_id IS NOT NULL)
+        OR
+        (runtime <> 'API' AND provider = '' AND model = '' AND credential_id IS NULL)
+    )
+);
+
+CREATE INDEX agents_name_idx ON agents(name , id);
+
+CREATE TABLE agent_languages (
+
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK(position >= 0),
+    language TEXT NOT NULL CHECK(length(trim(language)) BETWEEN 1 AND 100),
+    PRIMARY KEY(agent_id, position),
+    UNIQUE(agent_id, language)
+);
+
+CREATE TABLE agent_capabilities (
+
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    capability TEXT NOT NULL CHECK(length(trim(capability)) BETWEEN 1 AND 200),
+    PRIMARY KEY(agent_id, capability)
+);
+
+CREATE TABLE brain_configuration (
+
+    brain_id TEXT PRIMARY KEY REFERENCES brains(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    autonomy TEXT NOT NULL CHECK(autonomy IN ('MANUAL', 'SEMI_AUTO', 'AUTONOMOUS'))
+);
+
+CREATE TABLE runs (
+
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    task_id TEXT,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL CHECK(status IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED', 'CANCELLED')),
+    started_at TEXT,
+    finished_at TEXT,
+    runtime TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input TEXT NOT NULL,
+    output TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+, tools_used TEXT NOT NULL DEFAULT '[]', kind TEXT NOT NULL DEFAULT 'brain' CHECK(kind IN ('brain', 'worker')));
+
+CREATE INDEX runs_project_created_idx ON runs(project_id, created_at DESC, id);
+
+CREATE TABLE audit_events (
+
+    sequence BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE DEFAULT (md5(random()::text || clock_timestamp()::text)),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    task_id TEXT,
+    actor_type TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    from_status TEXT NOT NULL DEFAULT '',
+    to_status TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+, reason TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '');
+
+CREATE INDEX runs_project_task_created_idx ON runs(project_id, task_id, created_at DESC, id);
+
+CREATE INDEX runs_project_agent_created_idx ON runs(project_id, agent_id, created_at DESC, id);
+
+CREATE INDEX audit_events_run_idx ON audit_events(resource_type, resource_id, sequence);
+
+CREATE INDEX audit_events_project_idx ON audit_events(project_id, sequence DESC);
+
+CREATE TABLE tasks (
+
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 200),
+    description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 16000),
+    status TEXT NOT NULL CHECK(status IN ('BACKLOG', 'READY', 'WORKING', 'REVIEW', 'HUMAN_REVIEW', 'BLOCKED', 'FAILED', 'DONE', 'CANCELLED')),
+    priority TEXT NOT NULL DEFAULT 'NORMAL' CHECK(priority IN ('LOW', 'NORMAL', 'HIGH', 'URGENT')),
+    created_by_type TEXT NOT NULL CHECK(created_by_type IN ('LOCAL_API_CLIENT', 'ADMINISTRATOR', 'BRAIN', 'AGENT')),
+    created_by TEXT NOT NULL CHECK(length(trim(created_by)) > 0),
+    assigned_to TEXT REFERENCES agents(id) ON DELETE RESTRICT,
+    human_review INTEGER NOT NULL DEFAULT 0 CHECK(human_review IN (0, 1)),
+    parent_id TEXT REFERENCES tasks(id) ON DELETE RESTRICT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_actor_type TEXT NOT NULL CHECK(last_actor_type IN ('LOCAL_API_CLIENT', 'ADMINISTRATOR', 'BRAIN', 'AGENT')),
+    last_actor_id TEXT NOT NULL CHECK(length(trim(last_actor_id)) > 0),
+    last_reason TEXT NOT NULL CHECK(length(trim(last_reason)) BETWEEN 1 AND 2000)
+, version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0));
+
+CREATE INDEX tasks_project_status_created_idx ON tasks(project_id, status, created_at DESC, id);
+
+CREATE INDEX tasks_project_assigned_created_idx ON tasks(project_id, assigned_to, created_at DESC, id);
+
+CREATE INDEX tasks_parent_idx ON tasks(parent_id) WHERE parent_id IS NOT NULL;
+
+CREATE TABLE conversations (
+
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE RESTRICT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX conversations_project_idx ON conversations(project_id, created_at DESC, id);
+
+CREATE TABLE conversation_messages (
+
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE RESTRICT,
+    sender_type TEXT NOT NULL CHECK(sender_type IN ('USER', 'AGENT', 'BRAIN', 'SYSTEM')),
+    sender_id TEXT NOT NULL CHECK(length(trim(sender_id)) > 0),
+    content TEXT NOT NULL CHECK(length(trim(content)) > 0 AND length(content) <= 1048576),
+    content_type TEXT NOT NULL CHECK(length(trim(content_type)) BETWEEN 1 AND 128),
+    metadata TEXT NOT NULL CHECK(jsonb_typeof(metadata::jsonb) = 'object' AND length(metadata) <= 65536),
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX conversation_messages_history_idx ON conversation_messages(conversation_id, created_at, id);
+
+CREATE TABLE project_members (
+
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL CHECK(length(trim(user_id)) BETWEEN 1 AND 200),
+    role TEXT NOT NULL CHECK(role IN ('ADMIN', 'MEMBER')),
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+    PRIMARY KEY(project_id, user_id)
+);
+
+CREATE INDEX project_members_user_idx ON project_members(user_id, project_id);
+
+CREATE TABLE authorization_denials (
+
+    sequence BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    principal_id TEXT NOT NULL DEFAULT '',
+    project_id TEXT NOT NULL DEFAULT '',
+    required_capability TEXT NOT NULL DEFAULT '',
+    resource TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+);
+
+CREATE TABLE agent_projects (
+
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+    PRIMARY KEY (agent_id, project_id)
+);
+
+CREATE INDEX agent_projects_project_idx ON agent_projects(project_id, agent_id);
+
+CREATE TABLE mcp_agent_tokens (
+
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    token_hash BYTEA NOT NULL UNIQUE CHECK(length(token_hash) = 32),
+    issued_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+
+CREATE INDEX mcp_agent_tokens_agent_idx ON mcp_agent_tokens(agent_id, issued_at DESC);
+
+CREATE TABLE mcp_agent_token_events (
+
+    sequence BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    token_id TEXT NOT NULL REFERENCES mcp_agent_tokens(id) ON DELETE RESTRICT,
+    related_token_id TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    actor_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK(event_type IN ('token.issued', 'token.rotated', 'token.revoked', 'token.bootstrapped')),
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX mcp_agent_token_events_token_idx ON mcp_agent_token_events(token_id, sequence);
+
+CREATE TABLE agent_sessions (
+
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    token_id TEXT NOT NULL REFERENCES mcp_agent_tokens(id) ON DELETE RESTRICT,
+    started_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    ended_at TEXT
+);
+
+CREATE UNIQUE INDEX agent_sessions_open_idx ON agent_sessions(agent_id, token_id) WHERE ended_at IS NULL;
+
+CREATE INDEX agent_sessions_agent_seen_idx ON agent_sessions(agent_id, last_seen_at DESC);
+
+CREATE TABLE agent_status_events (
+
+    sequence BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    session_id TEXT NOT NULL DEFAULT '',
+    from_status TEXT NOT NULL CHECK(from_status IN ('ONLINE', 'IDLE', 'BUSY', 'WAITING', 'OFFLINE', 'STALE', 'ERROR')),
+    to_status TEXT NOT NULL CHECK(to_status IN ('ONLINE', 'IDLE', 'BUSY', 'WAITING', 'OFFLINE', 'STALE', 'ERROR')),
+    reason TEXT NOT NULL CHECK(reason IN ('session.opened', 'session.resumed', 'session.expired', 'work.changed', 'status.reconciled')),
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX agent_status_events_agent_idx ON agent_status_events(agent_id, sequence DESC);
+
+CREATE TABLE project_memory (
+
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    category TEXT NOT NULL CHECK(category IN ('architecture_decision', 'project_decision', 'important_context', 'known_problem', 'current_state', 'task_history')),
+    version INTEGER NOT NULL CHECK(version >= 1),
+    content TEXT NOT NULL CHECK(length(trim(content)) BETWEEN 1 AND 65536),
+    source_ids TEXT NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(source_ids::jsonb) = 'array'),
+    created_by_type TEXT NOT NULL,
+    created_by TEXT NOT NULL CHECK(length(trim(created_by)) > 0),
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, category, version)
+);
+
+CREATE INDEX project_memory_project_idx ON project_memory(project_id, category, version DESC);
+
+CREATE TABLE project_profiles (
+
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    profile_key TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '',
+    capabilities TEXT NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(capabilities::jsonb) = 'array'),
+    tools TEXT NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(tools::jsonb) = 'array'),
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(project_id, profile_key)
+);
+
+CREATE INDEX project_profiles_project_idx ON project_profiles(project_id, profile_key);
+
+CREATE TABLE notifications (
+
+    id TEXT PRIMARY KEY DEFAULT (md5(random()::text || clock_timestamp()::text)),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    source_key TEXT NOT NULL UNIQUE,
+    event_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL DEFAULT '',
+    severity TEXT NOT NULL CHECK(severity IN ('INFO', 'WARNING', 'CRITICAL')),
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+    delivery_state TEXT NOT NULL DEFAULT 'PENDING' CHECK(delivery_state IN ('PENDING', 'DELIVERED', 'FAILED')),
+    delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK(delivery_attempts BETWEEN 0 AND 5),
+    delivery_error TEXT NOT NULL DEFAULT '',
+    delivered_at TEXT,
+    read_at TEXT,
+    acknowledged_at TEXT
+);
+
+CREATE INDEX notifications_project_created_idx ON notifications(project_id, created_at DESC, id);
+
+CREATE INDEX notifications_delivery_idx ON notifications(delivery_state, created_at, id);
+
+CREATE TABLE agent_templates (
+
+    id TEXT PRIMARY KEY,
+    template_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    instructions TEXT NOT NULL DEFAULT '',
+    default_runtime TEXT NOT NULL,
+    suggested_tools TEXT NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(suggested_tools::jsonb) = 'array'),
+    suggested_capabilities TEXT NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(suggested_capabilities::jsonb) = 'array'),
+    version INTEGER NOT NULL CHECK(version >= 1),
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE template_instances (
+
+    agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    template_key TEXT NOT NULL,
+    template_version INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX template_instances_project_idx ON template_instances(project_id, template_key);
+
+CREATE TABLE template_audit (
+
+    sequence BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    template_key TEXT NOT NULL,
+    action TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    actor_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+);
+
+CREATE FUNCTION active_brain_agent_must_keep_execute_capability_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (OLD.capability = 'brain.execute' AND EXISTS (
+    SELECT 1 FROM brain_configuration bc
+    JOIN brains b ON b.id = bc.brain_id
+    JOIN projects p ON p.id = b.project_id
+    WHERE bc.agent_id = OLD.agent_id AND b.active = 1 AND p.brain_id = b.id
+)) THEN
+
+        RAISE EXCEPTION 'active Brain agent must retain brain.execute capability';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER active_brain_agent_must_keep_execute_capability BEFORE DELETE ON agent_capabilities FOR EACH ROW EXECUTE FUNCTION active_brain_agent_must_keep_execute_capability_fn();
+
+CREATE FUNCTION active_brain_agent_must_remain_brain_runtime_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.runtime NOT IN ('API', 'MCP') AND EXISTS (
+    SELECT 1 FROM brain_configuration bc
+    JOIN brains b ON b.id = bc.brain_id
+    JOIN projects p ON p.id = b.project_id
+    WHERE bc.agent_id = OLD.id AND b.active = 1 AND p.brain_id = b.id
+)) THEN
+
+        RAISE EXCEPTION 'active Brain agent must use API or MCP runtime';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER active_brain_agent_must_remain_brain_runtime BEFORE UPDATE OF runtime ON agents FOR EACH ROW EXECUTE FUNCTION active_brain_agent_must_remain_brain_runtime_fn();
+
+CREATE FUNCTION agent_status_events_prevent_delete_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'agent status events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER agent_status_events_prevent_delete BEFORE DELETE ON agent_status_events FOR EACH ROW EXECUTE FUNCTION agent_status_events_prevent_delete_fn();
+
+CREATE FUNCTION agent_status_events_prevent_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'agent status events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER agent_status_events_prevent_update BEFORE UPDATE ON agent_status_events FOR EACH ROW EXECUTE FUNCTION agent_status_events_prevent_update_fn();
+
+CREATE FUNCTION agents_validate_credential_insert_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.runtime = 'API' AND NOT EXISTS (
+    SELECT 1 FROM credentials WHERE id = NEW.credential_id AND lower(provider) = NEW.provider
+)) THEN
+
+        RAISE EXCEPTION 'agent credential does not match configured provider';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER agents_validate_credential_insert BEFORE INSERT ON agents FOR EACH ROW EXECUTE FUNCTION agents_validate_credential_insert_fn();
+
+CREATE FUNCTION agents_validate_credential_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.runtime = 'API' AND NOT EXISTS (
+    SELECT 1 FROM credentials WHERE id = NEW.credential_id AND lower(provider) = NEW.provider
+)) THEN
+
+        RAISE EXCEPTION 'agent credential does not match configured provider';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER agents_validate_credential_update BEFORE UPDATE OF runtime, provider, credential_id ON agents FOR EACH ROW EXECUTE FUNCTION agents_validate_credential_update_fn();
+
+CREATE FUNCTION audit_events_prevent_delete_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'audit events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER audit_events_prevent_delete BEFORE DELETE ON audit_events FOR EACH ROW EXECUTE FUNCTION audit_events_prevent_delete_fn();
+
+CREATE FUNCTION audit_events_prevent_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'audit events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER audit_events_prevent_update BEFORE UPDATE ON audit_events FOR EACH ROW EXECUTE FUNCTION audit_events_prevent_update_fn();
+
+CREATE FUNCTION authorization_denials_prevent_delete_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'authorization denial events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER authorization_denials_prevent_delete BEFORE DELETE ON authorization_denials FOR EACH ROW EXECUTE FUNCTION authorization_denials_prevent_delete_fn();
+
+CREATE FUNCTION authorization_denials_prevent_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'authorization denial events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER authorization_denials_prevent_update BEFORE UPDATE ON authorization_denials FOR EACH ROW EXECUTE FUNCTION authorization_denials_prevent_update_fn();
+
+CREATE FUNCTION brain_configuration_requires_supported_agent_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NOT EXISTS (SELECT 1 FROM agents a JOIN agent_capabilities c ON c.agent_id = a.id
+    WHERE a.id = NEW.agent_id AND a.runtime IN ('API', 'MCP') AND c.capability = 'brain.execute')) THEN
+
+        RAISE EXCEPTION 'Brain must use an API or MCP agent with brain.execute capability';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER brain_configuration_requires_supported_agent BEFORE INSERT ON brain_configuration FOR EACH ROW EXECUTE FUNCTION brain_configuration_requires_supported_agent_fn();
+
+CREATE FUNCTION brain_configuration_update_requires_supported_agent_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NOT EXISTS (SELECT 1 FROM agents a JOIN agent_capabilities c ON c.agent_id = a.id
+    WHERE a.id = NEW.agent_id AND a.runtime IN ('API', 'MCP') AND c.capability = 'brain.execute')) THEN
+
+        RAISE EXCEPTION 'Brain must use an API or MCP agent with brain.execute capability';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER brain_configuration_update_requires_supported_agent BEFORE UPDATE OF agent_id ON brain_configuration FOR EACH ROW EXECUTE FUNCTION brain_configuration_update_requires_supported_agent_fn();
+
+CREATE FUNCTION brains_prevent_deactivating_project_brain_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (OLD.active = 1 AND NEW.active = 0 AND EXISTS (
+    SELECT 1 FROM projects WHERE id = OLD.project_id AND brain_id = OLD.id AND status IN ('READY', 'RUNNING')
+)) THEN
+
+        RAISE EXCEPTION 'cannot deactivate the Brain of an executable project';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER brains_prevent_deactivating_project_brain BEFORE UPDATE OF active ON brains FOR EACH ROW EXECUTE FUNCTION brains_prevent_deactivating_project_brain_fn();
+
+CREATE FUNCTION brains_prevent_deleting_project_brain_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (EXISTS (
+    SELECT 1 FROM projects WHERE id = OLD.project_id AND brain_id = OLD.id
+)) THEN
+
+        RAISE EXCEPTION 'cannot delete the Brain associated with a project';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER brains_prevent_deleting_project_brain BEFORE DELETE ON brains FOR EACH ROW EXECUTE FUNCTION brains_prevent_deleting_project_brain_fn();
+
+CREATE FUNCTION conversations_validate_task_project_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NOT EXISTS (SELECT 1 FROM tasks WHERE id = NEW.task_id AND project_id = NEW.project_id)) THEN
+
+        RAISE EXCEPTION 'conversation project must match its task project';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER conversations_validate_task_project BEFORE INSERT ON conversations FOR EACH ROW EXECUTE FUNCTION conversations_validate_task_project_fn();
+
+CREATE FUNCTION mcp_agent_token_events_prevent_delete_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'MCP token events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER mcp_agent_token_events_prevent_delete BEFORE DELETE ON mcp_agent_token_events FOR EACH ROW EXECUTE FUNCTION mcp_agent_token_events_prevent_delete_fn();
+
+CREATE FUNCTION mcp_agent_token_events_prevent_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'MCP token events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER mcp_agent_token_events_prevent_update BEFORE UPDATE ON mcp_agent_token_events FOR EACH ROW EXECUTE FUNCTION mcp_agent_token_events_prevent_update_fn();
+
+CREATE FUNCTION notifications_agent_error_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.to_status IN ('ERROR', 'STALE', 'OFFLINE')) THEN
+
+        INSERT INTO notifications(project_id, source_key, event_type, resource_id, severity, summary)
+
+            SELECT project_id, 'agent-status:' || NEW.sequence || ':' || project_id,
+
+                CASE WHEN NEW.to_status = 'ERROR' THEN 'agent.failed' ELSE 'agent.disconnected' END,
+
+                NEW.agent_id,
+
+                CASE WHEN NEW.to_status = 'ERROR' THEN 'CRITICAL' ELSE 'WARNING' END,
+
+                CASE WHEN NEW.to_status = 'ERROR' THEN 'An agent entered an error state.' ELSE 'An external agent disconnected or became stale.' END
+
+            FROM (
+
+                SELECT ap.project_id FROM agent_projects ap WHERE ap.agent_id = NEW.agent_id
+
+                UNION
+
+                SELECT b.project_id
+
+                FROM brain_configuration bc
+
+                JOIN brains b ON b.id = bc.brain_id
+
+                JOIN projects p ON p.id = b.project_id AND p.brain_id = b.id
+
+                WHERE bc.agent_id = NEW.agent_id AND b.active = 1
+
+             ) AS scoped_projects WHERE true ON CONFLICT DO NOTHING;
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER notifications_agent_error AFTER INSERT ON agent_status_events FOR EACH ROW EXECUTE FUNCTION notifications_agent_error_fn();
+
+CREATE FUNCTION notifications_run_failed_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.event_type = 'run.status.changed' AND NEW.to_status = 'FAILED') THEN
+
+        INSERT INTO notifications(project_id, source_key, event_type, resource_id, severity, summary) VALUES (NEW.project_id, 'audit:' || NEW.id, 'run.failed', NEW.resource_id, 'CRITICAL', 'An agent or provider run failed.' ) ON CONFLICT DO NOTHING;
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER notifications_run_failed AFTER INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION notifications_run_failed_fn();
+
+CREATE FUNCTION notifications_security_denial_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.project_id <> '' AND EXISTS (SELECT 1 FROM projects WHERE id = NEW.project_id)) THEN
+
+        INSERT INTO notifications(project_id, source_key, event_type, resource_id, severity, summary) VALUES (NEW.project_id, 'denial:' || NEW.sequence, 'security.authorization_denied', '', 'CRITICAL', 'A project operation was denied by security policy.' ) ON CONFLICT DO NOTHING;
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER notifications_security_denial AFTER INSERT ON authorization_denials FOR EACH ROW EXECUTE FUNCTION notifications_security_denial_fn();
+
+CREATE FUNCTION notifications_task_status_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.event_type = 'task.status.changed' AND NEW.to_status IN ('BLOCKED', 'FAILED', 'HUMAN_REVIEW')) THEN
+
+        INSERT INTO notifications(project_id, source_key, event_type, resource_id, severity, summary) VALUES (NEW.project_id, 'audit:' || NEW.id, NEW.to_status, NEW.resource_id,
+
+                CASE WHEN NEW.to_status = 'FAILED' THEN 'CRITICAL' ELSE 'WARNING' END,
+
+                CASE NEW.to_status
+
+                    WHEN 'BLOCKED' THEN 'A task is blocked and needs administrator attention.'
+
+                    WHEN 'FAILED' THEN 'A task failed and needs administrator attention.'
+
+                    ELSE 'A task is waiting for human review.'
+
+                END ) ON CONFLICT DO NOTHING;
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER notifications_task_status AFTER INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION notifications_task_status_fn();
+
+CREATE FUNCTION projects_add_local_administrator_membership_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    INSERT INTO project_members(project_id, user_id, role)
+
+        VALUES (NEW.id, 'local-administrator', 'ADMIN');
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER projects_add_local_administrator_membership AFTER INSERT ON projects FOR EACH ROW EXECUTE FUNCTION projects_add_local_administrator_membership_fn();
+
+CREATE FUNCTION projects_require_active_brain_on_insert_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.status IN ('READY', 'RUNNING') AND NOT EXISTS (
+    SELECT 1 FROM brains b
+    JOIN brain_configuration bc ON bc.brain_id = b.id
+    JOIN agents a ON a.id = bc.agent_id
+    WHERE b.id = NEW.brain_id AND b.project_id = NEW.id AND b.active = 1 AND a.runtime IN ('API', 'MCP')
+)) THEN
+
+        RAISE EXCEPTION 'project requires exactly one configured active API or MCP Brain';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER projects_require_active_brain_on_insert BEFORE INSERT ON projects FOR EACH ROW EXECUTE FUNCTION projects_require_active_brain_on_insert_fn();
+
+CREATE FUNCTION projects_require_active_brain_on_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.status IN ('READY', 'RUNNING') AND NOT EXISTS (
+    SELECT 1 FROM brains b
+    JOIN brain_configuration bc ON bc.brain_id = b.id
+    JOIN agents a ON a.id = bc.agent_id
+    WHERE b.id = NEW.brain_id AND b.project_id = NEW.id AND b.active = 1 AND a.runtime IN ('API', 'MCP')
+)) THEN
+
+        RAISE EXCEPTION 'project requires exactly one configured active API or MCP Brain';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER projects_require_active_brain_on_update BEFORE UPDATE OF status, brain_id ON projects FOR EACH ROW EXECUTE FUNCTION projects_require_active_brain_on_update_fn();
+
+CREATE FUNCTION runs_audit_insert_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    INSERT INTO audit_events(project_id, task_id, actor_type, actor_id, event_type, resource_type, resource_id, to_status)
+
+        VALUES (NEW.project_id, NEW.task_id, 'agent', NEW.agent_id, 'run.created', 'run', NEW.id, NEW.status);
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER runs_audit_insert AFTER INSERT ON runs FOR EACH ROW EXECUTE FUNCTION runs_audit_insert_fn();
+
+CREATE FUNCTION runs_audit_status_change_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (OLD.status <> NEW.status) THEN
+
+        INSERT INTO audit_events(project_id, task_id, actor_type, actor_id, event_type, resource_type, resource_id, from_status, to_status)
+
+            VALUES (NEW.project_id, NEW.task_id, 'agent', NEW.agent_id, 'run.status.changed', 'run', NEW.id, OLD.status, NEW.status);
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER runs_audit_status_change AFTER UPDATE OF status ON runs FOR EACH ROW EXECUTE FUNCTION runs_audit_status_change_fn();
+
+CREATE FUNCTION tasks_audit_assignment_change_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (OLD.assigned_to IS DISTINCT FROM NEW.assigned_to) THEN
+
+        INSERT INTO audit_events(project_id, task_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
+
+            VALUES (NEW.project_id, NEW.id, NEW.last_actor_type, NEW.last_actor_id, 'task.assigned', 'task', NEW.id, NEW.last_reason);
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER tasks_audit_assignment_change AFTER UPDATE OF assigned_to ON tasks FOR EACH ROW EXECUTE FUNCTION tasks_audit_assignment_change_fn();
+
+CREATE FUNCTION tasks_audit_human_review_decision_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (OLD.status = 'HUMAN_REVIEW' AND NEW.status IN ('DONE', 'WORKING')) THEN
+
+        INSERT INTO audit_events(project_id, task_id, actor_type, actor_id, event_type, resource_type, resource_id, from_status, to_status, reason)
+
+            VALUES (
+
+                NEW.project_id,
+
+                NEW.id,
+
+                NEW.last_actor_type,
+
+                NEW.last_actor_id,
+
+                CASE WHEN NEW.status = 'DONE' THEN 'task.human_review.approved' ELSE 'task.human_review.rejected' END,
+
+                'task',
+
+                NEW.id,
+
+                OLD.status,
+
+                NEW.status,
+
+                NEW.last_reason
+
+            );
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER tasks_audit_human_review_decision AFTER UPDATE OF status ON tasks FOR EACH ROW EXECUTE FUNCTION tasks_audit_human_review_decision_fn();
+
+CREATE FUNCTION tasks_audit_insert_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    INSERT INTO audit_events(project_id, task_id, actor_type, actor_id, event_type, resource_type, resource_id, to_status, reason)
+
+        VALUES (NEW.project_id, NEW.id, NEW.last_actor_type, NEW.last_actor_id, 'task.created', 'task', NEW.id, NEW.status, NEW.last_reason);
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER tasks_audit_insert AFTER INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION tasks_audit_insert_fn();
+
+CREATE FUNCTION tasks_audit_status_change_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (OLD.status <> NEW.status) THEN
+
+        INSERT INTO audit_events(project_id, task_id, actor_type, actor_id, event_type, resource_type, resource_id, from_status, to_status, reason)
+
+            VALUES (NEW.project_id, NEW.id, NEW.last_actor_type, NEW.last_actor_id, 'task.status.changed', 'task', NEW.id, OLD.status, NEW.status, NEW.last_reason);
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER tasks_audit_status_change AFTER UPDATE OF status ON tasks FOR EACH ROW EXECUTE FUNCTION tasks_audit_status_change_fn();
+
+CREATE FUNCTION tasks_create_conversation_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    INSERT INTO conversations(id, project_id, task_id, created_at)
+
+        VALUES(md5(random()::text || clock_timestamp()::text), NEW.project_id, NEW.id, NEW.created_at);
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER tasks_create_conversation AFTER INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION tasks_create_conversation_fn();
+
+CREATE FUNCTION tasks_prevent_self_parent_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    IF (NEW.parent_id = NEW.id) THEN
+
+        RAISE EXCEPTION 'task cannot be its own parent';
+
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER tasks_prevent_self_parent BEFORE INSERT ON tasks FOR EACH ROW EXECUTE FUNCTION tasks_prevent_self_parent_fn();
+
+CREATE FUNCTION template_audit_prevent_delete_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'template audit events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER template_audit_prevent_delete BEFORE DELETE ON template_audit FOR EACH ROW EXECUTE FUNCTION template_audit_prevent_delete_fn();
+
+CREATE FUNCTION template_audit_prevent_update_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+
+    RAISE EXCEPTION 'template audit events are immutable';
+
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$$;
+
+CREATE TRIGGER template_audit_prevent_update BEFORE UPDATE ON template_audit FOR EACH ROW EXECUTE FUNCTION template_audit_prevent_update_fn();

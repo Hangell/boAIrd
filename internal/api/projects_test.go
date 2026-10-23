@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -153,7 +152,7 @@ func TestProjectBrainAssociationRequiresAnActiveBrain(t *testing.T) {
 	}
 }
 
-func newProjectHandler(t *testing.T) (http.Handler, *sql.DB) {
+func newProjectHandler(t *testing.T) (http.Handler, *storage.Database) {
 	t.Helper()
 	database, err := storage.OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {

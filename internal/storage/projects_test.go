@@ -7,7 +7,7 @@ import (
 )
 
 func TestProjectExecutionRequiresExactlyOneActiveBrain(t *testing.T) {
-	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestProjectExecutionRequiresExactlyOneActiveBrain(t *testing.T) {
 }
 
 func TestProjectExecutionAcceptsMCPBrain(t *testing.T) {
-	database, err := OpenSQLite(context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, context.Background(), filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -12,10 +11,10 @@ import (
 	"boAIrd/internal/template"
 )
 
-func newTemplateRepo(t *testing.T) (*TemplateRepository, *sql.DB) {
+func newTemplateRepo(t *testing.T) (*TemplateRepository, *Database) {
 	t.Helper()
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "boaird.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +100,7 @@ func TestTemplateRepositoryRejectsArchivedProjectInsideTransaction(t *testing.T)
 	assertCount(t, database, "SELECT COUNT(*) FROM audit_events WHERE resource_id='archived-agent'", 0)
 }
 
-func assertCount(t *testing.T, database *sql.DB, query string, want int) {
+func assertCount(t *testing.T, database *Database, query string, want int) {
 	t.Helper()
 	var got int
 	if err := database.QueryRow(query).Scan(&got); err != nil {

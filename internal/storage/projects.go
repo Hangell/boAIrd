@@ -10,10 +10,10 @@ import (
 )
 
 type ProjectRepository struct {
-	database *sql.DB
+	database *Database
 }
 
-func NewProjectRepository(database *sql.DB) (*ProjectRepository, error) {
+func NewProjectRepository(database *Database) (*ProjectRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}
@@ -46,7 +46,7 @@ func (r *ProjectRepository) Get(ctx context.Context, id string) (project.Project
 }
 
 func (r *ProjectRepository) List(ctx context.Context, limit, offset int) ([]project.Project, error) {
-	rows, err := r.database.QueryContext(ctx, projectSelect+" ORDER BY name COLLATE NOCASE, id LIMIT ? OFFSET ?", limit, offset)
+	rows, err := r.database.QueryContext(ctx, projectSelect+" ORDER BY lower(name), id LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}

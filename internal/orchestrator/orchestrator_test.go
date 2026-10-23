@@ -2,7 +2,6 @@ package orchestrator_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -79,7 +78,7 @@ func (f *fakeEscalations) Values() []audit.Escalation {
 }
 
 type fixture struct {
-	database        *sql.DB
+	database        *storage.Database
 	projects        *project.Manager
 	agents          *agent.Manager
 	tasks           *task.Service
@@ -790,7 +789,7 @@ func TestSuccessfulExecutionGetsFreshCleanupContext(t *testing.T) {
 	}
 }
 
-func assertTransitions(t *testing.T, database *sql.DB, taskID string, expected [][2]string) {
+func assertTransitions(t *testing.T, database *storage.Database, taskID string, expected [][2]string) {
 	t.Helper()
 	rows, err := database.Query(`SELECT from_status, to_status FROM audit_events WHERE task_id=? AND event_type='task.status.changed' ORDER BY sequence`, taskID)
 	if err != nil {

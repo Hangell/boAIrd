@@ -9,9 +9,9 @@ import (
 	"boAIrd/internal/conversation"
 )
 
-type ConversationRepository struct{ database *sql.DB }
+type ConversationRepository struct{ database *Database }
 
-func NewConversationRepository(database *sql.DB) (*ConversationRepository, error) {
+func NewConversationRepository(database *Database) (*ConversationRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}

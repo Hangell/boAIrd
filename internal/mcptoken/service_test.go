@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"path/filepath"
 	"strings"
@@ -148,7 +147,7 @@ func TestCreateRequiresExistingMCPAgentAndBoundedExpiry(t *testing.T) {
 	}
 }
 
-func newTestService(t *testing.T) (*sql.DB, *mcptoken.Service, string) {
+func newTestService(t *testing.T) (*storage.Database, *mcptoken.Service, string) {
 	t.Helper()
 	ctx := context.Background()
 	database, err := storage.OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))

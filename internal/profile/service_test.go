@@ -2,7 +2,6 @@ package profile_test
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,7 +10,7 @@ import (
 	"boAIrd/internal/storage"
 )
 
-func newTestService(t *testing.T) (*profile.Service, *sql.DB) {
+func newTestService(t *testing.T) (*profile.Service, *storage.Database) {
 	t.Helper()
 	ctx := context.Background()
 	database, err := storage.OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))

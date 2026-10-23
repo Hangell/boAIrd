@@ -13,7 +13,7 @@ import (
 
 func TestTaskUpdateRejectsStaleVersionWithoutAuditMutation(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "tasks.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "tasks.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestTaskUpdateRejectsStaleVersionWithoutAuditMutation(t *testing.T) {
 
 func TestTaskUpdateDistinguishesMissingTaskFromConflict(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "tasks.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "tasks.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestTaskUpdateDistinguishesMissingTaskFromConflict(t *testing.T) {
 
 func TestStaleTransitionCannotOverwriteConcurrentAssignment(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "tasks.db"))
+	database, err := openTestDatabase(t, ctx, filepath.Join(t.TempDir(), "tasks.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

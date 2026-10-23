@@ -585,7 +585,7 @@ Default development endpoint:
 http://localhost:3110
 ```
 
-The backend accepts `BOAIRD_HOST`, `BOAIRD_PORT`, and `BOAIRD_DATABASE_PATH` to override the listen address, listen port, and SQLite file path. Defaults are `127.0.0.1`, `3110`, and `./data/boaird.db`. `BOAIRD_HOST` must remain a loopback IP until authenticated remote mode is implemented. `BOAIRD_MASTER_KEY` is required: set it to 32 random bytes encoded as 64 hexadecimal characters (for example, generate one with `openssl rand -hex 32`). Keep it outside the repository and database; losing it prevents decrypting stored provider credentials.
+The backend accepts `BOAIRD_HOST`, `BOAIRD_PORT`, `BOAIRD_DATABASE_DRIVER`, `BOAIRD_DATABASE_PATH`, and `BOAIRD_DATABASE_URL` to configure the listener and storage. Defaults are `127.0.0.1`, `3110`, SQLite, and `./data/boaird.db`. Select PostgreSQL explicitly with `BOAIRD_DATABASE_DRIVER=postgres` and provide `BOAIRD_DATABASE_URL`. Use verified TLS for remote PostgreSQL servers and keep connection credentials outside the repository. `BOAIRD_HOST` must remain a loopback IP until authenticated remote mode is implemented. `BOAIRD_MASTER_KEY` is required: set it to 32 random bytes encoded as 64 hexadecimal characters (for example, generate one with `openssl rand -hex 32`). Keep it outside the repository and database; losing it prevents decrypting stored provider credentials.
 
 Custom provider endpoints must be explicitly approved with the exact hostname or IP in `BOAIRD_PROVIDER_ALLOWED_HOSTS`. DNS answers are validated at connection time; private or special-use destination ranges require a matching `BOAIRD_PROVIDER_ALLOWED_IP_RANGES` CIDR. Do not use broad ranges unless the provider endpoint is trusted to receive stored credentials and Brain prompts.
 
@@ -593,7 +593,7 @@ Custom provider endpoints must be explicitly approved with the exact hostname or
 
 # Health Check
 
-This liveness check reports whether the HTTP service is running; it does not query SQLite.
+This liveness check reports whether the HTTP service is running; it does not query the configured database.
 
 ```text
 GET /health
@@ -615,7 +615,7 @@ Expected response:
 GET /api/v1/status
 ```
 
-The endpoint returns `200 OK` when SQLite is connected:
+The endpoint returns `200 OK` when the configured database is connected:
 
 ```json
 {
@@ -624,7 +624,7 @@ The endpoint returns `200 OK` when SQLite is connected:
 }
 ```
 
-It returns `503 Service Unavailable` when SQLite cannot be reached:
+It returns `503 Service Unavailable` when the configured database cannot be reached:
 
 ```json
 {
@@ -1663,9 +1663,14 @@ Migrations should be:
 
 # SQLite
 
-SQLite is the default MVP database.
-
-Avoid using database-specific features that make future PostgreSQL support unnecessarily difficult unless justified.
+SQLite is the default MVP database; PostgreSQL is an optional backend. Keep
+repository behavior equivalent across both implementations and update both
+versioned migration tracks for every schema change. Preserve transaction
+boundaries and compare-and-swap semantics. Storage contract tests run against
+SQLite by default and PostgreSQL when `BOAIRD_TEST_POSTGRES_URL` is configured.
+Switching the configured backend does not transfer data. Use PostgreSQL-native
+`pg_dump`/`pg_restore` backups with credentials supplied through a protected
+service or password file; never pass passwords in command-line arguments.
 
 ---
 

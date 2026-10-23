@@ -44,17 +44,26 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 		}
 	}()
 
-	database, err := storage.OpenSQLite(ctx, cfg.DatabasePath)
+	var database *storage.Database
+	var err error
+	switch cfg.DatabaseDriver {
+	case "sqlite":
+		database, err = storage.OpenSQLite(ctx, cfg.DatabasePath)
+	case "postgres":
+		database, err = storage.OpenPostgres(ctx, cfg.DatabaseURL)
+	default:
+		return fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
+	}
 	if err != nil {
 		return fmt.Errorf("initialize storage: %w", err)
 	}
 	defer func() {
 		if err := database.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("close SQLite database: %w", err))
+			result = errors.Join(result, fmt.Errorf("close database connection: %w", err))
 		}
 	}()
 
-	logger.Info("SQLite database ready", "path", cfg.DatabasePath)
+	logger.Info("database ready", "driver", cfg.DatabaseDriver)
 	projectRepository, err := storage.NewProjectRepository(database)
 	if err != nil {
 		return fmt.Errorf("initialize project repository: %w", err)

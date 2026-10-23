@@ -10,9 +10,9 @@ import (
 	"boAIrd/internal/task"
 )
 
-type TaskRepository struct{ database *sql.DB }
+type TaskRepository struct{ database *Database }
 
-func NewTaskRepository(database *sql.DB) (*TaskRepository, error) {
+func NewTaskRepository(database *Database) (*TaskRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}

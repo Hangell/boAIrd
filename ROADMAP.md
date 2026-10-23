@@ -1820,7 +1820,12 @@ remote MCP
 
 SQLite remains the default for local use.
 
-PostgreSQL can be added for larger environments.
+PostgreSQL is an optional backend for larger environments. Configure it with
+`BOAIRD_DATABASE_DRIVER=postgres` and `BOAIRD_DATABASE_URL`. Both storage
+backends have deterministic versioned migrations and shared repository
+contracts; CI exercises the storage contract on SQLite and PostgreSQL. SQLite
+remains the default, while PostgreSQL backups and restores use PostgreSQL-native
+tools.
 
 ```text
 SQLite
@@ -1828,7 +1833,8 @@ SQLite
 PostgreSQL
 ```
 
-Repositories should prevent a strong dependency on the database from the start.
+Repositories isolate database access and preserve equivalent transaction and
+compare-and-swap behavior across the supported backends.
 
 ---
 

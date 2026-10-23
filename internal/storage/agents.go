@@ -10,7 +10,7 @@ import (
 	"boAIrd/internal/project"
 )
 
-type AgentRepository struct{ database *sql.DB }
+type AgentRepository struct{ database *Database }
 
 func closeRowsAfter(rows *sql.Rows, operation string, operationErr error) error {
 	if closeErr := rows.Close(); closeErr != nil {
@@ -19,7 +19,7 @@ func closeRowsAfter(rows *sql.Rows, operation string, operationErr error) error 
 	return operationErr
 }
 
-func NewAgentRepository(database *sql.DB) (*AgentRepository, error) {
+func NewAgentRepository(database *Database) (*AgentRepository, error) {
 	if database == nil {
 		return nil, errors.New("database is required")
 	}
@@ -66,7 +66,7 @@ func (r *AgentRepository) Get(ctx context.Context, id string) (agent.Agent, erro
 }
 
 func (r *AgentRepository) List(ctx context.Context, limit, offset int) ([]agent.Agent, error) {
-	rows, err := r.database.QueryContext(ctx, agentSelect+" ORDER BY name COLLATE NOCASE, id LIMIT ? OFFSET ?", limit, offset)
+	rows, err := r.database.QueryContext(ctx, agentSelect+" ORDER BY lower(name), id LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("query agents: %w", err)
 	}
@@ -151,7 +151,7 @@ func (r *AgentRepository) Update(ctx context.Context, value agent.Agent) error {
 	return nil
 }
 
-func auditAgentCredentialScopeChange(ctx context.Context, tx *sql.Tx, agentID, previousCredentialID, nextCredentialID string) error {
+func auditAgentCredentialScopeChange(ctx context.Context, tx *Transaction, agentID, previousCredentialID, nextCredentialID string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT project_id FROM agent_projects WHERE agent_id=?
 		UNION SELECT p.id FROM brain_configuration bc JOIN brains b ON b.id=bc.brain_id AND b.active=1
 		JOIN projects p ON p.id=b.project_id AND p.brain_id=b.id WHERE bc.agent_id=? ORDER BY project_id`, agentID, agentID)
@@ -188,7 +188,7 @@ func (r *AgentRepository) AddProject(ctx context.Context, agentID, projectID, ac
 		return fmt.Errorf("begin agent project membership: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_projects(agent_id, project_id) VALUES (?, ?)`, agentID, projectID)
+	result, err := tx.ExecContext(ctx, `INSERT INTO agent_projects(agent_id, project_id) VALUES (?, ?) ON CONFLICT DO NOTHING`, agentID, projectID)
 	if err != nil {
 		return fmt.Errorf("add agent project membership: %w", err)
 	}
@@ -240,7 +240,7 @@ type sqlExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-func validateAgentCredential(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+func validateAgentCredential(ctx context.Context, tx *Transaction, snapshot agent.Snapshot) error {
 	if snapshot.Runtime != agent.RuntimeAPI {
 		return nil
 	}
@@ -262,7 +262,7 @@ func insertAgent(ctx context.Context, executor sqlExecutor, snapshot agent.Snaps
 	return err
 }
 
-func insertAgentRelations(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+func insertAgentRelations(ctx context.Context, tx *Transaction, snapshot agent.Snapshot) error {
 	if err := insertAgentLanguages(ctx, tx, snapshot); err != nil {
 		return err
 	}
@@ -274,7 +274,7 @@ func insertAgentRelations(ctx context.Context, tx *sql.Tx, snapshot agent.Snapsh
 	return nil
 }
 
-func insertAgentLanguages(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+func insertAgentLanguages(ctx context.Context, tx *Transaction, snapshot agent.Snapshot) error {
 	for position, language := range snapshot.LanguagePreferences {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO agent_languages(agent_id, position, language) VALUES (?, ?, ?)", snapshot.ID, position, language); err != nil {
 			return fmt.Errorf("insert agent language: %w", err)
@@ -283,7 +283,7 @@ func insertAgentLanguages(ctx context.Context, tx *sql.Tx, snapshot agent.Snapsh
 	return nil
 }
 
-func syncAgentCapabilities(ctx context.Context, tx *sql.Tx, snapshot agent.Snapshot) error {
+func syncAgentCapabilities(ctx context.Context, tx *Transaction, snapshot agent.Snapshot) error {
 	rows, err := tx.QueryContext(ctx, "SELECT capability FROM agent_capabilities WHERE agent_id = ?", snapshot.ID)
 	if err != nil {
 		return fmt.Errorf("query current agent capabilities: %w", err)
@@ -326,7 +326,7 @@ func syncAgentCapabilities(ctx context.Context, tx *sql.Tx, snapshot agent.Snaps
 	return nil
 }
 
-func loadAgentRelations(ctx context.Context, database *sql.DB, snapshot *agent.Snapshot) error {
+func loadAgentRelations(ctx context.Context, database *Database, snapshot *agent.Snapshot) error {
 	languages, err := database.QueryContext(ctx, "SELECT language FROM agent_languages WHERE agent_id = ? ORDER BY position", snapshot.ID)
 	if err != nil {
 		return fmt.Errorf("query agent languages: %w", err)
