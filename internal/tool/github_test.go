@@ -350,6 +350,25 @@ func TestGitHubPullRequestReadExposesExpectedHeadSHA(t *testing.T) {
 	}
 }
 
+func TestGitHubMergeRejectsChangedHead(t *testing.T) {
+	server, _ := newGitHubTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{"message":"Head sha does not match"}`))
+	})
+	input := GitHubPRMergeInput{Number: 4, ExpectedHeadSHA: strings.Repeat("c", 40), CredentialID: "cred-1"}
+	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, input)
+	_, err := runGitHubPRMerge(context.Background(), request, GitHubConfig{
+		AllowMerge:          true,
+		APIBaseURL:          server.URL,
+		Client:              server.Client(),
+		HumanReviewRequired: func(context.Context, string) (bool, error) { return false, nil },
+	}, "acme", "widgets", "github-token", input)
+	if !errors.Is(err, ErrGitHubPolicy) {
+		t.Fatalf("merge after PR head changed = %v, want conflict rejection", err)
+	}
+}
+
 func TestGitHubRedactsCredentialFromErrors(t *testing.T) {
 	server, _ := newGitHubTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
