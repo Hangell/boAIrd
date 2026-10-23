@@ -1777,6 +1777,9 @@ remote MCP
   only for TLS requests.
 - Remote mode enables per-client-IP rate limiting (`BOAIRD_RATE_LIMIT_REQUESTS`,
   `BOAIRD_RATE_LIMIT_WINDOW`), defaulting to 60 requests per minute.
+- The limiter covers versioned API endpoints except `/api/v1/status`, and the
+  `/mcp` endpoint. For configured trusted proxies, client IP resolution walks
+  `X-Forwarded-For` from right to left and skips trusted proxy hops.
 - `BOAIRD_TRUSTED_PROXIES` is the only way forwarded headers (`X-Forwarded-For`)
   are honored for client identity; unconfigured proxies are never trusted.
 - Existing authentication, session cookies (`HttpOnly`, `SameSite=Strict`), and

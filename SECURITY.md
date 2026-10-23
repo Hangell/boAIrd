@@ -1143,8 +1143,10 @@ The local listener stays loopback-bound by default. A non-loopback
 `BOAIRD_TLS_CERT_FILE` and `BOAIRD_TLS_KEY_FILE`; startup fails closed if TLS
 or authentication is incomplete. Remote deployments terminate TLS at the
 listener (TLS 1.2 minimum), apply security headers and per-client-IP rate
-limiting, and honor `X-Forwarded-For` only from IPs/CIDRs listed in
-`BOAIRD_TRUSTED_PROXIES`. Existing session cookies (`HttpOnly`,
+limiting to the versioned API and `/mcp` endpoint, and honor `X-Forwarded-For`
+only from IPs/CIDRs listed in `BOAIRD_TRUSTED_PROXIES`. The forwarded chain is
+walked from the directly connected peer toward the client, skipping trusted
+proxy hops; malformed entries fall back to the peer address. Existing session cookies (`HttpOnly`,
 `SameSite=Strict`), trusted-origin CORS/CSRF checks, and capability/membership
 authorization apply unchanged.
 

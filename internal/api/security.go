@@ -46,19 +46,18 @@ func clientIP(r *http.Request, trustedProxies []netip.Prefix) string {
 		return peer.String()
 	}
 	forwarded := r.Header.Values("X-Forwarded-For")
-	for i := len(forwarded) - 1; i >= 0; i-- {
-		for _, candidate := range strings.Split(forwarded[i], ",") {
-			candidate = strings.TrimSpace(candidate)
-			if candidate == "" {
-				continue
-			}
-			address, err := netip.ParseAddr(strings.Trim(candidate, "[]"))
-			if err != nil {
-				return candidate
-			}
-			if !isTrustedProxy(address, trustedProxies) {
-				return address.String()
-			}
+	chain := strings.Split(strings.Join(forwarded, ","), ",")
+	for i := len(chain) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(chain[i])
+		if candidate == "" {
+			continue
+		}
+		address, err := netip.ParseAddr(strings.Trim(candidate, "[]"))
+		if err != nil {
+			return peer.String()
+		}
+		if !isTrustedProxy(address, trustedProxies) {
+			return address.String()
 		}
 	}
 	return peer.String()
@@ -127,7 +126,8 @@ func rateLimitHandler(next http.Handler, policy SecurityPolicy) http.Handler {
 	}
 	limiter := newRateLimiter(policy.RateLimitRequests, policy.RateLimitWindow)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/status" {
+		apiRequest := strings.HasPrefix(r.URL.Path, "/api/v1/") && r.URL.Path != "/api/v1/status"
+		if !apiRequest && r.URL.Path != "/mcp" {
 			next.ServeHTTP(w, r)
 			return
 		}
