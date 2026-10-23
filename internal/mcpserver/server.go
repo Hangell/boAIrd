@@ -389,12 +389,13 @@ type githubPRReviewMCPInput struct {
 }
 
 type githubPRMergeMCPInput struct {
-	ProjectID    string `json:"project_id"`
-	TaskID       string `json:"task_id,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Number       int    `json:"number"`
-	MergeMethod  string `json:"merge_method,omitempty"`
-	CredentialID string `json:"credential_id"`
+	ProjectID       string `json:"project_id"`
+	TaskID          string `json:"task_id,omitempty"`
+	RunID           string `json:"run_id,omitempty"`
+	Number          int    `json:"number"`
+	ExpectedHeadSHA string `json:"expected_head_sha"`
+	MergeMethod     string `json:"merge_method,omitempty"`
+	CredentialID    string `json:"credential_id"`
 }
 type runOutput struct {
 	ID        string `json:"id"`
@@ -1312,7 +1313,7 @@ func (s *Server) githubPRMerge(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, governedtool.GitHubPRMergeOutput{}, toolError(err)
 	}
-	encodedInput, err := json.Marshal(governedtool.GitHubPRMergeInput{Number: input.Number, MergeMethod: input.MergeMethod, CredentialID: input.CredentialID})
+	encodedInput, err := json.Marshal(governedtool.GitHubPRMergeInput{Number: input.Number, ExpectedHeadSHA: input.ExpectedHeadSHA, MergeMethod: input.MergeMethod, CredentialID: input.CredentialID})
 	if err != nil {
 		return nil, governedtool.GitHubPRMergeOutput{}, toolError(governedtool.ErrInvalidInput)
 	}

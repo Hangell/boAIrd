@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"boAIrd/internal/capability"
 )
@@ -35,8 +36,8 @@ func newGitHubEnforcer(t *testing.T, config GitHubConfig, auditor *memoryAuditor
 		}
 	}
 	if config.ResolveCredential == nil {
-		config.ResolveCredential = func(_ context.Context, agentID, projectID, credentialID string) (string, error) {
-			if agentID != "agent-1" || projectID != "project-1" || credentialID != "cred-1" {
+		config.ResolveCredential = func(_ context.Context, agentID, projectID, credentialID, provider string) (string, error) {
+			if agentID != "agent-1" || projectID != "project-1" || credentialID != "cred-1" || provider != "github" {
 				return "", ErrDenied
 			}
 			return "ghp_test_token_1234567890", nil
@@ -93,6 +94,8 @@ func TestGitHubIssueReadCreateUpdate(t *testing.T) {
 		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/issues"):
 			_, _ = writer.Write([]byte(`[{"number":1,"title":"first","state":"open","html_url":"https://github.com/acme/widgets/issues/1"}]`))
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/issues"):
+			_, _ = writer.Write([]byte(`{"number":2,"title":"second","state":"open","html_url":"https://github.com/acme/widgets/issues/2"}`))
+		case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/issues/2"):
 			_, _ = writer.Write([]byte(`{"number":2,"title":"second","state":"open","html_url":"https://github.com/acme/widgets/issues/2"}`))
 		case request.Method == http.MethodPatch && strings.Contains(request.URL.Path, "/issues/2"):
 			_, _ = writer.Write([]byte(`{"number":2,"state":"closed","html_url":"https://github.com/acme/widgets/issues/2"}`))
@@ -170,7 +173,7 @@ func TestGitHubMergeDeniedByDefaultAndHumanReviewGate(t *testing.T) {
 	auditor := &memoryAuditor{}
 	// Default: merge denied without AllowMerge.
 	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, auditor)
-	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, CredentialID: "cred-1"})); !errors.Is(err, ErrExecution) {
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40), CredentialID: "cred-1"})); !errors.Is(err, ErrExecution) {
 		t.Fatalf("pr.merge with AllowMerge=false error = %v, want denied", err)
 	}
 	// Allowed but project requires review: without a task it is denied.
@@ -181,7 +184,7 @@ func TestGitHubMergeDeniedByDefaultAndHumanReviewGate(t *testing.T) {
 			return projectID == "project-1" && taskID == "approved-task", nil
 		},
 	}, auditor)
-	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, CredentialID: "cred-1"})
+	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40), CredentialID: "cred-1"})
 	if _, err := enforcer.Execute(context.Background(), request); !errors.Is(err, ErrExecution) {
 		t.Fatalf("pr.merge without task error = %v, want denied", err)
 	}
@@ -210,6 +213,140 @@ func TestGitHubRejectsNonGitHubRepository(t *testing.T) {
 	}, &memoryAuditor{})
 	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", CredentialID: "cred-1"})); !errors.Is(err, ErrDenied) {
 		t.Fatalf("non-GitHub repository error = %v, want denied", err)
+	}
+}
+
+func TestGitHubSSHRepositoryRequiresExactHost(t *testing.T) {
+	if owner, repo, err := parseGitHubRepository("git@github.com:acme/widgets.git"); err != nil || owner != "acme" || repo != "widgets" {
+		t.Fatalf("parse valid SSH repository = (%q, %q), %v", owner, repo, err)
+	}
+	for _, value := range []string{"git@evilgithub.com:acme/widgets.git", "git@github.com.evil.invalid:acme/widgets.git"} {
+		if _, _, err := parseGitHubRepository(value); err == nil {
+			t.Errorf("parseGitHubRepository(%q) unexpectedly accepted a non-GitHub host", value)
+		}
+	}
+}
+
+func TestGitHubHTTPClientDoesNotFollowRedirects(t *testing.T) {
+	redirectTargetCalls := 0
+	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		redirectTargetCalls++
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte(`{"number":1}`))
+	}))
+	t.Cleanup(target.Close)
+	redirector := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, target.URL+"/repos/other/repo/issues/1", http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+	client := githubClient{baseURL: redirector.URL, client: githubHTTPClient(GitHubConfig{Timeout: time.Second, Client: redirector.Client()})}
+	if _, err := client.call(context.Background(), http.MethodGet, "/repos/acme/widgets/issues/1", "github-token", nil); !errors.Is(err, ErrGitHubPolicy) {
+		t.Fatalf("redirected GitHub call error = %v, want policy rejection", err)
+	}
+	if redirectTargetCalls != 0 {
+		t.Fatalf("redirect target received %d requests, want none", redirectTargetCalls)
+	}
+}
+
+func TestGitHubHumanReviewLookupErrorsFailClosed(t *testing.T) {
+	serverCalls := 0
+	server, _ := newGitHubTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
+		serverCalls++
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"merged":true,"message":"merged"}`))
+	})
+	enforcer := newGitHubEnforcer(t, GitHubConfig{
+		APIBaseURL: server.URL, Client: server.Client(), AllowMerge: true,
+		HumanReviewRequired: func(context.Context, string) (bool, error) { return false, errors.New("policy read failed") },
+		TaskApproved: func(context.Context, string, string) (bool, error) {
+			t.Fatal("task approval must not be checked after policy lookup fails")
+			return false, nil
+		},
+	}, &memoryAuditor{})
+	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 1, ExpectedHeadSHA: strings.Repeat("a", 40), CredentialID: "cred-1"})
+	if _, err := enforcer.Execute(context.Background(), request); !errors.Is(err, ErrExecution) {
+		t.Fatalf("merge after Human Review lookup error = %v, want denial", err)
+	}
+	if serverCalls != 0 {
+		t.Fatalf("GitHub API received %d merge requests after policy lookup failure", serverCalls)
+	}
+}
+
+func TestGitHubIssueCapabilitiesExcludePullRequests(t *testing.T) {
+	patchCalls := 0
+	server, _ := newGitHubTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widgets/issues":
+			_, _ = writer.Write([]byte(`[{"number":1,"title":"issue","state":"open"},{"number":2,"title":"pull request","state":"open","pull_request":{"url":"https://api.github.com/repos/acme/widgets/pulls/2"}}]`))
+		case request.Method == http.MethodGet && request.URL.Path == "/repos/acme/widgets/issues/2":
+			_, _ = writer.Write([]byte(`{"number":2,"title":"pull request","state":"open","pull_request":{"url":"https://api.github.com/repos/acme/widgets/pulls/2"}}`))
+		case request.Method == http.MethodPatch && request.URL.Path == "/repos/acme/widgets/issues/2":
+			patchCalls++
+			_, _ = writer.Write([]byte(`{"number":2,"state":"closed"}`))
+		default:
+			writer.WriteHeader(http.StatusNotFound)
+		}
+	})
+	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, &memoryAuditor{})
+	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "list", CredentialID: "cred-1"}))
+	if err != nil {
+		t.Fatalf("list issues = %v", err)
+	}
+	var output GitHubIssueReadOutput
+	if err := json.Unmarshal(encoded, &output); err != nil || output.Count != 1 || output.Issues[0].Number != 1 {
+		t.Fatalf("issue list = %#v, error = %v; want PR excluded", output, err)
+	}
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.read", capability.GitHubIssueRead, GitHubIssueReadInput{Action: "get", Number: 2, CredentialID: "cred-1"})); !errors.Is(err, ErrExecution) {
+		t.Fatalf("read pull request through issue capability = %v, want denial", err)
+	}
+	if _, err := enforcer.Execute(context.Background(), githubRequest(t, "github.issue.update", capability.GitHubIssueUpdate, GitHubIssueUpdateInput{Number: 2, State: "closed", CredentialID: "cred-1"})); !errors.Is(err, ErrExecution) {
+		t.Fatalf("update pull request through issue capability = %v, want denial", err)
+	}
+	if patchCalls != 0 {
+		t.Fatalf("issue.update issued %d PATCH requests against a pull request", patchCalls)
+	}
+}
+
+func TestGitHubMergePinsExpectedHeadSHA(t *testing.T) {
+	expectedSHA := strings.Repeat("b", 40)
+	server, _ := newGitHubTestServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]string
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode merge body: %v", err)
+		}
+		if body["sha"] != expectedSHA {
+			t.Errorf("merge SHA = %q, want %q", body["sha"], expectedSHA)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"merged":true,"message":"merged"}`))
+	})
+	request := githubRequest(t, "github.pr.merge", capability.GitHubPRMerge, GitHubPRMergeInput{Number: 2, ExpectedHeadSHA: expectedSHA, CredentialID: "cred-1"})
+	_, err := runGitHubPRMerge(context.Background(), request, GitHubConfig{
+		AllowMerge:          true,
+		APIBaseURL:          server.URL,
+		Client:              server.Client(),
+		HumanReviewRequired: func(context.Context, string) (bool, error) { return false, nil },
+	}, "acme", "widgets", "github-token", GitHubPRMergeInput{Number: 2, ExpectedHeadSHA: expectedSHA, CredentialID: "cred-1"})
+	if err != nil {
+		t.Fatalf("merge with expected SHA = %v", err)
+	}
+}
+
+func TestGitHubPullRequestReadExposesExpectedHeadSHA(t *testing.T) {
+	const headSHA = "0123456789abcdef0123456789abcdef01234567"
+	server, _ := newGitHubTestServer(t, func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"number":2,"title":"change","state":"open","head":{"ref":"feature","sha":"` + headSHA + `"},"base":{"ref":"main","sha":"fedcba9876543210fedcba9876543210fedcba98"}}`))
+	})
+	enforcer := newGitHubEnforcer(t, GitHubConfig{APIBaseURL: server.URL, Client: server.Client()}, &memoryAuditor{})
+	encoded, err := enforcer.Execute(context.Background(), githubRequest(t, "github.pr.read", capability.GitHubPRRead, GitHubPRReadInput{Action: "get", Number: 2, CredentialID: "cred-1"}))
+	if err != nil {
+		t.Fatalf("github.pr.read = %v", err)
+	}
+	var output GitHubPRReadOutput
+	if err := json.Unmarshal(encoded, &output); err != nil || output.Count != 1 || output.PullRequests[0].Head.SHA != headSHA {
+		t.Fatalf("PR read output = %#v, error = %v; want head SHA %q", output, err, headSHA)
 	}
 }
 

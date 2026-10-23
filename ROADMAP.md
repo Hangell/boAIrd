@@ -1600,14 +1600,18 @@ github.pr.merge
   registered through the shared tool Enforcer.
 - Repository binding: every call is bound to the project's
   administrator-approved repository URL. Only `github.com` HTTPS/SSH URLs are
-  parsed; any other host or a caller-specified repository is rejected.
+  parsed, with exact SSH host matching; any other host or a caller-specified
+  repository is rejected. HTTP redirects are disabled.
 - Credentials: tokens are resolved through the Credential Service with Agent and
-  project scope; the plaintext token never reaches logs, audit, or responses.
+  project scope and must have provider `github`; the plaintext token never
+  reaches logs, audit, or responses.
   Requests use `Authorization: Bearer <token>` against `https://api.github.com`.
 - Safe defaults: the whole set is disabled unless `BOAIRD_GITHUB_ENABLED=true`;
   PR merge stays denied unless `BOAIRD_GITHUB_ALLOW_MERGE=true` and requires an
-  approved Human Review task when the project demands it. PR review never grants
-  merge authority.
+  approved Human Review task when the project demands it; policy lookup errors
+  deny. Merge requests include the expected PR head SHA to reject stale reviews.
+  PR review never grants merge authority. Issue tools filter PRs from the Issues
+  API so issue capabilities cannot operate on pull requests.
 - Audit: actor, project, task, run, repository, operation, and result are
   recorded without credentials, arguments, or response bodies; a metadata-only
   `start` event is persisted before mutating requests.

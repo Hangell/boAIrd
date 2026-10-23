@@ -128,6 +128,20 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 
 // Resolve decrypts one secret only when a provider adapter requests its credential ID.
 func (m *Manager) Resolve(ctx context.Context, id string, scope Scope) (string, error) {
+	return m.resolve(ctx, id, scope, "")
+}
+
+// ResolveForProvider decrypts a credential only when it is scoped to the
+// requested provider as well as the Agent and project.
+func (m *Manager) ResolveForProvider(ctx context.Context, id string, scope Scope, provider string) (string, error) {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return "", ErrCredentialUnavailable
+	}
+	return m.resolve(ctx, id, scope, provider)
+}
+
+func (m *Manager) resolve(ctx context.Context, id string, scope Scope, expectedProvider string) (string, error) {
 	if ctx == nil || strings.TrimSpace(id) == "" || strings.TrimSpace(scope.AgentID) == "" || strings.TrimSpace(scope.ProjectID) == "" {
 		return "", ErrCredentialUnavailable
 	}
@@ -139,6 +153,9 @@ func (m *Manager) Resolve(ctx context.Context, id string, scope Scope) (string, 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return "", err
 		}
+		return "", ErrCredentialUnavailable
+	}
+	if expectedProvider != "" && !strings.EqualFold(record.Provider, expectedProvider) {
 		return "", ErrCredentialUnavailable
 	}
 	plaintext, err := m.decrypt(record.ID, record.Provider, record.SecretCiphertext)

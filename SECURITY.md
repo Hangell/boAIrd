@@ -714,13 +714,16 @@ github.issue.update  github.pr.review
 ```
 
 Every call is bound to the project's administrator-approved repository URL.
-The server parses only `github.com` HTTPS/SSH repository URLs; any other host
-is rejected. The caller cannot target a different repository — the operation
-always runs against the project's bound repository.
+The server parses only `github.com` HTTPS/SSH repository URLs and requires the
+exact SSH host `github.com`; lookalike suffixes are rejected. HTTP redirects
+are not followed, so a request cannot leave the approved API origin. The caller
+cannot target a different repository — the operation always runs against the
+project's bound repository.
 
 Credentials are managed: the tool resolves the caller's credential identifier
-through the Credential Service with the Agent and project scope, so the plaintext
-token never reaches Agent memory, logs, audit, or responses. HTTP calls use
+through the Credential Service with Agent, project, and `github` provider scope,
+so credentials for another provider cannot be sent to GitHub and plaintext
+tokens never reach Agent memory, logs, audit, or responses. HTTP calls use
 `Authorization: Bearer <token>` and are redacted; provider error bodies are
 bounded and sanitized. The API base is fixed to `https://api.github.com`.
 
@@ -735,7 +738,11 @@ Human Review gate when the project requires it
 ```
 
 When the project sets `human_review_required`, merge must be tied to a task
-(`task_id`) whose human review has been approved.
+(`task_id`) whose human review has been approved. Errors while checking the
+Human Review policy deny the merge. Every merge request includes the expected
+full PR head SHA; GitHub rejects the request if the reviewed head has changed.
+Issue tools also inspect GitHub's `pull_request` marker and exclude PRs, because
+GitHub's Issues API represents pull requests as issues as well.
 
 Audit records actor, project, task, run, repository, operation, and result
 without credentials, arguments, or response bodies. A metadata-only `start`

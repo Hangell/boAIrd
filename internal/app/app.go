@@ -233,8 +233,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 				}
 				return value.RepositoryURL(), nil
 			},
-			ResolveCredential: func(ctx context.Context, agentID, projectID, credentialID string) (string, error) {
-				return credentialManager.Resolve(ctx, credentialID, credential.Scope{AgentID: agentID, ProjectID: projectID})
+			ResolveCredential: func(ctx context.Context, agentID, projectID, credentialID, provider string) (string, error) {
+				return credentialManager.ResolveForProvider(ctx, credentialID, credential.Scope{AgentID: agentID, ProjectID: projectID}, provider)
 			},
 			HumanReviewRequired: func(ctx context.Context, projectID string) (bool, error) {
 				value, err := projectManager.Get(ctx, projectID)
