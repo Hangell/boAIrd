@@ -50,7 +50,7 @@ describe('SseClient', () => {
 
     const source = FakeEventSource.instances[0];
     expect(source.url).toBe('http://127.0.0.1:3110/api/v1/events');
-    expect(source.options).toEqual({ withCredentials: false });
+    expect(source.options).toEqual({ withCredentials: true });
     source.onmessage?.({ data: '{"message":"ready"}' } as MessageEvent<string>);
     expect(values).toEqual(['ready']);
   });

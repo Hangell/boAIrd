@@ -38,6 +38,24 @@ func TestRESTRequiresBearerAndAuditsDenial(t *testing.T) {
 	}
 }
 
+func TestNotificationRoutesRequireDistinctProjectCapabilities(t *testing.T) {
+	cases := []struct{ method, path, want string }{
+		{http.MethodGet, "/api/v1/projects/p1/notifications", "notification.read"},
+		{http.MethodGet, "/api/v1/projects/p1/notifications/stream", "notification.read"},
+		{http.MethodPost, "/api/v1/projects/p1/notifications/n1/read", "notification.read"},
+		{http.MethodPost, "/api/v1/projects/p1/notifications/n1/acknowledge", "notification.acknowledge"},
+		{http.MethodPost, "/api/v1/projects/p1/notifications/n1/retry", "notification.retry"},
+	}
+	for _, test := range cases {
+		t.Run(test.path, func(t *testing.T) {
+			required, projectID, recognized := requiredAPICapability(httptest.NewRequest(test.method, test.path, nil), nil, nil, nil)
+			if !recognized || required != test.want || projectID != "p1" {
+				t.Fatalf("capability = %q, project = %q, recognized = %v", required, projectID, recognized)
+			}
+		})
+	}
+}
+
 func TestLocalSessionExchangesBearerForHttpOnlyCookie(t *testing.T) {
 	handler, _ := newProjectHandler(t)
 	login := authorizedTestRequest(http.MethodPost, "/api/v1/session", nil)
