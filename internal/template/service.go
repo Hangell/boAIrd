@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"boAIrd/internal/agent"
-	"boAIrd/internal/project"
 )
 
 const (
@@ -29,13 +28,8 @@ type Repository interface {
 	InstantiateAgent(context.Context, agent.Agent, Instance, AuditEvent) (agent.Agent, error)
 }
 
-type ProjectReader interface {
-	Get(context.Context, string) (project.Project, error)
-}
-
 type Service struct {
 	repository Repository
-	projects   ProjectReader
 }
 
 type CreateInput struct {
@@ -70,11 +64,11 @@ type InstantiateInput struct {
 	CredentialID    string   `json:"credential_id,omitempty"`
 }
 
-func NewService(repository Repository, projects ProjectReader) (*Service, error) {
-	if repository == nil || projects == nil {
-		return nil, errors.New("template repository and project reader are required")
+func NewService(repository Repository) (*Service, error) {
+	if repository == nil {
+		return nil, errors.New("template repository is required")
 	}
-	return &Service{repository: repository, projects: projects}, nil
+	return &Service{repository: repository}, nil
 }
 
 // Create persists a new versioned template and audits the change.
@@ -161,9 +155,6 @@ func (s *Service) Instantiate(ctx context.Context, projectID, key string, input 
 	if actorID = strings.TrimSpace(actorID); actorID == "" {
 		return agent.Agent{}, fmt.Errorf("%w: administrator actor is required", ErrInvalidInput)
 	}
-	if _, err := s.ensureProjectActive(ctx, projectID); err != nil {
-		return agent.Agent{}, err
-	}
 	value, err := s.repository.Get(ctx, strings.TrimSpace(key))
 	if err != nil {
 		return agent.Agent{}, err
@@ -201,20 +192,6 @@ func (s *Service) Instantiate(ctx context.Context, projectID, key string, input 
 	return s.repository.InstantiateAgent(ctx, configured, instance, AuditEvent{
 		ActorID: actorID, Action: "instantiated", TemplateKey: value.Key, ProjectID: projectID, Version: value.Version,
 	})
-}
-
-func (s *Service) ensureProjectActive(ctx context.Context, projectID string) (project.Project, error) {
-	value, err := s.projects.Get(ctx, projectID)
-	if err != nil {
-		if errors.Is(err, project.ErrNotFound) {
-			return project.Project{}, ErrProjectNotFound
-		}
-		return project.Project{}, err
-	}
-	if value.Status() == project.StatusArchived {
-		return project.Project{}, ErrProjectArchived
-	}
-	return value, nil
 }
 
 func buildTemplate(input CreateInput, version int, actorID string) (Template, error) {

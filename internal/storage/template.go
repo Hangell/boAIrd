@@ -137,6 +137,9 @@ func (r *TemplateRepository) InstantiateAgent(ctx context.Context, value agent.A
 		return agent.Agent{}, fmt.Errorf("begin template instantiation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockActiveProjectForInstantiation(ctx, tx, instance.ProjectID); err != nil {
+		return agent.Agent{}, err
+	}
 	if err := validateAgentCredential(ctx, tx, snapshot); err != nil {
 		return agent.Agent{}, err
 	}
@@ -150,8 +153,8 @@ func (r *TemplateRepository) InstantiateAgent(ctx context.Context, value agent.A
 		snapshot.ID, instance.ProjectID); err != nil {
 		return agent.Agent{}, fmt.Errorf("insert instantiated agent project membership: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
-		VALUES (?, 'administrator', ?, 'agent.project.joined', 'agent', ?, 'project scope granted')`,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, result, reason)
+		VALUES (?, 'administrator', ?, 'agent.project.joined', 'agent', ?, 'success', 'project scope granted')`,
 		instance.ProjectID, event.ActorID, snapshot.ID); err != nil {
 		return agent.Agent{}, fmt.Errorf("record instantiated agent membership audit: %w", err)
 	}
@@ -160,8 +163,8 @@ func (r *TemplateRepository) InstantiateAgent(ctx context.Context, value agent.A
 		instance.AgentID, instance.ProjectID, instance.TemplateKey, instance.TemplateVersion, formatDatabaseTime(instance.CreatedAt)); err != nil {
 		return agent.Agent{}, fmt.Errorf("insert template instance: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
-		VALUES (?, 'administrator', ?, 'template.instantiated', 'agent', ?, ?)`,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, result, reason)
+		VALUES (?, 'administrator', ?, 'template.instantiated', 'agent', ?, 'success', ?)`,
 		instance.ProjectID, event.ActorID, instance.AgentID, "agent instantiated from template "+instance.TemplateKey); err != nil {
 		return agent.Agent{}, fmt.Errorf("record template instantiation audit: %w", err)
 	}
@@ -169,6 +172,34 @@ func (r *TemplateRepository) InstantiateAgent(ctx context.Context, value agent.A
 		return agent.Agent{}, fmt.Errorf("commit template instantiation: %w", err)
 	}
 	return reloadAgent(ctx, r.database, snapshot.ID)
+}
+
+// lockActiveProjectForInstantiation takes SQLite's write lock before reading
+// project state, so archival either commits first and is rejected or waits
+// until the complete instantiation transaction commits.
+func lockActiveProjectForInstantiation(ctx context.Context, tx *sql.Tx, projectID string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE projects SET updated_at = updated_at WHERE id = ? AND status <> 'ARCHIVED'`, projectID)
+	if err != nil {
+		return fmt.Errorf("lock active project for template instantiation: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count active project lock rows: %w", err)
+	}
+	if updated > 0 {
+		return nil
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM projects WHERE id = ?`, projectID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return template.ErrProjectNotFound
+		}
+		return fmt.Errorf("read project status for template instantiation: %w", err)
+	}
+	if status == "ARCHIVED" {
+		return template.ErrProjectArchived
+	}
+	return errors.New("lock project for template instantiation: no active project row matched")
 }
 
 // reloadAgent loads an Agent with its relations after an atomic write.

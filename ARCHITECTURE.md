@@ -3177,8 +3177,11 @@ capabilities: instantiation creates a separate project Agent with only the
 explicitly configured capabilities, scopes it to the project, and records the
 template key and version on the instance for provenance. Global template
 create/update is written to the immutable `template_audit` stream;
-instantiation is recorded in the project audit stream. The source template is
-never mutated by an instance.
+instantiation and project-scope membership are recorded in the project audit
+stream with explicit successful outcomes. The instantiation transaction locks
+and rechecks the project row before writing, so an archived project cannot gain
+a new Agent through an archival race. The source template is never mutated by
+an instance.
 
 ---
 

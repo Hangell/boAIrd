@@ -1698,6 +1698,10 @@ project-scoped record; the source template is never mutated.
 Instantiation is atomic: the Agent, its capabilities, its project membership,
 its template provenance (`template_instances`), and the `template.instantiated`
 audit event commit in one SQLite transaction; a failure rolls everything back.
+The transaction acquires a write lock on the project row and rechecks that its
+status is not `ARCHIVED` before inserting any instance data, serializing
+instantiation against project archival. Both `template.instantiated` and
+`agent.project.joined` audit events record the required `success` result.
 Global template create/update is recorded in the immutable `template_audit`
 stream, and template updates use a version compare-and-swap that rejects stale
 writers with a conflict.

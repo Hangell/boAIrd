@@ -1893,7 +1893,7 @@ Git Manager
 - `internal/template` — versioned global templates (key, role, instructions,
   default runtime, suggested tools, and suggested capabilities). Template
   names never grant authority.
-- `internal/storage/template.go` + migration `0021_agent_templates.sql` persist
+- `internal/storage/template.go` + migration `0023_agent_templates.sql` persist
   templates, the `template_instances` provenance table (template key + version
   per instantiated Agent), and an immutable `template_audit` stream for global
   create/update.

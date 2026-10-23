@@ -46,11 +46,18 @@ func newTemplateHandler(t *testing.T) (http.Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := template.NewService(templateRepository, projectManager)
+	auditRepository, err := storage.NewAuditRepository(database)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandlerWithServices(fakeDatabase{}, projectManager, nil, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes(), nil, nil, nil, nil, nil, service)
+	service, err := template.NewService(templateRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandlerWithProfilesAuditNotificationsAndTemplates(
+		fakeDatabase{}, projectManager, nil, agentManager, nil, nil, nil, nil, testLocalAuthTokenBytes(), nil, nil,
+		nil, auditRepository, nil, service,
+	)
 
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, authorizedTestRequest(http.MethodPost, "/api/v1/projects", strings.NewReader(`{"name":"Template target"}`)))
@@ -99,6 +106,30 @@ func TestTemplateAPICreateListInstantiate(t *testing.T) {
 	}
 	if len(createdAgent.Capabilities) != 1 || createdAgent.Capabilities[0] != "task.read" {
 		t.Fatalf("instantiated capabilities = %v, want only [task.read]", createdAgent.Capabilities)
+	}
+
+	audit := httptest.NewRecorder()
+	handler.ServeHTTP(audit, authorizedTestRequest(http.MethodGet, "/api/v1/projects/"+projectID+"/audit?limit=100", nil))
+	if audit.Code != http.StatusOK {
+		t.Fatalf("audit API status = %d, body = %s", audit.Code, audit.Body.String())
+	}
+	var auditPage struct {
+		Items []struct {
+			Action string `json:"action"`
+			Result string `json:"result"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(audit.Body.Bytes(), &auditPage); err != nil {
+		t.Fatal(err)
+	}
+	results := make(map[string]string, len(auditPage.Items))
+	for _, item := range auditPage.Items {
+		results[item.Action] = item.Result
+	}
+	for _, action := range []string{"template.instantiated", "agent.project.joined"} {
+		if results[action] != "success" {
+			t.Errorf("audit result for %s = %q, want success; events=%+v", action, results[action], auditPage.Items)
+		}
 	}
 }
 

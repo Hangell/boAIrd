@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"boAIrd/internal/agent"
-	"boAIrd/internal/project"
 	"boAIrd/internal/storage"
 	"boAIrd/internal/template"
 )
@@ -33,19 +32,11 @@ func newTestService(t *testing.T) (*template.Service, *sql.DB) {
 			t.Fatal(err)
 		}
 	}
-	projectRepository, err := storage.NewProjectRepository(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	projectManager, err := project.NewManager(projectRepository)
-	if err != nil {
-		t.Fatal(err)
-	}
 	templateRepository, err := storage.NewTemplateRepository(database)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := template.NewService(templateRepository, projectManager)
+	service, err := template.NewService(templateRepository)
 	if err != nil {
 		t.Fatal(err)
 	}
