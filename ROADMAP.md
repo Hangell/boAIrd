@@ -1440,6 +1440,16 @@ Structure:
 Tool Registry
 ```
 
+The generic system provides typed Go input/output definitions with JSON schemas,
+explicit capability declarations, per-tool timeout and input/output size limits,
+and an explicit registry. Its shared Enforcer checks capability and project/
+resource scope through a required resource resolver before strict JSON decoding
+and input validation, applies a bounded context, and records metadata-only
+immutable audit events. Missing authorization,
+invalid input, and execution failures fail closed. No concrete tools are exposed
+by this phase; filesystem, shell, Git, and GitHub implementations remain in their
+own phases.
+
 Initial tools:
 
 ```text

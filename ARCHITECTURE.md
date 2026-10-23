@@ -2754,14 +2754,24 @@ memory lifecycle
 Owns:
 
 ```text
-Tool interface
-Tool Registry
-filesystem
-shell
-git
-GitHub
-future integrations
+typed Tool contract and JSON schemas
+explicit Registry
+capability and project/resource enforcement
+bounded input, output, and execution time
+metadata-only immutable execution audit
 ```
+
+`internal/tool` adapts typed `Definition[I, O]` implementations to an explicit
+registry. The Enforcer checks each declared capability and project/resource
+scope through a required application-supplied `ScopeAuthorizer` before decoding
+and validating input, then runs the tool with a deadline. The authorizer must
+resolve the target resource to the requested project; project membership alone
+is not sufficient. Tool implementations must honor context cancellation; the
+Enforcer discards results returned after the deadline. It records only actor,
+project, tool, target resource, and outcome; input, output,
+and implementation errors are never copied into audit history. Tool definitions
+must be registered by application code; executable discovery is not supported.
+Concrete filesystem, shell, Git, and GitHub tools belong to later phases.
 
 ---
 
