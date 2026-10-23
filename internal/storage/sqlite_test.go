@@ -84,6 +84,10 @@ func TestOpenSQLiteAppliesMigrationsOnce(t *testing.T) {
 	if err := database.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_profiles'").Scan(&tableName); err != nil {
 		t.Fatalf("verify project profiles migration: %v", err)
 	}
+	var resultColumn string
+	if err := database.QueryRowContext(ctx, "SELECT name FROM pragma_table_info('audit_events') WHERE name='result'").Scan(&resultColumn); err != nil {
+		t.Fatalf("verify audit result migration: %v", err)
+	}
 }
 
 func TestOpenSQLiteRestrictsExistingDatabasePermissions(t *testing.T) {

@@ -210,7 +210,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize orchestrator: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithProfiles(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, mcp.Handler()), logger); err != nil {
+	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithProfilesAndAudit(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, mcp.Handler()), logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil

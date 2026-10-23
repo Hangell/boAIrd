@@ -821,6 +821,41 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/projects/{projectID}/audit:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: listProjectAuditEvents
+      x-required-capability: audit.read
+      summary: List immutable, project-scoped security audit events
+      description: Events are append-only and cannot be edited or deleted by Agents, the Brain, or API callers. Results are required; reasons are secret-redacted before persistence and on read.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Audit events, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEvent' }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/profiles:
     get:
       operationId: listAgentProfiles

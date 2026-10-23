@@ -63,9 +63,9 @@ func TestAuditRepositoryRecordsImmutableEscalation(t *testing.T) {
 	}
 }
 
-func TestAuditRepositoryRecordsToolExecutionWithoutPayload(t *testing.T) {
+func TestAuditRepositoryRecordsToolOutcomeAndListsImmutableEvents(t *testing.T) {
 	ctx := context.Background()
-	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "tool-audit.db"))
+	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestAuditRepositoryRecordsToolExecutionWithoutPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := projects.Create(ctx, project.CreateInput{Name: "Tool audit"})
+	p, err := projects.Create(ctx, project.CreateInput{Name: "Audit"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestAuditRepositoryRecordsToolExecutionWithoutPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	var actorType, actorID, eventType, resourceType, resourceID, outcome, reason string
-	if err := database.QueryRowContext(ctx, `SELECT actor_type, actor_id, event_type, resource_type, resource_id, to_status, reason FROM audit_events WHERE project_id=? AND event_type='tool.executed'`, p.ID()).
+	if err := database.QueryRowContext(ctx, `SELECT actor_type, actor_id, event_type, resource_type, resource_id, result, reason FROM audit_events WHERE project_id=? AND event_type='tool.executed'`, p.ID()).
 		Scan(&actorType, &actorID, &eventType, &resourceType, &resourceID, &outcome, &reason); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,62 @@ func TestAuditRepositoryRecordsToolExecutionWithoutPayload(t *testing.T) {
 	if strings.Contains(reason, "payload") || strings.Contains(reason, "secret-value") {
 		t.Fatalf("tool audit stored caller data: %q", reason)
 	}
+	if err := repository.RecordEvent(ctx, audit.Event{
+		ProjectID: p.ID(), ActorType: "administrator", ActorID: "local-administrator",
+		Action: "agent.capability.granted", ResourceType: "agent", ResourceID: "agent-1",
+		Result: "success", Reason: "granted shell.execute token=must-not-persist",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordEvent(ctx, audit.Event{
+		ProjectID: p.ID(), ActorType: "administrator", ActorID: "local-administrator",
+		Action: "agent.capability.revoked", ResourceType: "agent", ResourceID: "agent-1",
+		Result: "success",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := repository.ListEvents(ctx, p.ID(), 50, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
+	}
+	if events[0].Action != "agent.capability.revoked" || events[1].Result != "success" || events[1].ResourceType != "agent" || events[1].ResourceID != "agent-1" {
+		t.Fatalf("audit entries = %+v", events)
+	}
+	if strings.Contains(events[1].Reason, "must-not-persist") || events[2].Result != "success" {
+		t.Fatalf("stored event leaked secret or tool result was lost: %+v", events)
+	}
+	if events[1].CreatedAt.IsZero() {
+		t.Fatal("event timestamp not parsed")
+	}
+
+	if _, err := database.ExecContext(ctx, `DELETE FROM audit_events WHERE resource_id='agent-1'`); err == nil {
+		t.Fatal("audit event was deletable")
+	}
 	if _, err := database.ExecContext(ctx, `DELETE FROM audit_events WHERE event_type='tool.executed'`); err == nil {
 		t.Fatal("tool audit event was mutable")
+	}
+}
+
+func TestAuditRepositoryRejectsIncompleteEvent(t *testing.T) {
+	ctx := context.Background()
+	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
+	repository, err := NewAuditRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RecordEvent(ctx, audit.Event{ProjectID: "p1"}); err == nil {
+		t.Fatal("expected incomplete event to be rejected")
 	}
 }

@@ -1675,6 +1675,24 @@ credentials
 
 ---
 
+## Implemented
+
+- `audit.Event` / `audit.Entry` domain plus `audit.EventRecorder.RecordEvent`
+  and `audit.Reader.ListEvents` interfaces.
+- `storage.AuditRepository.RecordEvent` appends immutable rows with
+  actor/action/resource/result; reasons are secret-redacted and bounded before
+  persistence. Migration `0020_audit_result.sql` adds the `result` column.
+- `storage.AuditRepository.ListEvents` reads project-scoped events newest-first
+  and re-redacts reasons on read.
+- API `GET /api/v1/projects/{id}/audit` (capability `audit.read`, project
+  membership enforced) returns redacted, append-only history.
+- Existing emitters continue to write to the same stream: run and task triggers,
+  agent membership, credential changes, Brain replacement, orchestrator
+  escalation, and profile changes. Agents and the Brain have no mutation path
+  for audit rows (SQL triggers forbid UPDATE/DELETE).
+
+---
+
 # Phase 33 — Notifications
 
 Create an internal notification system.
