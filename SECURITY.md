@@ -1618,6 +1618,21 @@ Avoid arbitrary discovery of executables on the machine.
 
 ---
 
+# Specialized Profile Security
+
+Built-in profile names describe responsibilities and defaults; they do not
+grant capabilities, tools, project membership, or task scope. Effective
+capabilities and tools come only from an explicit administrator-configured
+override scoped to one active project. Tools are restricted to the profile's
+suggested tool set, and backend authorization remains mandatory when a tool is
+executed. Profile override writes and their immutable `profile.created` or
+`profile.updated` audit records commit in one SQLite transaction; an audit
+failure rolls back the configuration change. Profile instructions are
+administrator-controlled context and do not override system, project, or
+capability policy.
+
+---
+
 # Tool Installation
 
 An agent responsible for installing tools must have specific capabilities.

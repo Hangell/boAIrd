@@ -62,12 +62,11 @@ type AuditEvent struct {
 	ProjectID  string
 	ProfileKey string
 	ActorID    string
-	Action     string
 }
 
 type Repository interface {
 	Get(context.Context, string, string) (Override, error)
-	Save(context.Context, Override) error
+	SaveWithAudit(context.Context, Override, AuditEvent) error
 	List(context.Context, string) ([]Override, error)
 }
 
@@ -75,27 +74,19 @@ type ProjectReader interface {
 	Get(context.Context, string) (project.Project, error)
 }
 
-type AuditRecorder interface {
-	RecordProfileChange(context.Context, AuditEvent) error
-}
-
 type Service struct {
 	repository Repository
 	projects   ProjectReader
-	audit      AuditRecorder
 }
 
-func NewService(repository Repository, projects ProjectReader, audit AuditRecorder) (*Service, error) {
+func NewService(repository Repository, projects ProjectReader) (*Service, error) {
 	if repository == nil {
 		return nil, errors.New("profile repository is required")
 	}
 	if projects == nil {
 		return nil, errors.New("project reader is required")
 	}
-	if audit == nil {
-		return nil, errors.New("profile audit recorder is required")
-	}
-	return &Service{repository: repository, projects: projects, audit: audit}, nil
+	return &Service{repository: repository, projects: projects}, nil
 }
 
 // Effective resolves a profile for a project. With no override, capabilities
@@ -177,39 +168,17 @@ func (s *Service) Save(ctx context.Context, projectID, key string, input SaveInp
 	}
 
 	now := time.Now().UTC()
-	action := "created"
-	createdAt := now
-	existing, err := s.repository.Get(ctx, projectID, definition.Key)
-	switch {
-	case err == nil:
-		action = "updated"
-		createdAt = existing.CreatedAt
-	case errors.Is(err, ErrNotFound):
-		// new override
-	default:
-		return Effective{}, err
-	}
-
 	id, err := newID()
 	if err != nil {
 		return Effective{}, fmt.Errorf("generate profile override ID: %w", err)
 	}
-	if existing.ID != "" {
-		id = existing.ID
-	}
 	override := Override{
 		ID: id, ProjectID: projectID, ProfileKey: definition.Key, Instructions: instructions,
-		Capabilities: capabilities, Tools: tools, CreatedBy: existing.CreatedBy, UpdatedBy: input.ActorID,
-		CreatedAt: createdAt, UpdatedAt: now,
+		Capabilities: capabilities, Tools: tools, CreatedBy: input.ActorID, UpdatedBy: input.ActorID,
+		CreatedAt: now, UpdatedAt: now,
 	}
-	if action == "created" {
-		override.CreatedBy = input.ActorID
-	}
-	if err := s.repository.Save(ctx, override); err != nil {
-		return Effective{}, err
-	}
-	if err := s.audit.RecordProfileChange(ctx, AuditEvent{
-		ProjectID: projectID, ProfileKey: definition.Key, ActorID: input.ActorID, Action: action,
+	if err := s.repository.SaveWithAudit(ctx, override, AuditEvent{
+		ProjectID: projectID, ProfileKey: definition.Key, ActorID: input.ActorID,
 	}); err != nil {
 		return Effective{}, err
 	}

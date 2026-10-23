@@ -193,7 +193,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize profile repository: %w", err)
 	}
-	profileService, err := profile.NewService(profileRepository, projectManager, auditRepository)
+	profileService, err := profile.NewService(profileRepository, projectManager)
 	if err != nil {
 		return fmt.Errorf("initialize profile service: %w", err)
 	}

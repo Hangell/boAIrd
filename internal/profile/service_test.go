@@ -40,11 +40,7 @@ func newTestService(t *testing.T) (*profile.Service, *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	audit, err := storage.NewAuditRepository(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service, err := profile.NewService(repository, projects, audit)
+	service, err := profile.NewService(repository, projects)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +131,58 @@ func TestSaveAuditsCreatedAndUpdated(t *testing.T) {
 	}
 	if created != 1 || updated != 1 {
 		t.Fatalf("audit events created=%d updated=%d, want 1 and 1", created, updated)
+	}
+}
+
+func TestSaveRollsBackOverrideWhenAuditInsertFails(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		seedBefore bool
+	}{
+		{name: "create"},
+		{name: "update", seedBefore: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			service, database := newTestService(t)
+			if test.seedBefore {
+				if _, err := service.Save(ctx, "p1", "qa", profile.SaveInput{ActorID: "admin", Instructions: "original", Capabilities: []string{"task.read"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := database.ExecContext(ctx, `CREATE TRIGGER reject_profile_audit
+				BEFORE INSERT ON audit_events
+				WHEN NEW.event_type IN ('profile.created', 'profile.updated')
+				BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END`); err != nil {
+				t.Fatal(err)
+			}
+			input := profile.SaveInput{ActorID: "admin", Instructions: "must rollback", Capabilities: []string{"task.read", "task.review"}}
+			if _, err := service.Save(ctx, "p1", "qa", input); err == nil {
+				t.Fatal("expected audit failure")
+			}
+			effective, err := service.Effective(ctx, "p1", "qa")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.seedBefore {
+				if effective.Instructions != "original" || len(effective.Capabilities) != 1 || effective.Capabilities[0] != "task.read" {
+					t.Fatalf("override update was committed despite audit failure: %+v", effective)
+				}
+			} else if effective.Customized || len(effective.Capabilities) != 0 {
+				t.Fatalf("override create was committed despite audit failure: %+v", effective)
+			}
+			var events int
+			if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events WHERE resource_type='profile'`).Scan(&events); err != nil {
+				t.Fatal(err)
+			}
+			wantEvents := 0
+			if test.seedBefore {
+				wantEvents = 1
+			}
+			if events != wantEvents {
+				t.Fatalf("profile audit events = %d, want %d", events, wantEvents)
+			}
+		})
 	}
 }
 

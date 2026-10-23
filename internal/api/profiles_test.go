@@ -37,11 +37,7 @@ func newProfileHandler(t *testing.T) (http.Handler, *profile.Service, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auditRepository, err := storage.NewAuditRepository(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service, err := profile.NewService(profileRepository, projectManager, auditRepository)
+	service, err := profile.NewService(profileRepository, projectManager)
 	if err != nil {
 		t.Fatal(err)
 	}

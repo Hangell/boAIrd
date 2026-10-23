@@ -58,7 +58,12 @@ func (r *ProfileRepository) List(ctx context.Context, projectID string) ([]profi
 	return values, nil
 }
 
-func (r *ProfileRepository) Save(ctx context.Context, value profile.Override) error {
+// SaveWithAudit persists the override and its immutable audit event in one
+// transaction so neither change can be committed without the other.
+func (r *ProfileRepository) SaveWithAudit(ctx context.Context, value profile.Override, event profile.AuditEvent) error {
+	if event.ProjectID != value.ProjectID || event.ProfileKey != value.ProfileKey || event.ActorID != value.UpdatedBy {
+		return errors.New("profile audit metadata does not match override")
+	}
 	capabilities, err := json.Marshal(value.Capabilities)
 	if err != nil {
 		return fmt.Errorf("encode profile capabilities: %w", err)
@@ -67,19 +72,55 @@ func (r *ProfileRepository) Save(ctx context.Context, value profile.Override) er
 	if err != nil {
 		return fmt.Errorf("encode profile tools: %w", err)
 	}
-	_, err = r.database.ExecContext(ctx, `INSERT INTO project_profiles(
+	tx, err := r.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin profile change transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `INSERT INTO project_profiles(
 		id, project_id, profile_key, instructions, capabilities, tools, created_by, updated_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(project_id, profile_key) DO UPDATE SET
-			instructions = excluded.instructions,
-			capabilities = excluded.capabilities,
-			tools = excluded.tools,
-			updated_by = excluded.updated_by,
-			updated_at = excluded.updated_at`,
+		ON CONFLICT(project_id, profile_key) DO NOTHING`,
 		value.ID, value.ProjectID, value.ProfileKey, value.Instructions, string(capabilities), string(tools),
 		value.CreatedBy, value.UpdatedBy, formatDatabaseTime(value.CreatedAt), formatDatabaseTime(value.UpdatedAt))
 	if err != nil {
-		return fmt.Errorf("save project profile: %w", err)
+		return fmt.Errorf("insert project profile: %w", err)
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check project profile insert: %w", err)
+	}
+	action := "created"
+	if inserted == 0 {
+		action = "updated"
+		result, err = tx.ExecContext(ctx, `UPDATE project_profiles SET
+			instructions = ?,
+			capabilities = ?, tools = ?, updated_by = ?, updated_at = ?
+			WHERE project_id = ? AND profile_key = ?`,
+			value.Instructions, string(capabilities), string(tools), value.UpdatedBy, formatDatabaseTime(value.UpdatedAt),
+			value.ProjectID, value.ProfileKey)
+		if err != nil {
+			return fmt.Errorf("update project profile: %w", err)
+		}
+		updated, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("check project profile update: %w", err)
+		}
+		if updated != 1 {
+			return errors.New("project profile disappeared during update")
+		}
+	}
+	eventType := "profile.created"
+	if action == "updated" {
+		eventType = "profile.updated"
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
+		VALUES (?, 'administrator', ?, ?, 'profile', ?, 'project profile configuration changed')`,
+		event.ProjectID, event.ActorID, eventType, event.ProfileKey); err != nil {
+		return fmt.Errorf("record profile change: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit profile change: %w", err)
 	}
 	return nil
 }

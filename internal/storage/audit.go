@@ -9,7 +9,6 @@ import (
 
 	"boAIrd/internal/audit"
 	"boAIrd/internal/logging"
-	"boAIrd/internal/profile"
 )
 
 // AuditRepository appends immutable audit events that are not produced by domain triggers.
@@ -36,23 +35,6 @@ func (r *AuditRepository) RecordEscalation(ctx context.Context, escalation audit
 		VALUES (?, ?, 'system', 'orchestrator', 'orchestrator.escalated', 'task', ?, ?, ?)`,
 		escalation.ProjectID, escalation.TaskID, escalation.TaskID, escalation.Status, reason); err != nil {
 		return fmt.Errorf("record orchestration escalation: %w", err)
-	}
-	return nil
-}
-
-// RecordProfileChange appends an immutable audit event for a profile override change.
-func (r *AuditRepository) RecordProfileChange(ctx context.Context, event profile.AuditEvent) error {
-	if strings.TrimSpace(event.ProjectID) == "" || strings.TrimSpace(event.ProfileKey) == "" {
-		return errors.New("profile change project and profile key are required")
-	}
-	eventType := "profile.created"
-	if event.Action == "updated" {
-		eventType = "profile.updated"
-	}
-	if _, err := r.database.ExecContext(ctx, `INSERT INTO audit_events(project_id, actor_type, actor_id, event_type, resource_type, resource_id, reason)
-		VALUES (?, 'administrator', ?, ?, 'profile', ?, 'project profile configuration changed')`,
-		event.ProjectID, event.ActorID, eventType, event.ProfileKey); err != nil {
-		return fmt.Errorf("record profile change: %w", err)
 	}
 	return nil
 }

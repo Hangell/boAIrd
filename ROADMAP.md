@@ -1588,13 +1588,13 @@ Software Architect
 
 - `internal/profile` — built-in profile catalog (`qa`, `security`, `devops`,
   `git-manager`, `architect`, `product-owner`, `documentation`, `sdm`) with
-  task scope, instructions, default runtime, suggested tools, and suggested
-  capabilities.
+  responsibility descriptions, instructions, default runtime, suggested tools,
+  and suggested capabilities. Profiles do not define task-bound authorization scope.
 - Profile names never grant authority: a profile's effective capabilities and
   tools come only from an administrator-configured, project-scoped override.
 - `internal/storage/profile.go` + migration `0020_project_profiles.sql` persist
-  per-project overrides; `internal/storage/audit.go` records immutable
-  `profile.created` / `profile.updated` events.
+  per-project overrides and append immutable `profile.created` / `profile.updated`
+  events in the same SQLite transaction.
 - API: `GET /api/v1/profiles` lists the catalog;
   `GET /api/v1/projects/{id}/profiles` and `PUT /api/v1/projects/{id}/profiles/{key}`
   resolve and customize the effective profile for one project. Suggested tools

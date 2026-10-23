@@ -37,7 +37,7 @@ func TestProfileRepositoryUpsertAndList(t *testing.T) {
 		Capabilities: []string{"task.read"}, Tools: []string{"filesystem"},
 		CreatedBy: "admin", UpdatedBy: "admin", CreatedAt: created, UpdatedAt: created,
 	}
-	if err := repository.Save(ctx, first); err != nil {
+	if err := repository.SaveWithAudit(ctx, first, profile.AuditEvent{ProjectID: "p1", ProfileKey: "qa", ActorID: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := repository.Get(ctx, "p1", "qa")
@@ -54,7 +54,7 @@ func TestProfileRepositoryUpsertAndList(t *testing.T) {
 	second.Tools = []string{}
 	second.UpdatedBy = "admin-2"
 	second.UpdatedAt = time.Now().UTC()
-	if err := repository.Save(ctx, second); err != nil {
+	if err := repository.SaveWithAudit(ctx, second, profile.AuditEvent{ProjectID: "p1", ProfileKey: "qa", ActorID: "admin-2"}); err != nil {
 		t.Fatal(err)
 	}
 	updated, err := repository.Get(ctx, "p1", "qa")
