@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"time"
 
 	"boAIrd/internal/agent"
@@ -249,10 +250,43 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize orchestrator: %w", err)
 	}
-	if err := api.Serve(ctx, cfg.Address(), api.NewHandlerWithProfilesAuditAndNotifications(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, mcp.Handler()), logger); err != nil {
+	policy, err := apiSecurityPolicy(cfg)
+	if err != nil {
+		return fmt.Errorf("configure HTTP security policy: %w", err)
+	}
+	handler := api.NewHandlerWithSecurityAndNotifications(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, policy, mcp.Handler())
+	if cfg.TLSCertFile != "" {
+		if err := api.ServeTLS(ctx, cfg.Address(), cfg.TLSCertFile, cfg.TLSKeyFile, handler, logger); err != nil {
+			return fmt.Errorf("run HTTPS API: %w", err)
+		}
+		return nil
+	}
+	if err := api.Serve(ctx, cfg.Address(), handler, logger); err != nil {
 		return fmt.Errorf("run HTTP API: %w", err)
 	}
 	return nil
+}
+
+// apiSecurityPolicy translates remote-mode configuration into request-boundary
+// protections. Forwarded headers are never trusted unless explicitly allowed.
+func apiSecurityPolicy(cfg config.Config) (api.SecurityPolicy, error) {
+	proxies := make([]netip.Prefix, 0, len(cfg.TrustedProxies))
+	for _, value := range cfg.TrustedProxies {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			address, addrErr := netip.ParseAddr(value)
+			if addrErr != nil {
+				return api.SecurityPolicy{}, fmt.Errorf("parse trusted proxy %q: %w", value, err)
+			}
+			prefix = netip.PrefixFrom(address, address.BitLen())
+		}
+		proxies = append(proxies, prefix)
+	}
+	return api.SecurityPolicy{
+		TrustedProxies:    proxies,
+		RateLimitRequests: cfg.RateLimitRequests,
+		RateLimitWindow:   cfg.RateLimitWindow,
+	}, nil
 }
 
 // reconcileAgentStatus expires silent sessions and records observed Agent

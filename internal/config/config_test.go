@@ -323,6 +323,72 @@ func TestValidateAcceptsLoopbackHosts(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsRemoteModeWithoutTLS(t *testing.T) {
+	cfg := testConfig("192.0.2.1")
+	cfg.RemoteMode = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted remote mode without TLS")
+	}
+}
+
+func TestValidateAcceptsRemoteModeWithTLS(t *testing.T) {
+	cfg := testConfig("0.0.0.0")
+	cfg.RemoteMode = true
+	cfg.TLSCertFile = "/etc/boaird/cert.pem"
+	cfg.TLSKeyFile = "/etc/boaird/key.pem"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected valid remote mode: %v", err)
+	}
+}
+
+func TestValidateRejectsPartialTLS(t *testing.T) {
+	cfg := testConfig("192.0.2.1")
+	cfg.RemoteMode = true
+	cfg.TLSCertFile = "/etc/boaird/cert.pem"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted a certificate without a key")
+	}
+}
+
+func TestValidateRejectsInvalidTrustedProxy(t *testing.T) {
+	cfg := testConfig("127.0.0.1")
+	cfg.TrustedProxies = []string{"not-an-ip"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted an invalid trusted proxy")
+	}
+}
+
+func TestValidateRejectsInvalidRateLimit(t *testing.T) {
+	cfg := testConfig("127.0.0.1")
+	cfg.RateLimitRequests = 10
+	cfg.RateLimitWindow = 500 * time.Millisecond
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted a sub-second rate limit window")
+	}
+}
+
+func TestLoadAppliesRemoteModeDefaults(t *testing.T) {
+	setValidSecrets(t)
+	t.Setenv("BOAIRD_HOST", "0.0.0.0")
+	t.Setenv("BOAIRD_REMOTE_MODE", "true")
+	t.Setenv("BOAIRD_TLS_CERT_FILE", "/etc/boaird/cert.pem")
+	t.Setenv("BOAIRD_TLS_KEY_FILE", "/etc/boaird/key.pem")
+	t.Setenv("BOAIRD_TRUSTED_PROXIES", "10.0.0.0/8, 192.168.1.1")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.RemoteMode || cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
+		t.Fatalf("remote mode not parsed: %+v", cfg)
+	}
+	if cfg.RateLimitRequests != defaultRateLimitRequests || cfg.RateLimitWindow != defaultRateLimitWindow {
+		t.Fatalf("remote rate limit defaults = %d/%s", cfg.RateLimitRequests, cfg.RateLimitWindow)
+	}
+	if len(cfg.TrustedProxies) != 2 {
+		t.Fatalf("trusted proxies = %v", cfg.TrustedProxies)
+	}
+}
+
 func TestLoadRejectsMissingOrMalformedMasterKey(t *testing.T) {
 	t.Setenv("BOAIRD_LOCAL_AUTH_TOKEN", testLocalAuthToken())
 	for _, value := range []string{"", "not-hex", "abcd"} {

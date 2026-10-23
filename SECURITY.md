@@ -1138,6 +1138,16 @@ authorization
 
 Remote Mode must never rely on URL obscurity alone.
 
+The local listener stays loopback-bound by default. A non-loopback
+`BOAIRD_HOST` is accepted only with `BOAIRD_REMOTE_MODE=true`, which requires
+`BOAIRD_TLS_CERT_FILE` and `BOAIRD_TLS_KEY_FILE`; startup fails closed if TLS
+or authentication is incomplete. Remote deployments terminate TLS at the
+listener (TLS 1.2 minimum), apply security headers and per-client-IP rate
+limiting, and honor `X-Forwarded-For` only from IPs/CIDRs listed in
+`BOAIRD_TRUSTED_PROXIES`. Existing session cookies (`HttpOnly`,
+`SameSite=Strict`), trusted-origin CORS/CSRF checks, and capability/membership
+authorization apply unchanged.
+
 ---
 
 # CORS

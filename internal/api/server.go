@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -175,6 +176,16 @@ func NewHandlerWithProfilesAuditAndNotifications(database DatabaseHealth, projec
 	return newHandlerWithServices(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, mcpHandlers...)
 }
 
+// NewHandlerWithSecurity applies the configured request-boundary security policy.
+func NewHandlerWithSecurity(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, nil, policy, mcpHandlers...)
+}
+
+// NewHandlerWithSecurityAndNotifications also registers the notification routes.
+func NewHandlerWithSecurityAndNotifications(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, policy, mcpHandlers...)
+}
+
 func newHandler(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, mcpHandlers ...http.Handler) http.Handler {
 	return newHandlerWithMCP(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, nil, mcpHandlers...)
 }
@@ -184,6 +195,10 @@ func newHandlerWithMCP(database DatabaseHealth, projects ProjectManager, credent
 }
 
 func newHandlerWithServices(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, mcpHandlers ...http.Handler) http.Handler {
+	return newHandlerWithServicesAndSecurity(database, projects, credentials, agents, brains, runs, tasks, conversations, localAuthToken, tokens, orchestration, profiles, auditReader, notifications, SecurityPolicy{}, mcpHandlers...)
+}
+
+func newHandlerWithServicesAndSecurity(database DatabaseHealth, projects ProjectManager, credentials CredentialManager, agents AgentManager, brains BrainManager, runs RunManager, tasks TaskManager, conversations ConversationManager, localAuthToken []byte, tokens MCPTokenManager, orchestration OrchestrationManager, profiles ProfileManager, auditReader AuditReader, notifications NotificationManager, policy SecurityPolicy, mcpHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	sessions := newLocalSessionStore()
 	registerSessionRoutes(mux, database, localAuthToken, sessions)
@@ -249,7 +264,9 @@ func newHandlerWithServices(database DatabaseHealth, projects ProjectManager, cr
 	if len(mcpHandlers) > 0 && mcpHandlers[0] != nil {
 		mux.Handle("/mcp", mcpHandlers[0])
 	}
-	return corsAPI(secureAPI(mux, database, projects, tasks, runs, localAuthToken, sessions))
+	secured := secureAPI(mux, database, projects, tasks, runs, localAuthToken, sessions)
+	secured = rateLimitHandler(secured, policy)
+	return securityHeaders(corsAPI(secured))
 }
 
 // Serve listens on address and gracefully shuts down when ctx is cancelled.
@@ -259,6 +276,24 @@ func Serve(ctx context.Context, address string, handler http.Handler, logger *sl
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
 	return serve(ctx, listener, address, handler, logger)
+}
+
+// ServeTLS listens on address with a TLS-terminating listener and shuts down
+// gracefully when ctx is cancelled.
+func ServeTLS(ctx context.Context, address, certFile, keyFile string, handler http.Handler, logger *slog.Logger) error {
+	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("load TLS certificate: %w", err)
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", address, err)
+	}
+	tlsListener := tls.NewListener(listener, &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		MinVersion:   tls.VersionTLS12,
+	})
+	return serve(ctx, tlsListener, address, handler, logger)
 }
 
 func serve(ctx context.Context, listener net.Listener, address string, handler http.Handler, logger *slog.Logger) error {

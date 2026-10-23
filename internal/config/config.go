@@ -29,6 +29,10 @@ const (
 	maximumContextMaxBytes              = 1 << 20
 	defaultContextMaxTokens             = 4096
 	maximumContextMaxTokens             = 100_000
+
+	defaultRateLimitRequests = 60
+	defaultRateLimitWindow   = time.Minute
+	maximumRateLimitRequests = 1_000_000
 )
 
 // Config contains the settings required to start the local service.
@@ -50,6 +54,12 @@ type Config struct {
 	ContextMaxTokens        int
 	ShellEnabled            bool
 	ShellAllowedExecutables []string
+	RemoteMode              bool
+	TLSCertFile             string
+	TLSKeyFile              string
+	TrustedProxies          []string
+	RateLimitRequests       int
+	RateLimitWindow         time.Duration
 }
 
 // MCPAgentToken registers one MCP bearer token for an existing Agent identity.
@@ -188,6 +198,39 @@ func Load() (Config, error) {
 		cfg.ContextMaxTokens = limit
 	}
 
+	if rawMode, ok := os.LookupEnv("BOAIRD_REMOTE_MODE"); ok {
+		mode, err := strconv.ParseBool(rawMode)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_REMOTE_MODE: %w", err)
+		}
+		cfg.RemoteMode = mode
+	}
+	cfg.TLSCertFile = os.Getenv("BOAIRD_TLS_CERT_FILE")
+	cfg.TLSKeyFile = os.Getenv("BOAIRD_TLS_KEY_FILE")
+	cfg.TrustedProxies = splitList(os.Getenv("BOAIRD_TRUSTED_PROXIES"))
+	if rawLimit, ok := os.LookupEnv("BOAIRD_RATE_LIMIT_REQUESTS"); ok {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_RATE_LIMIT_REQUESTS: %w", err)
+		}
+		cfg.RateLimitRequests = limit
+	}
+	if rawWindow, ok := os.LookupEnv("BOAIRD_RATE_LIMIT_WINDOW"); ok {
+		window, err := time.ParseDuration(rawWindow)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse BOAIRD_RATE_LIMIT_WINDOW: %w", err)
+		}
+		cfg.RateLimitWindow = window
+	}
+	if cfg.RemoteMode {
+		if cfg.RateLimitRequests == 0 {
+			cfg.RateLimitRequests = defaultRateLimitRequests
+		}
+		if cfg.RateLimitWindow == 0 {
+			cfg.RateLimitWindow = defaultRateLimitWindow
+		}
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -209,8 +252,28 @@ func (c Config) Validate() error {
 		return fmt.Errorf("BOAIRD_HOST must not be empty")
 	}
 	address := net.ParseIP(c.Host)
-	if address == nil || !address.IsLoopback() {
-		return fmt.Errorf("BOAIRD_HOST must be a loopback IP address until authenticated remote mode is implemented")
+	if address == nil {
+		return fmt.Errorf("BOAIRD_HOST must be an IP address")
+	}
+	if !address.IsLoopback() && !c.RemoteMode {
+		return fmt.Errorf("BOAIRD_HOST must be a loopback IP address unless BOAIRD_REMOTE_MODE is enabled")
+	}
+	if c.RemoteMode && (c.TLSCertFile == "" || c.TLSKeyFile == "") {
+		return fmt.Errorf("BOAIRD_REMOTE_MODE requires BOAIRD_TLS_CERT_FILE and BOAIRD_TLS_KEY_FILE")
+	}
+	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
+		return fmt.Errorf("BOAIRD_TLS_CERT_FILE and BOAIRD_TLS_KEY_FILE must be configured together")
+	}
+	for _, value := range c.TrustedProxies {
+		if !validTrustedProxy(value) {
+			return fmt.Errorf("BOAIRD_TRUSTED_PROXIES must contain IP addresses or CIDR ranges")
+		}
+	}
+	if c.RateLimitRequests < 0 || c.RateLimitRequests > maximumRateLimitRequests {
+		return fmt.Errorf("BOAIRD_RATE_LIMIT_REQUESTS must be between 0 and %d", maximumRateLimitRequests)
+	}
+	if c.RateLimitRequests > 0 && c.RateLimitWindow < time.Second {
+		return fmt.Errorf("BOAIRD_RATE_LIMIT_WINDOW must be at least 1s when rate limiting is enabled")
 	}
 	if c.Port < 1 || c.Port > 65535 {
 		return fmt.Errorf("BOAIRD_PORT must be between 1 and 65535")
@@ -344,6 +407,14 @@ func validProviderHost(host string) bool {
 // Address returns the TCP address used by the HTTP server.
 func (c Config) Address() string {
 	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+}
+
+func validTrustedProxy(value string) bool {
+	if _, err := netip.ParsePrefix(value); err == nil {
+		return true
+	}
+	address, err := netip.ParseAddr(value)
+	return err == nil && address.Zone() == ""
 }
 
 func envOrDefault(key, fallback string) string {
