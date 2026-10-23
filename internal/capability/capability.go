@@ -22,6 +22,16 @@ const (
 	GitCommit Capability = "git.commit"
 	GitPush   Capability = "git.push"
 	GitMerge  Capability = "git.merge"
+
+	GitHubIssueRead   Capability = "github.issue.read"
+	GitHubIssueCreate Capability = "github.issue.create"
+	GitHubIssueUpdate Capability = "github.issue.update"
+	GitHubPRRead      Capability = "github.pr.read"
+	GitHubPRCreate    Capability = "github.pr.create"
+	GitHubPRReview    Capability = "github.pr.review"
+	GitHubPRMerge     Capability = "github.pr.merge"
+
+	CredentialIntegrationManage Capability = "credential.integration.manage"
 )
 
 func New(identifier string) (Capability, error) {

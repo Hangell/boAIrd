@@ -64,6 +64,12 @@ func TestManagerEncryptsResolvesAndReturnsMetadataOnly(t *testing.T) {
 	if err != nil || resolved != secret {
 		t.Fatalf("Resolve() = %q, %v", resolved, err)
 	}
+	if resolved, err := manager.ResolveForProvider(context.Background(), metadata.ID, scope, "github"); resolved != "" || !errors.Is(err, ErrCredentialUnavailable) {
+		t.Fatalf("ResolveForProvider(github) = %q, %v; want unavailable for OpenAI credential", resolved, err)
+	}
+	if resolved, err := manager.ResolveForProvider(context.Background(), metadata.ID, scope, "OpenAI"); err != nil || resolved != secret {
+		t.Fatalf("ResolveForProvider(OpenAI) = %q, %v", resolved, err)
+	}
 	if _, err := manager.Resolve(context.Background(), metadata.ID, Scope{}); !errors.Is(err, ErrCredentialUnavailable) {
 		t.Fatalf("Resolve() without scope error = %v, want unavailable", err)
 	}

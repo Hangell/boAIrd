@@ -729,6 +729,76 @@ trust, and keep kernel/container isolation as future work.
 
 ---
 
+# GitHub Tool Security Details
+
+GitHub tools reach an external service, so they are disabled by default:
+
+```text
+BOAIRD_GITHUB_ENABLED = false
+```
+
+and pull-request merges remain denied even when enabled:
+
+```text
+BOAIRD_GITHUB_ALLOW_MERGE = false
+```
+
+Each operation carries its own capability, and PR review never implies merge:
+
+```text
+github.issue.read    github.pr.read
+github.issue.create  github.pr.create
+github.issue.update  github.pr.review
+                     github.pr.merge
+```
+
+Every call is bound to the project's administrator-approved repository URL.
+The server parses only `github.com` HTTPS/SSH repository URLs and requires the
+exact SSH host `github.com`; lookalike suffixes are rejected. HTTP redirects
+are not followed, so a request cannot leave the approved API origin. The caller
+cannot target a different repository — the operation always runs against the
+project's bound repository.
+
+GitHub credentials use an explicit integration binding separate from an Agent's
+runtime-provider credential. A local administrator binds a stored credential
+whose provider is `github` to one MCP Agent and project through
+`PUT /api/v1/projects/{projectID}/agents/{agentID}/github-credential`; `DELETE`
+revokes it. Both changes and their immutable audit events commit atomically.
+The binding operation requires the Agent to be an MCP runtime with current
+scope in that non-archived project. MCP tool schemas do not accept
+`credential_id`; the server resolves the binding from the authenticated Agent
+and project and rechecks provider and scope before decryption. Missing, revoked,
+cross-project, or non-GitHub bindings fail closed. Plaintext tokens never reach
+Agent memory, logs, audit, or responses. HTTP calls use
+`Authorization: Bearer <token>`; provider error bodies are bounded and
+sanitized. The API base is fixed to `https://api.github.com`.
+
+`github.pr.merge` additionally requires:
+
+```text
+explicit capability (github.pr.merge)
++
+administrator enablement (BOAIRD_GITHUB_ALLOW_MERGE)
++
+Human Review gate when the project requires it
+```
+
+When the project sets `human_review_required`, merge must be tied to a task
+(`task_id`) whose human review has been approved. Errors while checking the
+Human Review policy deny the merge. Every merge request includes the expected
+full PR head SHA; GitHub rejects the request if the reviewed head has changed.
+Issue tools also inspect GitHub's `pull_request` marker and exclude PRs, because
+GitHub's Issues API represents pull requests as issues as well.
+
+Audit records actor, project, task, run, repository, operation, and result
+without credentials, arguments, or response bodies. A metadata-only `start`
+event is persisted before any mutating request; an audit failure aborts the call.
+
+As with Git, this is not a sandbox for the remote side: the credential and the
+repository binding limit what the tool may do, but the token itself may carry
+broader GitHub scopes. Use least-privilege tokens and restrict the bound
+repository to administrators the project trusts.
+
 # Tool Extension Security
 
 Extensions add tools without changing the core, and are governed by a versioned,

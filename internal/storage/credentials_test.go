@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -143,5 +144,127 @@ func TestCredentialManagerPersistsOnlyCiphertext(t *testing.T) {
 	}
 	if _, err := manager.Resolve(ctx, replacementID, scope); err != credential.ErrCredentialUnavailable {
 		t.Fatalf("Resolve() after scope removal error = %v, want unavailable", err)
+	}
+}
+
+func TestGitHubIntegrationCredentialBindingIsScopedAndAuditedAtomically(t *testing.T) {
+	ctx := context.Background()
+	database, err := OpenSQLite(ctx, filepath.Join(t.TempDir(), "boaird.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
+	projectRepository, err := NewProjectRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := project.NewManager(projectRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstProject, err := projects.Create(ctx, project.CreateInput{Name: "GitHub integration one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondProject, err := projects.Create(ctx, project.CreateInput{Name: "GitHub integration two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRepository, err := NewAgentRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := agent.NewManager(agentRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundAgent, err := agents.Create(ctx, agent.CreateInput{Name: "Bound MCP", Role: "worker", Runtime: agent.RuntimeMCP, Capabilities: []string{"github.issue.read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.AddProject(ctx, boundAgent.ID(), firstProject.ID(), project.LocalAdministratorID); err != nil {
+		t.Fatal(err)
+	}
+	unboundAgent, err := agents.Create(ctx, agent.CreateInput{Name: "Unbound MCP", Role: "worker", Runtime: agent.RuntimeMCP, Capabilities: []string{"github.issue.read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.AddProject(ctx, unboundAgent.ID(), firstProject.ID(), project.LocalAdministratorID); err != nil {
+		t.Fatal(err)
+	}
+	credentialRepository, err := NewCredentialRepository(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := credential.NewManager(credentialRepository, []byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "ghp_private_test_secret_123456"
+	githubCredential, err := manager.Create(ctx, "GitHub", credential.ProviderGitHub, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAICredential, err := manager.Create(ctx, "OpenAI", "openai", "sk-openai-test-secret-123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.BindGitHub(ctx, firstProject.ID(), boundAgent.ID(), githubCredential.ID, project.LocalAdministratorID); err != nil {
+		t.Fatalf("BindGitHub() error = %v", err)
+	}
+	resolved, err := manager.ResolveGitHub(ctx, credential.Scope{AgentID: boundAgent.ID(), ProjectID: firstProject.ID()})
+	if err != nil || resolved != secret {
+		t.Fatalf("ResolveGitHub() = %q, %v; want the bound token", resolved, err)
+	}
+	if _, err := manager.ResolveGitHub(ctx, credential.Scope{AgentID: unboundAgent.ID(), ProjectID: firstProject.ID()}); !errors.Is(err, credential.ErrCredentialUnavailable) {
+		t.Fatalf("unbound Agent ResolveGitHub() error = %v, want unavailable", err)
+	}
+	if _, err := manager.ResolveGitHub(ctx, credential.Scope{AgentID: boundAgent.ID(), ProjectID: secondProject.ID()}); !errors.Is(err, credential.ErrCredentialUnavailable) {
+		t.Fatalf("cross-project ResolveGitHub() error = %v, want unavailable", err)
+	}
+	if err := manager.BindGitHub(ctx, firstProject.ID(), boundAgent.ID(), openAICredential.ID, project.LocalAdministratorID); !errors.Is(err, credential.ErrCredentialUnavailable) {
+		t.Fatalf("BindGitHub(OpenAI credential) error = %v, want unavailable", err)
+	}
+	if err := manager.BindGitHub(ctx, secondProject.ID(), boundAgent.ID(), githubCredential.ID, project.LocalAdministratorID); !errors.Is(err, credential.ErrCredentialUnavailable) {
+		t.Fatalf("cross-project BindGitHub() error = %v, want unavailable", err)
+	}
+	if _, err := database.ExecContext(ctx, `CREATE TRIGGER reject_github_binding_audit BEFORE INSERT ON audit_events
+		WHEN NEW.event_type = 'credential.integration.bound' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.BindGitHub(ctx, firstProject.ID(), unboundAgent.ID(), githubCredential.ID, project.LocalAdministratorID); err == nil {
+		t.Fatal("BindGitHub() succeeded while audit insertion was rejected")
+	}
+	if _, err := database.ExecContext(ctx, "DROP TRIGGER reject_github_binding_audit"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.ResolveGitHub(ctx, credential.Scope{AgentID: unboundAgent.ID(), ProjectID: firstProject.ID()}); !errors.Is(err, credential.ErrCredentialUnavailable) {
+		t.Fatalf("binding survived failed audit transaction: %v", err)
+	}
+	if err := manager.UnbindGitHub(ctx, firstProject.ID(), boundAgent.ID(), project.LocalAdministratorID); err != nil {
+		t.Fatalf("UnbindGitHub() error = %v", err)
+	}
+	if _, err := manager.ResolveGitHub(ctx, credential.Scope{AgentID: boundAgent.ID(), ProjectID: firstProject.ID()}); !errors.Is(err, credential.ErrCredentialUnavailable) {
+		t.Fatalf("ResolveGitHub() after revocation error = %v, want unavailable", err)
+	}
+	var events int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_events
+		WHERE event_type IN ('credential.integration.bound', 'credential.integration.unbound')`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 2 {
+		t.Fatalf("integration binding audit events = %d, want 2", events)
+	}
+	var auditText string
+	if err := database.QueryRowContext(ctx, `SELECT group_concat(event_type || ' ' || resource_id || ' ' || reason, ' ')
+		FROM audit_events WHERE event_type LIKE 'credential.integration.%'`).Scan(&auditText); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(auditText, secret) || strings.Contains(auditText, githubCredential.ID) {
+		t.Fatalf("integration audit contains secret or credential ID: %q", auditText)
 	}
 }

@@ -917,6 +917,13 @@ This must never be the default behavior.
 
 # GitHub
 
+GitHub tools are available to MCP Agents only after a local administrator binds
+a stored `github` credential to the Agent and project using
+`PUT /api/v1/projects/{projectID}/agents/{agentID}/github-credential`. Revoke the
+binding with `DELETE` on the same path. MCP tool calls do not include a
+credential ID; boAIrd resolves the administrator-approved binding from the
+authenticated Agent and project.
+
 Possible capabilities:
 
 ```text

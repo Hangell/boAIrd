@@ -739,6 +739,16 @@ match, and the Agent must have administrator-granted project membership or be
 the project's active Brain. Missing or revoked scope is denied before decrypting.
 Credential binding, project membership, and Brain attachment changes are audited.
 
+GitHub tools use a separate integration binding because an MCP Agent cannot
+carry an API runtime provider credential. A local administrator binds a stored
+`github` credential to one MCP Agent and project through
+`PUT /api/v1/projects/{projectID}/agents/{agentID}/github-credential`. The MCP
+tool derives that binding from the authenticated Agent and requested project;
+its input never accepts a credential ID. Binding and revocation are audited in
+the same transaction as the grant change. Resolution rechecks the Agent's MCP
+runtime, current project scope, project archival state, and credential provider
+before decrypting.
+
 ---
 
 # 22. Credential Flow

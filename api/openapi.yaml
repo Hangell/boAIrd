@@ -944,6 +944,44 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/projects/{projectID}/agents/{agentID}/github-credential:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema: { type: string }
+      - name: agentID
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: bindAgentGitHubCredential
+      x-required-capability: credential.integration.manage
+      summary: Bind a GitHub credential to an MCP Agent in a project
+      description: Local administrator only. The credential must have provider github and the MCP Agent must belong to this project. The operation is audited atomically. The credential ID is accepted only on this administrator endpoint and is never returned or exposed to MCP tools.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GitHubCredentialBinding' }
+      responses:
+        '204': { description: GitHub credential bound to the Agent and project. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: Missing or invalid local administrator credentials. }
+        '403': { description: The caller is not authorized for this project. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: unbindAgentGitHubCredential
+      x-required-capability: credential.integration.manage
+      summary: Revoke an MCP Agent GitHub credential binding
+      description: Local administrator only. The revocation and immutable audit event commit atomically.
+      responses:
+        '204': { description: GitHub credential binding revoked. }
+        '401': { description: Missing or invalid local administrator credentials. }
+        '403': { description: The caller is not authorized for this project. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/agents:
     post:
       operationId: createAgent
@@ -1952,6 +1990,12 @@ components:
           minLength: 1
           maxLength: 16384
           writeOnly: true
+    GitHubCredentialBinding:
+      type: object
+      additionalProperties: false
+      required: [credential_id]
+      properties:
+        credential_id: { type: string, minLength: 1, maxLength: 128 }
     Credential:
       type: object
       description: Metadata only. Provider execution resolves a secret only for the Agent and project scope supplied by the server.

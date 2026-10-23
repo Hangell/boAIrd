@@ -217,6 +217,17 @@ func (s *gitExecutorStub) Execute(_ context.Context, request governedtool.Reques
 	return json.RawMessage(`{"stdout":"ok","truncated":false}`), nil
 }
 
+type githubExecutorStub struct {
+	request governedtool.Request
+	calls   int
+}
+
+func (s *githubExecutorStub) Execute(_ context.Context, request governedtool.Request) (json.RawMessage, error) {
+	s.request = request
+	s.calls++
+	return json.RawMessage(`{"issues":[],"count":0}`), nil
+}
+
 type mcpExtensionAuditor struct{}
 
 func (mcpExtensionAuditor) RecordToolExecution(context.Context, governedtool.Event) error { return nil }
@@ -621,6 +632,15 @@ func TestGitToolsAreDiscoveredAndUseAuthenticatedRepositoryScope(t *testing.T) {
 	got := make(map[string]bool, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		got[tool.Name] = true
+		if strings.HasPrefix(tool.Name, "boaird.github.") {
+			schema, err := json.Marshal(tool.InputSchema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(schema), "credential_id") {
+				t.Errorf("GitHub MCP schema exposes credential selection: %s", schema)
+			}
+		}
 	}
 	for _, name := range []string{"boaird.git.read", "boaird.git.diff", "boaird.git.branch", "boaird.git.commit", "boaird.git.push", "boaird.git.merge"} {
 		if !got[name] {
@@ -647,6 +667,73 @@ func TestGitToolsAreDiscoveredAndUseAuthenticatedRepositoryScope(t *testing.T) {
 	}
 	if executor.calls != 1 {
 		t.Fatalf("git.commit reached the executor despite missing capability; calls = %d", executor.calls)
+	}
+}
+
+func TestGitHubToolsAreDiscoveredAndUseAuthenticatedRepositoryScope(t *testing.T) {
+	a, err := testAgentWithCapabilities(t, "github-agent", []string{"github.issue.read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err = a.AddProject("project-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := project.Restore(project.Snapshot{ID: "project-one", Name: "Project One", Status: project.StatusConfiguring, RepositoryURL: "https://github.com/acme/widgets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &githubExecutorStub{}
+	server, err := New(Services{
+		Agents: agentStub{values: map[string]agent.Agent{a.ID(): a}}, Projects: projectStub{values: map[string]project.Project{"project-one": value}},
+		Tasks: taskStub{}, Conversations: conversationStub{}, Brains: brainStub{}, Runs: runStub{}, GitHubTools: executor,
+	}, staticVerifier{"secret": a.ID()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+	client := mcp.NewClient(&mcp.Implementation{Name: "github-test", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint: httpServer.URL, HTTPClient: &http.Client{Transport: bearerRoundTripper{token: func() string { return "secret" }, base: http.DefaultTransport}}, DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool, len(tools.Tools))
+	for _, tool := range tools.Tools {
+		got[tool.Name] = true
+	}
+	for _, name := range []string{"boaird.github.issue.read", "boaird.github.issue.create", "boaird.github.issue.update", "boaird.github.pr.read", "boaird.github.pr.create", "boaird.github.pr.review", "boaird.github.pr.merge"} {
+		if !got[name] {
+			t.Errorf("missing MCP tool %q", name)
+		}
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.github.issue.read", Arguments: map[string]any{
+		"project_id": "project-one", "task_id": "task-1", "run_id": "run-1", "action": "list",
+	}})
+	if err != nil || result.IsError {
+		t.Fatalf("github.issue.read result = %+v, error = %v", result, err)
+	}
+	if executor.calls != 1 || executor.request.Principal.ID != a.ID() || executor.request.ProjectID != "project-one" ||
+		executor.request.ToolName != "github.issue.read" || executor.request.TaskID != "task-1" || executor.request.RunID != "run-1" ||
+		executor.request.ResourceType != "github.repository" || executor.request.ResourceID != "https://github.com/acme/widgets" {
+		t.Fatalf("executor calls = %d, request = %#v", executor.calls, executor.request)
+	}
+	// A missing GitHub capability must be denied before reaching the executor.
+	denied, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "boaird.github.pr.merge", Arguments: map[string]any{
+		"project_id": "project-one", "number": 1,
+	}})
+	if err != nil || denied == nil || !denied.IsError {
+		t.Fatalf("github.pr.merge without capability result = %+v, error = %v; want denial", denied, err)
+	}
+	if executor.calls != 1 {
+		t.Fatalf("github.pr.merge reached the executor despite missing capability; calls = %d", executor.calls)
 	}
 }
 

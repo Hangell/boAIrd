@@ -223,6 +223,48 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 			return fmt.Errorf("configure shell tool enforcement: %w", err)
 		}
 	}
+	var githubExecutor mcpserver.ToolExecutor
+	if cfg.GitHubEnabled {
+		registry := governedtool.NewRegistry()
+		githubTools, err := governedtool.NewGitHubTools(governedtool.GitHubConfig{
+			Enabled: true, AllowMerge: cfg.GitHubAllowMerge,
+			ResolveRepository: func(ctx context.Context, projectID string) (string, error) {
+				value, err := projectManager.Get(ctx, projectID)
+				if err != nil {
+					return "", err
+				}
+				return value.RepositoryURL(), nil
+			},
+			ResolveCredential: func(ctx context.Context, agentID, projectID, provider string) (string, error) {
+				if provider != credential.ProviderGitHub {
+					return "", credential.ErrCredentialUnavailable
+				}
+				return credentialManager.ResolveGitHub(ctx, credential.Scope{AgentID: agentID, ProjectID: projectID})
+			},
+			HumanReviewRequired: func(ctx context.Context, projectID string) (bool, error) {
+				value, err := projectManager.Get(ctx, projectID)
+				if err != nil {
+					return false, err
+				}
+				return value.HumanReviewRequired(), nil
+			},
+			TaskApproved: func(ctx context.Context, projectID, taskID string) (bool, error) {
+				return githubTaskReviewApproved(ctx, taskService, projectID, taskID)
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("configure github tools: %w", err)
+		}
+		for _, githubTool := range githubTools {
+			if err := registry.Register(githubTool); err != nil {
+				return fmt.Errorf("register github tool: %w", err)
+			}
+		}
+		githubExecutor, err = governedtool.NewEnforcer(registry, auditRepository, githubScopeAuthorizer{projects: projectManager, tasks: taskService, runs: runManager})
+		if err != nil {
+			return fmt.Errorf("configure github tool enforcement: %w", err)
+		}
+	}
 	var gitExecutor mcpserver.ToolExecutor
 	if cfg.GitEnabled {
 		registry := governedtool.NewRegistry()
@@ -283,7 +325,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	mcp, err := mcpserver.New(mcpserver.Services{
 		Agents: agentManager, Projects: projectManager, Tasks: taskService, Denials: taskRepository,
 		Conversations: conversationService, Brains: brainService, Runs: runManager,
-		Heartbeats: heartbeatService, Tools: shellExecutor, GitTools: gitExecutor, ExtensionTools: extensionExecutor,
+		Heartbeats: heartbeatService, Tools: shellExecutor, GitTools: gitExecutor,
+		GitHubTools: githubExecutor, ExtensionTools: extensionExecutor,
 	}, mcpTokenService)
 	if err != nil {
 		return fmt.Errorf("initialize MCP server: %w", err)

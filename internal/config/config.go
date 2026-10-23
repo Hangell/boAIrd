@@ -63,6 +63,8 @@ type Config struct {
 	GitEnabled              bool
 	GitAllowPush            bool
 	GitAllowMerge           bool
+	GitHubEnabled           bool
+	GitHubAllowMerge        bool
 	RemoteMode              bool
 	TLSCertFile             string
 	TLSKeyFile              string
@@ -178,6 +180,14 @@ func Load() (Config, error) {
 		return Config{}, boolErr
 	}
 	cfg.GitAllowMerge, boolErr = boolEnv("BOAIRD_GIT_ALLOW_MERGE")
+	if boolErr != nil {
+		return Config{}, boolErr
+	}
+	cfg.GitHubEnabled, boolErr = boolEnv("BOAIRD_GITHUB_ENABLED")
+	if boolErr != nil {
+		return Config{}, boolErr
+	}
+	cfg.GitHubAllowMerge, boolErr = boolEnv("BOAIRD_GITHUB_ALLOW_MERGE")
 	if boolErr != nil {
 		return Config{}, boolErr
 	}
@@ -402,6 +412,9 @@ func (c Config) Validate() error {
 	}
 	if c.GitAllowMerge && !c.GitEnabled {
 		return fmt.Errorf("BOAIRD_GIT_ALLOW_MERGE requires BOAIRD_GIT_ENABLED")
+	}
+	if c.GitHubAllowMerge && !c.GitHubEnabled {
+		return fmt.Errorf("BOAIRD_GITHUB_ALLOW_MERGE requires BOAIRD_GITHUB_ENABLED")
 	}
 	seenAgents := make(map[string]struct{}, len(c.MCPAgentTokens))
 	seenTokens := make(map[[32]byte]struct{}, len(c.MCPAgentTokens))
