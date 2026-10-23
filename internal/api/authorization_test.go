@@ -205,7 +205,7 @@ func TestRESTAuditsDomainAuthorizationDenials(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "forbidden", "domain policy denied the operation")
 	})
-	handler := secureAPI(next, database, nil, nil, nil, testLocalAuthTokenBytes(), newLocalSessionStore())
+	handler := secureAPI(next, database, nil, nil, nil, nil, testLocalAuthTokenBytes(), newLocalSessionStore())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, authorizedTestRequest(http.MethodGet, "/api/v1/agents", nil))
 	if response.Code != http.StatusForbidden {

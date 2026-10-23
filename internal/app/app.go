@@ -29,6 +29,7 @@ import (
 	"boAIrd/internal/task"
 	"boAIrd/internal/template"
 	governedtool "boAIrd/internal/tool"
+	"boAIrd/internal/user"
 )
 
 // Run opens service dependencies and serves HTTP until the context is cancelled.
@@ -284,6 +285,14 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize template service: %w", err)
 	}
+	userRepository, err := storage.NewUserRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize user repository: %w", err)
+	}
+	userService, err := user.NewService(userRepository, projectRepository)
+	if err != nil {
+		return fmt.Errorf("initialize user service: %w", err)
+	}
 	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
 		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService,
@@ -301,7 +310,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("configure HTTP security policy: %w", err)
 	}
-	handler := api.NewHandlerWithSecurityNotificationsAndTemplates(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, templateService, policy, mcp.Handler())
+	handler := api.NewHandlerWithSecurityNotificationsTemplatesAndUsers(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, templateService, userService, policy, mcp.Handler())
 	if cfg.TLSCertFile != "" {
 		if err := api.ServeTLS(ctx, cfg.Address(), cfg.TLSCertFile, cfg.TLSKeyFile, handler, logger); err != nil {
 			return fmt.Errorf("run HTTPS API: %w", err)

@@ -11,6 +11,7 @@ import (
 	"boAIrd/internal/capability"
 	"boAIrd/internal/project"
 	"boAIrd/internal/task"
+	"boAIrd/internal/user"
 )
 
 type projectMembershipChecker interface {
@@ -32,23 +33,32 @@ var administratorCapabilities = []capability.Capability{
 	"task.review", "task.complete", "conversation.read", "conversation.write", "mcp.token.manage",
 	"audit.read",
 	"notification.read", "notification.acknowledge", "notification.retry",
+	"user.manage",
 }
 
-func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, token []byte, sessions *localSessionStore) http.Handler {
+// memberCapabilities is the read-only, deny-by-default grant for non-administrator
+// users. Members never receive write, credential, scope, or user-management grants.
+var memberCapabilities = []capability.Capability{
+	"project.read", "agent.read", "brain.read", "run.read", "task.read",
+	"conversation.read", "notification.read", "audit.read",
+}
+
+func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, users userRoleResolver, token []byte, sessions *localSessionStore) http.Handler {
 	authorizer := capability.Authorizer{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/status" || r.URL.Path == "/api/v1/session" && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, ok := localConversationPrincipal(r, token, sessions); !ok {
+		userID, ok := localConversationPrincipal(r, token, sessions)
+		if !ok {
 			recordAuthorizationDenial(r.Context(), database, "", "", "", authorizationResource(r), "authentication_required")
 			writeConversationUnauthorized(w)
 			return
 		}
 		if r.Header.Get("Authorization") == "" && isUnsafeMethod(r.Method) {
 			if !trustedDashboardOrigin(r.Header.Get("Origin"), r) {
-				recordAuthorizationDenial(r.Context(), database, project.LocalAdministratorID, "", "", authorizationResource(r), "cookie_origin_rejected")
+				recordAuthorizationDenial(r.Context(), database, userID, "", "", authorizationResource(r), "cookie_origin_rejected")
 				writeAPIError(w, http.StatusForbidden, "forbidden", "browser origin is not authorized")
 				return
 			}
@@ -59,8 +69,8 @@ func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManag
 			return
 		}
 		principal := capability.Principal{
-			ID:           project.LocalAdministratorID,
-			Capabilities: append([]capability.Capability(nil), administratorCapabilities...),
+			ID:           userID,
+			Capabilities: capabilitiesForUser(r.Context(), users, userID),
 		}
 		if projectID != "" {
 			membership, ok := projects.(projectMembershipChecker)
@@ -90,6 +100,22 @@ func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManag
 			recordAuthorizationDenial(r.Context(), database, principal.ID, projectID, required, authorizationResource(r), "operation_denied")
 		}
 	})
+}
+
+// userRoleResolver resolves a user's global role for authorization.
+type userRoleResolver interface {
+	Get(context.Context, string) (user.User, error)
+}
+
+func capabilitiesForUser(ctx context.Context, users userRoleResolver, userID string) []capability.Capability {
+	if users == nil || userID == project.LocalAdministratorID {
+		return append([]capability.Capability(nil), administratorCapabilities...)
+	}
+	value, err := users.Get(ctx, userID)
+	if err != nil || value.Role() != user.RoleAdministrator {
+		return append([]capability.Capability(nil), memberCapabilities...)
+	}
+	return append([]capability.Capability(nil), administratorCapabilities...)
 }
 
 func authorizationResource(r *http.Request) string {
@@ -159,6 +185,16 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		return "mcp.token.manage", "", true
 	case len(parts) == 6 && parts[2] == "mcp" && parts[3] == "tokens" && parts[4] != "" && parts[5] == "rotate" && method == http.MethodPost:
 		return "mcp.token.manage", "", true
+	case len(parts) == 3 && parts[2] == "users":
+		if method == http.MethodGet || method == http.MethodPost {
+			return "user.manage", "", true
+		}
+	case len(parts) == 4 && parts[2] == "users":
+		if method == http.MethodGet || method == http.MethodDelete {
+			return "user.manage", "", true
+		}
+	case len(parts) == 5 && parts[2] == "users" && parts[4] == "sessions" && method == http.MethodPost:
+		return "user.manage", "", true
 	case len(parts) == 3 && parts[2] == "projects" && method == http.MethodPost:
 		return "project.create", "", true
 	case len(parts) == 3 && parts[2] == "projects" && method == http.MethodGet:
@@ -250,6 +286,9 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		}
 		if len(parts) == 7 && parts[4] == "templates" && parts[6] == "instantiate" && method == http.MethodPost {
 			return "agent.scope.manage", projectID, true
+		}
+		if len(parts) == 6 && parts[4] == "members" && (method == http.MethodPut || method == http.MethodDelete) {
+			return "user.manage", projectID, true
 		}
 	case len(parts) == 3 && parts[2] == "profiles" && method == http.MethodGet:
 		return "agent.read", "", true
