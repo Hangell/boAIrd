@@ -1139,7 +1139,7 @@ paths:
       operationId: instantiateAgentTemplate
       x-required-capability: agent.scope.manage
       summary: Instantiate a project Agent from a template
-      description: Creates a separate project Agent with only the explicitly configured capabilities, scoped to the project. The template source and version are recorded on the instance; the template is not mutated.
+      description: Requires agent.create and agent.scope.manage. Creates a separate project Agent with only the explicitly configured capabilities, scoped to the project. The template source and version are recorded on the instance; the template is not mutated.
       requestBody:
         required: true
         content:
@@ -1585,7 +1585,10 @@ components:
         description: { type: string, maxLength: 4000 }
         instructions: { type: string, maxLength: 16000 }
         capabilities: { type: array, items: { type: string }, description: Explicitly configured capabilities only; never granted by the template. }
-        tools: { type: array, items: { type: string }, description: Limited to the template's suggested tools. }
+        provider: { type: string, description: Required when the template's default runtime is API. }
+        provider_base_url: { type: string, description: Optional API endpoint override. }
+        model: { type: string, description: Required when the template's default runtime is API. }
+        credential_id: { type: string, description: Required when the template's default runtime is API; references a configured credential, never a raw secret. }
     AgentStatusEvent:
       type: object
       required: [sequence, agent_id, from_status, to_status, reason, created_at]

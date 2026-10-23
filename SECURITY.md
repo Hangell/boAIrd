@@ -1687,6 +1687,29 @@ capability policy.
 
 ---
 
+# Reusable Agent Template Security
+
+Agent templates are global, versioned definitions (role, instructions, default
+runtime, suggested tools, and suggested capabilities). Template metadata and
+suggestions never grant authority: capabilities are granted only from an
+explicit instantiation request, and the instantiated Agent is a separate,
+project-scoped record; the source template is never mutated.
+
+Instantiation is atomic: the Agent, its capabilities, its project membership,
+its template provenance (`template_instances`), and the `template.instantiated`
+audit event commit in one SQLite transaction; a failure rolls everything back.
+Global template create/update is recorded in the immutable `template_audit`
+stream, and template updates use a version compare-and-swap that rejects stale
+writers with a conflict.
+
+Instantiation requires both `agent.create` and `agent.scope.manage` (plus
+project membership). API-runtime templates require the request to supply
+`provider`, `model`, and `credential_id`; credentials are never embedded in a
+global template. Tool grants are not part of Phase 39: a template's suggested
+tools are metadata only until a tool-assignment model exists.
+
+---
+
 # Tool Installation
 
 An agent responsible for installing tools must have specific capabilities.
