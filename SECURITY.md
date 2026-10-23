@@ -690,6 +690,37 @@ trust, and keep kernel/container isolation as future work.
 
 ---
 
+# Tool Extension Security
+
+Extensions add tools without changing the core, and are governed by a versioned,
+declarative SDK (see `docs/EXTENSIONS.md`). The only accepted contract is
+`sdk_version: 1`; other versions are rejected. Extensions are manifests, never
+executable code, so an untrusted extension cannot read arbitrary files or
+secrets and cannot execute arbitrary programs.
+
+Every tool declaration must provide its name, description, input/output JSON
+schemas, required capabilities, and data access. Data access is limited to
+`none` or `network:<host>`; manifests requesting filesystem, secret, credential,
+or shell/exec access are rejected. An `http` tool targets one administrator
+approved `https://` endpoint with no embedded credentials; invocation sends the
+validated input in a single bounded, redacted `POST`, and responses are
+size-limited and secret-redacted. `declarative` tools are contract-only and are
+not executable until a core-reviewed adapter exists.
+
+Lifecycle is administrator-controlled and audited:
+
+```text
+install (pending) -> activate (active) -> deactivate (removed)
+```
+
+Installation validates and stores the manifest as `pending`. Activation
+(`extension.manage`) registers every executable tool with the shared tool
+Enforcer, so each invocation is capability- and resource-checked. Deactivation
+unregisters the tools and removes the extension. Every transition is recorded
+in the immutable `extension_audit` stream.
+
+---
+
 # Filesystem Security
 
 Agents must have clear filesystem boundaries.

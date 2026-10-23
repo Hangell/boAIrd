@@ -68,6 +68,14 @@ func (r *Registry) Resolve(name string) (Tool, error) {
 	return value, nil
 }
 
+// Unregister removes a previously registered tool, used when an extension is
+// deactivated. Removing an unknown tool is not an error.
+func (r *Registry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 // Enforcer authorizes and bounds every call before invoking a registered tool.
 type Enforcer struct {
 	registry   *Registry

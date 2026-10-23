@@ -32,6 +32,7 @@ var administratorCapabilities = []capability.Capability{
 	"task.review", "task.complete", "conversation.read", "conversation.write", "mcp.token.manage",
 	"audit.read",
 	"notification.read", "notification.acknowledge", "notification.retry",
+	"extension.manage",
 }
 
 func secureAPI(next http.Handler, database DatabaseHealth, projects ProjectManager, tasks TaskManager, runs RunManager, token []byte, sessions *localSessionStore) http.Handler {
@@ -267,6 +268,16 @@ func requiredAPICapability(r *http.Request, projects ProjectManager, tasks TaskM
 		if method == http.MethodPatch {
 			return "agent.update", "", true
 		}
+	case len(parts) == 3 && parts[2] == "extensions":
+		if method == http.MethodGet || method == http.MethodPost {
+			return "extension.manage", "", true
+		}
+	case len(parts) == 4 && parts[2] == "extensions":
+		if method == http.MethodGet || method == http.MethodDelete {
+			return "extension.manage", "", true
+		}
+	case len(parts) == 5 && parts[2] == "extensions" && parts[4] == "activate" && method == http.MethodPut:
+		return "extension.manage", "", true
 	case len(parts) == 3 && parts[2] == "agents":
 		switch method {
 		case http.MethodGet:

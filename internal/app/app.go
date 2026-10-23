@@ -14,6 +14,7 @@ import (
 	"boAIrd/internal/config"
 	"boAIrd/internal/conversation"
 	"boAIrd/internal/credential"
+	"boAIrd/internal/extension"
 	"boAIrd/internal/heartbeat"
 	"boAIrd/internal/mcpserver"
 	"boAIrd/internal/mcptoken"
@@ -293,6 +294,19 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("initialize template service: %w", err)
 	}
+	extensionRepository, err := storage.NewExtensionRepository(database)
+	if err != nil {
+		return fmt.Errorf("initialize extension repository: %w", err)
+	}
+	extensionRegistry := governedtool.NewRegistry()
+	extensionRegistrar := newExtensionToolRegistrar(extensionRegistry)
+	extensionService, err := extension.NewService(extensionRepository, extensionRegistrar, extensionRepository)
+	if err != nil {
+		return fmt.Errorf("initialize extension service: %w", err)
+	}
+	if err := extensionService.Reconcile(ctx); err != nil {
+		return fmt.Errorf("reconcile active extensions: %w", err)
+	}
 	orchestratorService, err := orchestrator.New(orchestrator.Dependencies{
 		Tasks: taskService, Runs: runRepository, Agents: agentManager, Projects: projectManager,
 		Brains: brainRepository, Executor: executor, Conversations: conversationService, ContextReader: conversationService,
@@ -310,7 +324,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (result er
 	if err != nil {
 		return fmt.Errorf("configure HTTP security policy: %w", err)
 	}
-	handler := api.NewHandlerWithSecurityNotificationsAndTemplates(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, templateService, policy, mcp.Handler())
+	handler := api.NewHandlerWithSecurityNotificationsTemplatesAndExtensions(database, projectManager, credentialManager, agentManager, brainService, runManager, taskService, conversationService, cfg.LocalAuthToken[:], mcpTokenService, orchestratorService, profileService, auditRepository, notificationService, templateService, extensionService, policy, mcp.Handler())
 	if cfg.TLSCertFile != "" {
 		if err := api.ServeTLS(ctx, cfg.Address(), cfg.TLSCertFile, cfg.TLSKeyFile, handler, logger); err != nil {
 			return fmt.Errorf("run HTTPS API: %w", err)
